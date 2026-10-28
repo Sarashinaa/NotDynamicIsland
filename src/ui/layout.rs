@@ -1323,7 +1323,7 @@ fn wrap_lyric_line<'a>(
         let _ = h;
         // Top Header
         let cy = 18.0;
-        text_renderer.draw_text(buf, "TodoList", x + 16.0, cy + 5.0, 13.0, Color::rgba(34, 197, 94, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, "TodoList", x + 16.0, cy + 5.0, 13.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
 
         // Center Time & Battery
         draw_battery_circle_ring(buf, x + w * 0.5 - 72.0, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity);
@@ -1364,9 +1364,9 @@ fn wrap_lyric_line<'a>(
         // Interactive Task Input Mode or Action Buttons (+ Add Task & ✎ Clear)
         if state.todo.is_input_active {
             let input_rect = Rect { x: left_x, y: 92.0, w: 140.0, h: 26.0 };
-            // Dark input pill with green accent outline
+            // Dark input pill with frosted translucent outline
             draw_rounded_rect(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, Color::rgba(18, 22, 28, 0.95 * opacity));
-            draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.2, Color::rgba(34, 197, 94, 0.85 * opacity));
+            draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.0, Color::rgba(255, 255, 255, 0.35 * opacity));
 
             let text_val = &state.todo.input_buffer;
             let max_text_w = input_rect.w - 40.0;
@@ -1379,7 +1379,7 @@ fn wrap_lyric_line<'a>(
                     let min_y = (input_rect.y + 6.0) as usize;
                     let max_y = (input_rect.y + 19.0) as usize;
                     for py in min_y..=max_y {
-                        buf.blend_pixel(cursor_x, py, 34, 197, 94, 0.95 * opacity);
+                        buf.blend_pixel(cursor_x, py, 255, 255, 255, 0.95 * opacity);
                     }
                 }
             } else {
@@ -1401,7 +1401,7 @@ fn wrap_lyric_line<'a>(
                     let min_y = (input_rect.y + 6.0) as usize;
                     let max_y = (input_rect.y + 19.0) as usize;
                     for py in min_y..=max_y {
-                        buf.blend_pixel(cursor_x, py, 34, 197, 94, 0.95 * opacity);
+                        buf.blend_pixel(cursor_x, py, 255, 255, 255, 0.95 * opacity);
                     }
                 }
             }
@@ -1409,7 +1409,7 @@ fn wrap_lyric_line<'a>(
             // Save button (✓ vector checkmark)
             let ok_rect = Rect { x: input_rect.x + input_rect.w - 34.0, y: input_rect.y + 2.0, w: 16.0, h: 22.0 };
             let ok_hover = cursor_pos.map(|(px, py)| ok_rect.contains(px, py)).unwrap_or(false);
-            let ok_col = if ok_hover { Color::rgba(34, 197, 94, 1.0 * opacity) } else { Color::rgba(34, 197, 94, 0.75 * opacity) };
+            let ok_col = if ok_hover { Color::rgba(255, 255, 255, 1.0 * opacity) } else { Color::rgba(255, 255, 255, 0.70 * opacity) };
             let ok_cx = ok_rect.x + 8.0;
             let ok_cy = ok_rect.y + 11.0;
             for i in 0..5 {
@@ -1425,7 +1425,7 @@ fn wrap_lyric_line<'a>(
             // Cancel button (✕ vector cross)
             let cancel_rect = Rect { x: input_rect.x + input_rect.w - 18.0, y: input_rect.y + 2.0, w: 16.0, h: 22.0 };
             let cancel_hover = cursor_pos.map(|(px, py)| cancel_rect.contains(px, py)).unwrap_or(false);
-            let cancel_col = if cancel_hover { Color::rgba(239, 68, 68, 1.0 * opacity) } else { Color::rgba(156, 163, 175, 0.75 * opacity) };
+            let cancel_col = if cancel_hover { Color::rgba(255, 255, 255, 0.95 * opacity) } else { Color::rgba(156, 163, 175, 0.75 * opacity) };
             let cancel_cx = cancel_rect.x + 8.0;
             let cancel_cy = cancel_rect.y + 11.0;
             for i in 0..8 {
@@ -1470,7 +1470,7 @@ fn wrap_lyric_line<'a>(
             let is_hovered = cursor_pos.map(|(px, py)| item_rect.contains(px, py)).unwrap_or(false);
 
             let item_bg = if item.done {
-                Color::rgba(20, 83, 45, 0.35 * opacity)
+                Color::rgba(255, 255, 255, 0.04 * opacity)
             } else if is_hovered {
                 Color::rgba(255, 255, 255, 0.16 * opacity)
             } else {
@@ -1485,7 +1485,7 @@ fn wrap_lyric_line<'a>(
 
             // Task text
             let text_color = if item.done {
-                Color::rgba(187, 247, 208, 0.85 * opacity)
+                Color::rgba(148, 163, 184, 0.65 * opacity)
             } else {
                 Color::rgba(255, 255, 255, 0.95 * opacity)
             };
@@ -1535,7 +1535,7 @@ fn wrap_lyric_line<'a>(
 
         // Top Header Row (y: 18.0) - Consistent with Shelf and TodoList
         let cy = 18.0;
-        text_renderer.draw_text(buf, "Focus", x + 16.0, cy + 5.0, 13.0, Color::rgba(251, 191, 36, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, "Focus", x + 16.0, cy + 5.0, 13.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
 
         // Center Time & Battery
         draw_battery_circle_ring(buf, center_x - 72.0, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity);
@@ -1800,13 +1800,13 @@ fn wrap_lyric_line<'a>(
             draw_rounded_rect(buf, c_x, card_y, card_w, card_h, 12.0, bg);
             draw_rounded_rect_stroke(buf, c_x, card_y, card_w, card_h, 12.0, 1.0, stroke);
 
-            // Icon Badge
+            // Icon Badge - Monochromatic Frosted Glass
             let badge_cx = c_x + 22.0;
             let badge_cy = card_y + 22.0;
             let badge_bg = if is_hover {
-                Color::rgba(139, 92, 246, 0.35 * opacity)
+                Color::rgba(255, 255, 255, 0.20 * opacity)
             } else {
-                Color::rgba(139, 92, 246, 0.22 * opacity)
+                Color::rgba(255, 255, 255, 0.10 * opacity)
             };
             draw_circle(buf, badge_cx, badge_cy, 12.0, badge_bg);
             draw_eyedropper_icon(buf, badge_cx, badge_cy, 13.0, Color::rgba(255, 255, 255, 0.95 * opacity));
@@ -1853,13 +1853,13 @@ fn wrap_lyric_line<'a>(
             draw_rounded_rect(buf, c_x, card_y, card_w, card_h, 12.0, bg);
             draw_rounded_rect_stroke(buf, c_x, card_y, card_w, card_h, 12.0, 1.0, stroke);
 
-            // Icon Badge
+            // Icon Badge - Monochromatic Frosted Glass
             let badge_cx = c_x + 22.0;
             let badge_cy = card_y + 22.0;
             let badge_bg = if is_hover {
-                Color::rgba(56, 189, 248, 0.35 * opacity)
+                Color::rgba(255, 255, 255, 0.20 * opacity)
             } else {
-                Color::rgba(56, 189, 248, 0.22 * opacity)
+                Color::rgba(255, 255, 255, 0.10 * opacity)
             };
             draw_circle(buf, badge_cx, badge_cy, 12.0, badge_bg);
             draw_snip_icon(buf, badge_cx, badge_cy, 12.5, Color::rgba(255, 255, 255, 0.95 * opacity));
@@ -1906,14 +1906,14 @@ fn wrap_lyric_line<'a>(
             draw_rounded_rect(buf, c_x, card_y, card_w, card_h, 12.0, bg);
             draw_rounded_rect_stroke(buf, c_x, card_y, card_w, card_h, 12.0, 1.0, stroke);
 
-            // Icon Badge
+            // Icon Badge - Monochromatic Frosted Glass
             let badge_cx = c_x + 22.0;
             let badge_cy = card_y + 22.0;
             let is_muted = state.privacy.mic_muted;
-            let badge_bg = if is_muted {
-                if is_hover { Color::rgba(239, 68, 68, 0.40 * opacity) } else { Color::rgba(239, 68, 68, 0.25 * opacity) }
+            let badge_bg = if is_hover {
+                Color::rgba(255, 255, 255, 0.20 * opacity)
             } else {
-                if is_hover { Color::rgba(34, 197, 94, 0.35 * opacity) } else { Color::rgba(34, 197, 94, 0.20 * opacity) }
+                Color::rgba(255, 255, 255, 0.10 * opacity)
             };
             draw_circle(buf, badge_cx, badge_cy, 12.0, badge_bg);
             draw_microphone_icon(buf, badge_cx, badge_cy, 12.5, is_muted, Color::rgba(255, 255, 255, 0.95 * opacity));
@@ -1929,9 +1929,9 @@ fn wrap_lyric_line<'a>(
                 true,
             );
             let (sub_text, sub_color) = if is_muted {
-                ("Muted", Color::rgba(248, 113, 113, 0.95 * opacity))
+                ("Muted", Color::rgba(203, 213, 225, 0.85 * opacity))
             } else {
-                ("Active / Live", Color::rgba(74, 222, 128, 0.95 * opacity))
+                ("Active / Live", Color::rgba(148, 163, 184, 0.85 * opacity))
             };
             text_renderer.draw_text(
                 buf,

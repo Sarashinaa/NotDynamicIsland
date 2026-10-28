@@ -616,11 +616,11 @@ pub fn draw_todo_checkbox(
     opacity: f32,
 ) {
     if done {
-        // Green completed badge
-        let color = Color::rgba(34, 197, 94, 0.95 * opacity);
+        // Apple-style elegant frosted silver completed badge
+        let color = Color::rgba(255, 255, 255, 0.35 * opacity);
         draw_circle(buf, cx, cy, radius, color);
 
-        // White checkmark glyph
+        // Crisp white checkmark glyph
         let check_color = Color::rgba(255, 255, 255, 0.98 * opacity);
         for i in 0..5 {
             let t = i as f32 / 4.0;
