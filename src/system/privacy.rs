@@ -177,13 +177,18 @@ fn format_app_name(raw: &str) -> String {
     if raw.contains("Discord") {
         return "Discord".to_string();
     }
+    if raw.contains("Instagram") {
+        return "Instagram".to_string();
+    }
 
     raw.split('_').next().unwrap_or(raw).to_string()
 }
 
 pub fn is_call_app(name: &str) -> bool {
     let lower = name.to_lowercase();
-    lower.contains("whatsapp")
+    lower.contains("instagram")
+        || lower.contains("ig")
+        || lower.contains("whatsapp")
         || lower.contains("discord")
         || lower.contains("zoom")
         || lower.contains("teams")
@@ -194,6 +199,72 @@ pub fn is_call_app(name: &str) -> bool {
         || lower.contains("webex")
         || lower.contains("wechat")
         || lower.contains("line")
+        || lower.contains("call")
+}
+
+pub fn is_browser_app(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("brave")
+        || lower.contains("chrome")
+        || lower.contains("edge")
+        || lower.contains("firefox")
+        || lower.contains("opera")
+        || lower.contains("vivaldi")
+        || lower.contains("arc")
+}
+
+/// Discovers active web calls (e.g. Instagram Web, WhatsApp Web, Google Meet) when a browser accesses mic/camera
+pub fn detect_call_app_from_browser() -> Option<String> {
+    use windows::Win32::Foundation::BOOL;
+    use windows::Win32::UI::WindowsAndMessaging::{EnumWindows, GetWindowTextW, IsWindowVisible};
+
+    let mut detected: Option<String> = None;
+
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        unsafe {
+            if IsWindowVisible(hwnd).as_bool() {
+                let mut buf = [0u16; 512];
+                let len = GetWindowTextW(hwnd, &mut buf);
+                if len > 0 {
+                    let title = String::from_utf16_lossy(&buf[..len as usize]);
+                    let lower = title.to_lowercase();
+                    let det = &mut *(lparam.0 as *mut Option<String>);
+                    if lower.contains("instagram") {
+                        *det = Some("Instagram".to_string());
+                        return BOOL(0);
+                    } else if lower.contains("whatsapp") {
+                        *det = Some("WhatsApp".to_string());
+                        return BOOL(0);
+                    } else if lower.contains("discord") {
+                        *det = Some("Discord".to_string());
+                        return BOOL(0);
+                    } else if lower.contains("meet.google") || lower.contains("google meet") || lower.contains("meet - ") {
+                        *det = Some("Google Meet".to_string());
+                        return BOOL(0);
+                    } else if lower.contains("zoom") {
+                        *det = Some("Zoom".to_string());
+                        return BOOL(0);
+                    } else if lower.contains("teams") {
+                        *det = Some("Teams".to_string());
+                        return BOOL(0);
+                    } else if lower.contains("telegram") {
+                        *det = Some("Telegram".to_string());
+                        return BOOL(0);
+                    } else if lower.contains("call") || lower.contains("panggilan") {
+                        *det = Some("Web Call".to_string());
+                        return BOOL(0);
+                    }
+                }
+            }
+        }
+        BOOL(1)
+    }
+
+    unsafe {
+        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut detected as *mut _ as isize));
+    }
+
+    detected
 }
 
 pub fn query_default_mic_muted() -> Option<bool> {

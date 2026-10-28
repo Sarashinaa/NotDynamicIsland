@@ -611,6 +611,8 @@ pub unsafe extern "system" fn window_proc(
                         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
                         let _ = AppendMenuW(hmenu, MF_STRING, 1019, windows::core::w!("🟢  Test Camera In-Use Privacy Alert"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1020, windows::core::w!("🟠  Test Microphone In-Use Privacy Alert"));
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1026, windows::core::w!("📞  Test Instagram Voice Call (Instagram - 02:22)"));
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1027, windows::core::w!("📹  Test Instagram Video Call (Instagram - 01:15)"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1023, windows::core::w!("📞  Test Active Voice Call (WhatsApp - 03:25)"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1024, windows::core::w!("📹  Test Active Video Call (Discord - 01:45)"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1025, windows::core::w!("⏹️  End Call HUD Simulation"));
@@ -702,6 +704,14 @@ pub unsafe extern "system" fn window_proc(
                                         1024 => {
                                             app.island_state.set_call_active(true, true, "Discord".to_string());
                                             app.island_state.active_call.duration_secs = 105;
+                                        }
+                                        1026 => {
+                                            app.island_state.set_call_active(true, false, "Instagram".to_string());
+                                            app.island_state.active_call.duration_secs = 142; // 02:22
+                                        }
+                                        1027 => {
+                                            app.island_state.set_call_active(true, true, "Instagram".to_string());
+                                            app.island_state.active_call.duration_secs = 75; // 01:15
                                         }
                                         1025 => {
                                             app.island_state.set_call_active(false, false, String::new());
@@ -1148,11 +1158,34 @@ pub unsafe extern "system" fn window_proc(
 
                     app.island_state.privacy = status.clone();
 
-                    // Automatic detection of active voice / video call in communication apps
-                    if status.mic_active && system::privacy::is_call_app(&status.mic_app) {
+                    // Resolve app name (including browser web calls like Instagram, WhatsApp Web, Google Meet)
+                    let resolved_mic_app = if system::privacy::is_browser_app(&status.mic_app) {
+                        system::privacy::detect_call_app_from_browser().unwrap_or(status.mic_app.clone())
+                    } else {
+                        status.mic_app.clone()
+                    };
+
+                    let resolved_cam_app = if system::privacy::is_browser_app(&status.camera_app) {
+                        system::privacy::detect_call_app_from_browser().unwrap_or(status.camera_app.clone())
+                    } else {
+                        status.camera_app.clone()
+                    };
+
+                    // Automatic detection of active voice / video call in communication apps (Instagram, WhatsApp, Discord, Meet, etc.)
+                    let is_call = (status.mic_active && system::privacy::is_call_app(&resolved_mic_app))
+                        || (status.camera_active && system::privacy::is_call_app(&resolved_cam_app));
+
+                    if is_call {
                         let is_video = status.camera_active;
-                        app.island_state.set_call_active(true, is_video, status.mic_app.clone());
-                    } else if !status.mic_active && app.island_state.active_call.is_active {
+                        let call_name = if !resolved_mic_app.is_empty() && system::privacy::is_call_app(&resolved_mic_app) {
+                            resolved_mic_app.clone()
+                        } else if !resolved_cam_app.is_empty() {
+                            resolved_cam_app.clone()
+                        } else {
+                            "Call".to_string()
+                        };
+                        app.island_state.set_call_active(true, is_video, call_name);
+                    } else if (!status.mic_active && !status.camera_active) && app.island_state.active_call.is_active {
                         app.island_state.set_call_active(false, false, String::new());
                     }
 
@@ -1160,7 +1193,7 @@ pub unsafe extern "system" fn window_proc(
                         app.island_state.show_notification(
                             ui::NotificationKind::PrivacyAlert {
                                 is_camera: true,
-                                app_name: status.camera_app.clone(),
+                                app_name: resolved_cam_app,
                             },
                             3500,
                         );
@@ -1168,7 +1201,7 @@ pub unsafe extern "system" fn window_proc(
                         app.island_state.show_notification(
                             ui::NotificationKind::PrivacyAlert {
                                 is_camera: false,
-                                app_name: status.mic_app.clone(),
+                                app_name: resolved_mic_app,
                             },
                             3500,
                         );
