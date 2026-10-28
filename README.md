@@ -6,6 +6,20 @@ Proyek ini dibuat untuk memberikan pengalaman antarmuka yang sangat mulus dan es
 
 ---
 
+## 📥 Unduh Langsung (Untuk Teman / Pengguna Awam)
+
+Tidak perlu paham koding, tidak perlu install Rust, dan tidak perlu buka PowerShell/terminal sama sekali!
+
+1. Buka halaman rilis terbaru: **[Download NotDynamicIsland (Releases)](https://github.com/Sarashinaa/NotDynamicIsland/releases/latest)**
+2. Unduh file **`NotDynamicIsland-windows-x64.zip`** (atau langsung file **`not_dynamic_island.exe`**).
+3. Ekstrak file zip, lalu **double-click `not_dynamic_island.exe`**.
+4. Dynamic Island langsung aktif di layar atas monitor Anda!
+
+> **Tips:** Mau aplikasi langsung jalan otomatis saat laptop/PC dinyalakan?
+> Cukup buat shortcut dari `not_dynamic_island.exe`, tekan tombol `Win + R`, ketik `shell:startup`, lalu paste shortcut-nya di sana!
+
+---
+
 ## 📊 Hasil Pengukuran & Benchmark Aktual
 
 Sesuai dengan target ketat pada [rancangan_arsitektur_dynamic_island.md](file:///d:/PROJECT%20ISENG/NotDynamicIsland/rancangan_arsitektur_dynamic_island.md) dan [prd_dynamic_island.html](file:///d:/PROJECT%20ISENG/NotDynamicIsland/prd_dynamic_island.html):
