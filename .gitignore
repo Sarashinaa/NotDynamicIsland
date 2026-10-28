@@ -1,3 +1,4 @@
 /target
 *.log
 todo.json
+*.zip

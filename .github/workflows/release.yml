@@ -1,0 +1,65 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    name: Build Windows Release
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build release binary
+        run: cargo build --release
+
+      - name: Prepare release package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist
+          Copy-Item target/release/not_dynamic_island.exe -Destination dist/
+          @"
+          ==================================================
+              NotDynamicIsland (Project Nova) for Windows
+          ==================================================
+
+          Cara Pakai:
+          1. Tinggal double-click file 'not_dynamic_island.exe'.
+          2. Notch Dynamic Island akan langsung muncul di bagian atas layar monitor.
+          3. Fitur Utama:
+             - Media Controller & Synced Lyrics (Apple Music style)
+             - File Shelf (Drag & drop file hingga 5 item)
+             - To-Do List (Tambah tugas, checklist centang)
+             - Focus Timer & Stopwatch (Pomodoro 25m, break, stopwatch)
+             - Tools & Control Center (Eyedropper, Screen Snip, Mic Mute)
+             - Voice / Video Call HUD (WhatsApp, Discord, Instagram Web)
+          4. Navigasi:
+             - Scroll mouse / swipe touchpad untuk berpindah halaman.
+             - Atau klik titik indikator halaman di bagian bawah notch.
+             - Klik kanan pada notch untuk membuka Menu, Quick Switch, atau Exit.
+
+          Tidak butuh install apa pun, portable & hemat RAM (~8 MB).
+          "@ | Out-File -FilePath dist/README.txt -Encoding utf8
+          Compress-Archive -Path dist/* -DestinationPath NotDynamicIsland-windows-x64.zip -Force
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            NotDynamicIsland-windows-x64.zip
+            target/release/not_dynamic_island.exe
+          generate_release_notes: true
+          draft: false
+          prerelease: false
