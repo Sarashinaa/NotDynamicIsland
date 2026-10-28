@@ -133,7 +133,15 @@ impl LayoutManager {
     ) -> (f32, f32, f32, f32, f32) {
         let (w, h, r) = match &state.mode {
             // Resting: Thinner, compact notch showing green battery ring + date (center) + time (right)
-            IslandMode::Resting => (236.0, 32.0, 16.0),
+            // If active voice / video call is running: expands to Call HUD pill
+            IslandMode::Resting => {
+                if state.active_call.is_active {
+                    let extra_w = if state.active_call.is_video { 16.0 } else { 0.0 };
+                    (288.0 + extra_w, 34.0, 17.0)
+                } else {
+                    (236.0, 32.0, 16.0)
+                }
+            }
             // Closed: Battery ring + centered date & time + sound wave
             IslandMode::Closed => (236.0, 32.0, 16.0),
             // Music: Increased height to 150px to provide generous breathing room above bottom dots
@@ -317,6 +325,52 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             opacity,
         );
 
+        if state.active_call.is_active {
+            // Feature: Voice / Video Call HUD (Replaces standard resting view during call)
+            // 1. Hardware status indicators (Mic + Camera for video call) right next to battery
+            let mut icon_x = bat_cx + 16.0;
+            let mic_color = if state.privacy.mic_muted {
+                Color::rgba(239, 68, 68, 0.98 * opacity)
+            } else {
+                Color::rgba(249, 115, 22, 0.98 * opacity)
+            };
+            draw_microphone_icon(buf, icon_x, cy, 10.0, state.privacy.mic_muted, mic_color);
+            let mic_rect = Rect { x: icon_x - 7.0, y: cy - 7.0, w: 14.0, h: 14.0 };
+            self.click_targets.push((mic_rect, ClickAction::ToggleMicMute));
+            icon_x += 13.0;
+
+            if state.active_call.is_video {
+                draw_camera_icon(buf, icon_x, cy, 11.0, Color::rgba(34, 197, 94, 0.98 * opacity));
+            }
+
+            // 2. Right: Local Time (Bold white, right-aligned)
+            let (_, time_str) = get_formatted_date_parts();
+            let (time_w, _) = text_renderer.measure_text(&time_str, 11.5, true);
+            let time_x = x + w - 16.0 - time_w;
+            text_renderer.draw_text(
+                buf,
+                &time_str,
+                time_x,
+                cy + 4.5,
+                11.5,
+                Color::rgba(255, 255, 255, 0.98 * opacity),
+                true,
+            );
+
+            // 3. Center: [Caller / App Name] - [Call Duration MM:SS]
+            let center_text = format!("{} - {}", state.active_call.app_name, state.active_call.format_duration());
+            let (text_w, _) = text_renderer.measure_text(&center_text, 11.0, true);
+            let text_x = x + (w - text_w) * 0.5;
+            text_renderer.draw_text(
+                buf,
+                &center_text,
+                text_x,
+                cy + 4.0,
+                11.0,
+                Color::rgba(255, 255, 255, 0.98 * opacity),
+                true,
+            );
+        } else {
             let (date_str, time_str) = get_formatted_date_parts();
 
             // Rightmost: Privacy Dots (Camera Green Dot, Mic Orange Dot)
@@ -372,6 +426,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
                 Color::rgba(203, 213, 225, 0.90 * opacity),
                 false,
             );
+        }
 
         // Clicking expands to active page
         self.click_targets.push((Rect { x, y: 0.0, w, h }, ClickAction::NextPage));
@@ -2844,6 +2899,50 @@ mod tests {
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleMicMute));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
             assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 5);
+        }
+
+        // 10. Voice Call HUD in Resting Mode
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Resting;
+            state.set_call_active(true, false, "WhatsApp".to_string());
+            state.active_call.duration_secs = 205; // 03:25
+            state.privacy.mic_active = true;
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            let lyrics = SyncedLyrics::default();
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            save_bmp(&buf, &format!(r"{}\render_call_voice.bmp", scratch_dir));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleMicMute));
+        }
+
+        // 11. Video Call HUD in Resting Mode
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Resting;
+            state.set_call_active(true, true, "Discord".to_string());
+            state.active_call.duration_secs = 105; // 01:45
+            state.privacy.mic_active = true;
+            state.privacy.camera_active = true;
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            let lyrics = SyncedLyrics::default();
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            save_bmp(&buf, &format!(r"{}\render_call_video.bmp", scratch_dir));
         }
     }
 }

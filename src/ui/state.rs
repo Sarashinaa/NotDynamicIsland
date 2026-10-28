@@ -70,6 +70,23 @@ pub enum IslandMode {
     Notification(NotificationKind),       // charging.png / headphones.png / volume / capslock / banner
 }
 
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct ActiveCallInfo {
+    pub is_active: bool,
+    pub is_video: bool,
+    pub app_name: String,
+    pub duration_secs: u32,
+    pub duration_accum: f32,
+}
+
+impl ActiveCallInfo {
+    pub fn format_duration(&self) -> String {
+        let mins = self.duration_secs / 60;
+        let secs = self.duration_secs % 60;
+        format!("{:02}:{:02}", mins, secs)
+    }
+}
+
 pub struct IslandState {
     pub mode: IslandMode,
     pub previous_mode: IslandMode,
@@ -79,6 +96,7 @@ pub struct IslandState {
     pub media_info: MediaTrackInfo,
     pub shelf: FileShelf,
     pub todo: TodoList,
+    pub active_call: ActiveCallInfo,
     pub is_hovered: bool,
     pub battery_percent: u32,
     pub is_charging: bool,
@@ -142,6 +160,26 @@ impl IslandState {
             network_speed: NetworkSpeed::default(),
             is_color_picker_active: false,
             recording_start_time: None,
+            active_call: ActiveCallInfo::default(),
+        }
+    }
+
+    pub fn set_call_active(&mut self, active: bool, is_video: bool, app_name: String) {
+        if active {
+            if !self.active_call.is_active || self.active_call.app_name != app_name {
+                self.active_call.duration_secs = 0;
+                self.active_call.duration_accum = 0.0;
+            }
+            self.active_call.is_active = true;
+            self.active_call.is_video = is_video;
+            self.active_call.app_name = if app_name.is_empty() { "Call".to_string() } else { app_name };
+            if self.mode == IslandMode::Resting || self.mode == IslandMode::Closed {
+                self.mode = IslandMode::Resting;
+            }
+        } else {
+            self.active_call.is_active = false;
+            self.active_call.duration_secs = 0;
+            self.active_call.duration_accum = 0.0;
         }
     }
 

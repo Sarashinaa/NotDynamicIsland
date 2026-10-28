@@ -611,6 +611,9 @@ pub unsafe extern "system" fn window_proc(
                         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
                         let _ = AppendMenuW(hmenu, MF_STRING, 1019, windows::core::w!("🟢  Test Camera In-Use Privacy Alert"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1020, windows::core::w!("🟠  Test Microphone In-Use Privacy Alert"));
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1023, windows::core::w!("📞  Test Active Voice Call (WhatsApp - 03:25)"));
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1024, windows::core::w!("📹  Test Active Video Call (Discord - 01:45)"));
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1025, windows::core::w!("⏹️  End Call HUD Simulation"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1021, windows::core::w!("🔔  Test Focus Session Completed"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1005, windows::core::w!("⚡  Test Charging Notification"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1009, windows::core::w!("🔌  Test Charger Disconnected"));
@@ -691,6 +694,17 @@ pub unsafe extern "system" fn window_proc(
                                         }
                                         1021 => {
                                             app.island_state.show_timer_completed("Focus session completed! Great job taking 25 minutes of deep focus.".to_string());
+                                        }
+                                        1023 => {
+                                            app.island_state.set_call_active(true, false, "WhatsApp".to_string());
+                                            app.island_state.active_call.duration_secs = 205;
+                                        }
+                                        1024 => {
+                                            app.island_state.set_call_active(true, true, "Discord".to_string());
+                                            app.island_state.active_call.duration_secs = 105;
+                                        }
+                                        1025 => {
+                                            app.island_state.set_call_active(false, false, String::new());
                                         }
                                         _ => {}
                                     }
@@ -1134,6 +1148,14 @@ pub unsafe extern "system" fn window_proc(
 
                     app.island_state.privacy = status.clone();
 
+                    // Automatic detection of active voice / video call in communication apps
+                    if status.mic_active && system::privacy::is_call_app(&status.mic_app) {
+                        let is_video = status.camera_active;
+                        app.island_state.set_call_active(true, is_video, status.mic_app.clone());
+                    } else if !status.mic_active && app.island_state.active_call.is_active {
+                        app.island_state.set_call_active(false, false, String::new());
+                    }
+
                     if status.camera_active && !prev_cam {
                         app.island_state.show_notification(
                             ui::NotificationKind::PrivacyAlert {
@@ -1189,6 +1211,16 @@ pub unsafe extern "system" fn window_proc(
                                 if app.island_state.media_info.duration_secs > 0 {
                                     app.island_state.media_info.position_secs = (app.island_state.media_info.position_secs + full_secs).min(app.island_state.media_info.duration_secs);
                                 }
+                            }
+                        }
+
+                        // Advance active call timer if running
+                        if app.island_state.active_call.is_active {
+                            app.island_state.active_call.duration_accum += dt;
+                            if app.island_state.active_call.duration_accum >= 1.0 {
+                                let full_secs = app.island_state.active_call.duration_accum.floor() as u32;
+                                app.island_state.active_call.duration_accum -= full_secs as f32;
+                                app.island_state.active_call.duration_secs += full_secs;
                             }
                         }
 
@@ -1278,6 +1310,7 @@ pub unsafe extern "system" fn window_proc(
                             || app.island_state.pending_shelf_drag.is_some()
                             || app.island_state.todo.is_input_active
                             || app.island_state.focus_timer.is_running
+                            || app.island_state.active_call.is_active
                             || app.island_state.is_color_picker_active
                             || lyric_dist > 0.05
                             || app.island_state.lyrics_manual_scroll.abs() > 0.05

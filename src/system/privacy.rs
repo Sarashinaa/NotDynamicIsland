@@ -181,6 +181,21 @@ fn format_app_name(raw: &str) -> String {
     raw.split('_').next().unwrap_or(raw).to_string()
 }
 
+pub fn is_call_app(name: &str) -> bool {
+    let lower = name.to_lowercase();
+    lower.contains("whatsapp")
+        || lower.contains("discord")
+        || lower.contains("zoom")
+        || lower.contains("teams")
+        || lower.contains("skype")
+        || lower.contains("slack")
+        || lower.contains("telegram")
+        || lower.contains("meet")
+        || lower.contains("webex")
+        || lower.contains("wechat")
+        || lower.contains("line")
+}
+
 pub fn query_default_mic_muted() -> Option<bool> {
     unsafe {
         let _ = CoInitializeEx(None, COINIT_MULTITHREADED);
