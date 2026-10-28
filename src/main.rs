@@ -26,7 +26,7 @@ use system::{
     NetworkListener, NotificationListener, PowerListener, PrivacyListener, ToastNotificationPayload, VolumeListener,
     WM_APP_BRIGHTNESS_CHANGED, WM_APP_CAPSLOCK_CHANGED, WM_APP_MEDIA_CHANGED,
     WM_APP_NETWORK_CHANGED, WM_APP_NOTIFICATION_ARRIVED, WM_APP_POWER_CHANGED, WM_APP_PRIVACY_CHANGED,
-    WM_APP_TODO_UPDATED, WM_APP_VOLUME_CHANGED,
+    WM_APP_TIME_TICK, WM_APP_TODO_UPDATED, WM_APP_VOLUME_CHANGED,
 };
 use ui::{ClickAction, ExpandedPage, IslandMode, IslandState, LayoutManager, Rect};
 use window::{Win32LayeredWindow, CANVAS_H, CANVAS_W, TIMER_ANIMATION_ID};
@@ -1055,16 +1055,22 @@ pub unsafe extern "system" fn window_proc(
                     }
                 } else if pbs.power_setting == system::power::GUID_ACDC_POWER_SOURCE
                     || pbs.power_setting == system::power::GUID_POWER_SAVING_STATUS
+                    || pbs.power_setting == system::power::GUID_BATTERY_PERCENTAGE_REMAINING
                 {
                     let status = PowerListener::query_power_status();
                     if let Ok(mut lock) = APP.lock() {
                         if let Some(app) = lock.as_mut() {
-                            app.island_state.set_power_status(
-                                status.is_charging,
-                                status.is_energy_saver,
-                                status.battery_percent,
-                            );
-                            wake_animation(hwnd, app);
+                            let changed = app.island_state.battery_percent != status.battery_percent
+                                || app.island_state.is_charging != status.is_charging
+                                || app.island_state.is_energy_saver != status.is_energy_saver;
+                            if changed {
+                                app.island_state.set_power_status(
+                                    status.is_charging,
+                                    status.is_energy_saver,
+                                    status.battery_percent,
+                                );
+                                wake_animation(hwnd, app);
+                            }
                         }
                     }
                 }
@@ -1072,12 +1078,17 @@ pub unsafe extern "system" fn window_proc(
                 let status = PowerListener::query_power_status();
                 if let Ok(mut lock) = APP.lock() {
                     if let Some(app) = lock.as_mut() {
-                        app.island_state.set_power_status(
-                            status.is_charging,
-                            status.is_energy_saver,
-                            status.battery_percent,
-                        );
-                        wake_animation(hwnd, app);
+                        let changed = app.island_state.battery_percent != status.battery_percent
+                            || app.island_state.is_charging != status.is_charging
+                            || app.island_state.is_energy_saver != status.is_energy_saver;
+                        if changed {
+                            app.island_state.set_power_status(
+                                status.is_charging,
+                                status.is_energy_saver,
+                                status.battery_percent,
+                            );
+                            wake_animation(hwnd, app);
+                        }
                     }
                 }
             }
@@ -1088,12 +1099,17 @@ pub unsafe extern "system" fn window_proc(
             let status = PowerListener::query_power_status();
             if let Ok(mut lock) = APP.lock() {
                 if let Some(app) = lock.as_mut() {
-                    app.island_state.set_power_status(
-                        status.is_charging,
-                        status.is_energy_saver,
-                        status.battery_percent,
-                    );
-                    wake_animation(hwnd, app);
+                    let changed = app.island_state.battery_percent != status.battery_percent
+                        || app.island_state.is_charging != status.is_charging
+                        || app.island_state.is_energy_saver != status.is_energy_saver;
+                    if changed {
+                        app.island_state.set_power_status(
+                            status.is_charging,
+                            status.is_energy_saver,
+                            status.battery_percent,
+                        );
+                        wake_animation(hwnd, app);
+                    }
                 }
             }
             LRESULT(0)
@@ -1219,6 +1235,15 @@ pub unsafe extern "system" fn window_proc(
                         app.island_state.network_speed = nl.get_speed();
                         wake_animation(hwnd, app);
                     }
+                }
+            }
+            LRESULT(0)
+        }
+
+        WM_APP_TIME_TICK => {
+            if let Ok(mut lock) = APP.lock() {
+                if let Some(app) = lock.as_mut() {
+                    wake_animation(hwnd, app);
                 }
             }
             LRESULT(0)
@@ -1483,7 +1508,7 @@ fn main() {
     media_ctrl.start();
 
     let mut power_listener = PowerListener::new();
-    power_listener.register(hwnd);
+    power_listener.start(hwnd);
 
     let mut brightness_listener = BrightnessListener::new();
     brightness_listener.register(hwnd);

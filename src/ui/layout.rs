@@ -406,8 +406,8 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
                 true,
             );
 
-            // Center: Day, Date, Year (or Network Speed if active transfer > 150 KB/s)
-            let display_str = if state.network_speed.download_bytes_sec > 150_000 {
+            // Center: Day, Date, Year (or Network Speed if active transfer reaches >= 25 Mbps / ~3.125 MB/s)
+            let display_str = if state.network_speed.download_bytes_sec >= 3_125_000 {
                 format!("↓ {}", state.network_speed.format_download())
             } else {
                 date_str
@@ -2840,7 +2840,7 @@ mod tests {
             state.mode = IslandMode::Resting;
             state.privacy.camera_active = true;
             state.privacy.mic_active = true;
-            state.network_speed.download_bytes_sec = 2_840_000; // 2.8 MB/s
+            state.network_speed.download_bytes_sec = 4_840_000; // 4.8 MB/s (> 25 Mbps threshold)
             let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
             let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
             springs.x.current = tx;

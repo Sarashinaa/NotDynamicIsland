@@ -10,6 +10,11 @@ use windows::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
 pub const WM_APP_NETWORK_CHANGED: u32 = 0x800B;
+pub const WM_APP_TIME_TICK: u32 = 0x800E;
+
+/// Minimum download throughput threshold required to replace the date display in the Dynamic Island
+/// 25 Megabits per second = 3,125,000 bytes/sec (~3.125 MB/s)
+pub const MIN_DOWNLOAD_THRESHOLD_BYTES: u64 = 3_125_000;
 
 #[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct NetworkSpeed {
@@ -95,6 +100,10 @@ impl NetworkListener {
                 let hwnd = HWND(hwnd_val as *mut _);
                 let (mut prev_in, mut prev_out) = query_total_octets();
                 let mut prev_time = Instant::now();
+                let mut was_download_active = false;
+                let mut prev_minute = unsafe {
+                    windows::Win32::System::SystemInformation::GetLocalTime().wMinute
+                };
 
                 while running.load(Ordering::SeqCst) {
                     thread::sleep(Duration::from_millis(1000));
@@ -120,10 +129,24 @@ impl NetworkListener {
                         *lock = new_speed;
                     }
 
-                    // Wake animation only if network is actively transferring (> 100 KB/s)
-                    if down_rate > 100_000 || up_rate > 100_000 {
+                    // Wake animation only when download speed reaches >= 25 Mbps (3,125,000 bytes/sec),
+                    // or wake once when it drops below threshold to immediately restore date display.
+                    let is_download_active = down_rate >= MIN_DOWNLOAD_THRESHOLD_BYTES;
+                    if is_download_active || was_download_active {
                         unsafe {
                             let _ = PostMessageW(hwnd, WM_APP_NETWORK_CHANGED, WPARAM(0), LPARAM(0));
+                        }
+                    }
+                    was_download_active = is_download_active;
+
+                    // Also check if clock minute has flipped to ensure Dynamic Island resting clock is always live
+                    let cur_minute = unsafe {
+                        windows::Win32::System::SystemInformation::GetLocalTime().wMinute
+                    };
+                    if cur_minute != prev_minute {
+                        prev_minute = cur_minute;
+                        unsafe {
+                            let _ = PostMessageW(hwnd, WM_APP_TIME_TICK, WPARAM(0), LPARAM(0));
                         }
                     }
                 }
