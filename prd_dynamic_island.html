@@ -1,0 +1,381 @@
+<!DOCTYPE html>
+<html lang="id" class="scroll-smooth">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PRD: Project Nova (High-Performance Dynamic Island)</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        dark: {
+                            900: '#0f172a',
+                            800: '#1e293b',
+                            700: '#334155',
+                        },
+                        brand: {
+                            400: '#38bdf8',
+                            500: '#0ea5e9',
+                            600: '#0284c7',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        body {
+            background-color: #0f172a;
+            color: #f8fafc;
+        }
+        /* Custom Scrollbar */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f172a; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #334155; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #475569; 
+        }
+        /* Glassmorphism utilities */
+        .glass {
+            background: rgba(30, 41, 59, 0.7);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+        }
+    </style>
+</head>
+<body class="antialiased flex h-screen overflow-hidden text-slate-300">
+
+    <!-- Sidebar Navigation -->
+    <aside class="w-64 glass flex-shrink-0 flex flex-col hidden md:flex border-r border-slate-700/50 z-20 relative">
+        <div class="p-6 border-b border-slate-700/50">
+            <h1 class="text-xl font-bold text-white flex items-center gap-2">
+                <svg class="w-6 h-6 text-brand-400" fill="none" stroke="currentColor" viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                Project Nova
+            </h1>
+            <p class="text-xs text-slate-400 mt-1">Product Requirements Doc</p>
+        </div>
+        <nav class="flex-1 overflow-y-auto py-4">
+            <ul class="space-y-1 px-3 text-sm font-medium" id="nav-links">
+                <li><a href="#overview" class="nav-link block px-3 py-2 rounded-lg hover:bg-slate-800 hover:text-white transition-colors text-brand-400 bg-slate-800/50">1. Ringkasan Proyek</a></li>
+                <li><a href="#core-principles" class="nav-link block px-3 py-2 rounded-lg hover:bg-slate-800 hover:text-white transition-colors">2. Prinsip Inti (The 4 Pillars)</a></li>
+                <li><a href="#mvp-scope" class="nav-link block px-3 py-2 rounded-lg hover:bg-slate-800 hover:text-white transition-colors">3. Lingkup MVP</a></li>
+                <li><a href="#ui-ux" class="nav-link block px-3 py-2 rounded-lg hover:bg-slate-800 hover:text-white transition-colors">4. Pedoman UI/UX</a></li>
+                <li><a href="#tech-stack" class="nav-link block px-3 py-2 rounded-lg hover:bg-slate-800 hover:text-white transition-colors">5. Tech Stack & Eksekusi</a></li>
+                <li><a href="#extreme-opt" class="nav-link block px-3 py-2 rounded-lg hover:bg-slate-800 hover:text-white transition-colors">6. Optimasi Ekstrem (EcoQoS)</a></li>
+            </ul>
+        </nav>
+        <div class="p-4 border-t border-slate-700/50">
+            <div class="flex items-center gap-3">
+                <div class="w-2 h-2 rounded-full bg-green-500 animate-pulse"></div>
+                <span class="text-xs text-slate-400">Status: Drafting</span>
+            </div>
+        </div>
+    </aside>
+
+    <!-- Main Content Area -->
+    <main class="flex-1 h-screen overflow-y-auto scroll-smooth relative" id="main-content">
+        <!-- Mobile Header -->
+        <header class="md:hidden glass sticky top-0 z-30 p-4 border-b border-slate-700/50 flex justify-between items-center">
+            <h1 class="text-lg font-bold text-white">Project Nova PRD</h1>
+            <button onclick="document.getElementById('mobile-menu').classList.toggle('hidden')" class="p-2 bg-slate-800 rounded text-white">
+                <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+            </button>
+        </header>
+
+        <!-- Mobile Menu (Hidden by default) -->
+        <div id="mobile-menu" class="hidden md:hidden glass absolute top-[69px] left-0 w-full z-20 border-b border-slate-700/50">
+             <ul class="flex flex-col p-4 space-y-2 text-sm font-medium">
+                <li><a href="#overview" class="block p-2 rounded hover:bg-slate-800">1. Ringkasan Proyek</a></li>
+                <li><a href="#core-principles" class="block p-2 rounded hover:bg-slate-800">2. Prinsip Inti</a></li>
+                <li><a href="#mvp-scope" class="block p-2 rounded hover:bg-slate-800">3. Lingkup MVP</a></li>
+                <li><a href="#tech-stack" class="block p-2 rounded hover:bg-slate-800">5. Tech Stack</a></li>
+            </ul>
+        </div>
+
+        <div class="max-w-4xl mx-auto p-6 md:p-10 lg:p-12 pb-32 space-y-16">
+            
+            <!-- Section 1: Overview -->
+            <section id="overview" class="space-y-6 pt-8 scroll-mt-20">
+                <div class="inline-block px-3 py-1 rounded-full bg-brand-500/20 text-brand-400 text-xs font-semibold uppercase tracking-wider mb-2 border border-brand-500/30">
+                    Dokumen Arsitektur & Produk
+                </div>
+                <h2 class="text-4xl font-extrabold text-white tracking-tight">Sistem Hamparan Desktop Interaktif Berkinerja Tinggi</h2>
+                <p class="text-lg text-slate-300 leading-relaxed">
+                    Pengembangan sistem <i>dynamic island</i> untuk Windows 11 yang dirancang dari nol untuk mencapai efisiensi ekstrem. Proyek ini membuang seluruh kelemahan teknologi berbasis web (Electron/Tauri) dan mengadopsi pendekatan 100% kode asli (native) untuk menjaga RAM di bawah 30 MB dan penggunaan CPU mendekati 0% saat diam.
+                </p>
+                
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-8">
+                    <div class="bg-dark-800/50 p-5 rounded-xl border border-slate-700/50 flex items-start gap-4">
+                        <div class="p-2 bg-green-500/20 rounded-lg text-green-400 mt-1">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                        </div>
+                        <div>
+                            <h4 class="text-white font-semibold mb-1">&lt; 30MB RAM</h4>
+                            <p class="text-sm text-slate-400">Jejak memori sangat ringan dengan alokator khusus mimalloc dan software rendering.</p>
+                        </div>
+                    </div>
+                    <div class="bg-dark-800/50 p-5 rounded-xl border border-slate-700/50 flex items-start gap-4">
+                        <div class="p-2 bg-brand-500/20 rounded-lg text-brand-400 mt-1">
+                            <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg>
+                        </div>
+                        <div>
+                            <h4 class="text-white font-semibold mb-1">0% Idle CPU</h4>
+                            <p class="text-sm text-slate-400">Arsitektur event-driven sejati. Aplikasi tertidur lelap tanpa siklus rendering saat tidak ada animasi.</p>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 2: Core Principles (The Nusa Strengths) -->
+            <section id="core-principles" class="space-y-6 scroll-mt-20">
+                <h3 class="text-2xl font-bold text-white border-b border-slate-700 pb-2">Prinsip Desain Inti (The 4 Pillars)</h3>
+                <p class="text-slate-400">Arsitektur ini menduplikasi dan menyempurnakan keunggulan efisiensi, memecahkan masalah keamanan dan beban memori.</p>
+                
+                <div class="space-y-4">
+                    <!-- Pillar 1 -->
+                    <div class="glass p-6 rounded-2xl relative overflow-hidden group">
+                        <div class="absolute left-0 top-0 w-1 h-full bg-blue-500"></div>
+                        <h4 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                            <div class="w-2.5 h-2.5 rounded-full bg-blue-500 shadow-[0_0_8px_rgba(59,130,246,0.8)]"></div>
+                            Native Code (Tanpa Web Engine)
+                        </h4>
+                        <p class="text-sm text-slate-300 ml-5">Ditulis menggunakan bahasa tingkat sistem (Rust). Kompilasi langsung menjadi biner mesin. Menghilangkan sama sekali keberadaan mesin peramban web di latar belakang yang rakus memori.</p>
+                    </div>
+
+                    <!-- Pillar 2 -->
+                    <div class="glass p-6 rounded-2xl relative overflow-hidden group">
+                        <div class="absolute left-0 top-0 w-1 h-full bg-indigo-400"></div>
+                        <h4 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                            <div class="w-2.5 h-2.5 rounded-full bg-indigo-400 shadow-[0_0_8px_rgba(129,140,248,0.8)]"></div>
+                            Draws Only When Moving
+                        </h4>
+                        <p class="text-sm text-slate-300 ml-5">Sistem menggunakan <i>Software Renderer</i> berbasis CPU (bukan memuat driver GPU berukuran besar). Hanya menyajikan ulang layar saat elemen bergerak. Saat hamparan diam, eksekusi lingkaran peristiwa dihentikan total (ControlFlow::Wait).</p>
+                    </div>
+
+                    <!-- Pillar 3 -->
+                    <div class="glass p-6 rounded-2xl relative overflow-hidden group">
+                        <div class="absolute left-0 top-0 w-1 h-full bg-brand-400"></div>
+                        <h4 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                            <div class="w-2.5 h-2.5 rounded-full bg-brand-400 shadow-[0_0_8px_rgba(56,189,248,0.8)]"></div>
+                            Waits Instead of Checking
+                        </h4>
+                        <p class="text-sm text-slate-300 ml-5">Mengharamkan <i>polling</i>. Terintegrasi dengan OS Windows lewat sinyal asinkron. Memantau volume melalui <i>Core Audio API</i> (WASAPI) dan media melalui <i>GSMTC</i>. Aplikasi bereaksi hanya jika Windows mengirimkan sinyal.</p>
+                    </div>
+
+                    <!-- Pillar 4 -->
+                    <div class="glass p-6 rounded-2xl relative overflow-hidden group">
+                        <div class="absolute left-0 top-0 w-1 h-full bg-purple-500"></div>
+                        <h4 class="text-lg font-bold text-white mb-2 flex items-center gap-2">
+                            <div class="w-2.5 h-2.5 rounded-full bg-purple-500 shadow-[0_0_8px_rgba(168,85,247,0.8)]"></div>
+                            Files Stay Where They Are (Zero-Copy)
+                        </h4>
+                        <p class="text-sm text-slate-300 ml-5">Modul <i>File Shelf</i> mengadopsi filosofi <i>Zero-Copy</i>. Saat di-<i>drag & drop</i>, sistem hanya mencatat referensi string (PathBuf) dan mengekstrak ikon lewat <i>SHGetFileInfoW</i> tanpa menyalin isi berkas ke memori aplikasi. Bebaskan ikon (DestroyIcon) saat selesai.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 3: MVP Scope -->
+            <section id="mvp-scope" class="space-y-6 scroll-mt-20">
+                <h3 class="text-2xl font-bold text-white border-b border-slate-700 pb-2">Lingkup MVP (Minimum Viable Product)</h3>
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div class="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div class="p-2 bg-slate-700 rounded-lg"><svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 19V6l12-3v13M9 19c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zm12-3c0 1.105-1.343 2-3 2s-3-.895-3-2 1.343-2 3-2 3 .895 3 2zM9 10l12-3"></path></svg></div>
+                            <h5 class="font-bold text-white">Media Controller</h5>
+                        </div>
+                        <p class="text-sm text-slate-400">Sinkronisasi judul, artis, dan durasi secara real-time dari Spotify/YouTube tanpa window aktif.</p>
+                    </div>
+                    <div class="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div class="p-2 bg-slate-700 rounded-lg"><svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg></div>
+                            <h5 class="font-bold text-white">System Overlays</h5>
+                        </div>
+                        <p class="text-sm text-slate-400">Notifikasi halus saat terjadi perubahan volume, kecerahan layar, status Caps Lock, dan baterai/charger dicolok.</p>
+                    </div>
+                    <div class="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div class="p-2 bg-slate-700 rounded-lg"><svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4"></path></svg></div>
+                            <h5 class="font-bold text-white">File Shelf</h5>
+                        </div>
+                        <p class="text-sm text-slate-400">Kemampuan seret dan letakkan (Drag & Drop) untuk menyimpan file sementara di area hamparan.</p>
+                    </div>
+                    <div class="bg-slate-800/40 p-4 rounded-xl border border-slate-700/50">
+                        <div class="flex items-center gap-3 mb-3">
+                            <div class="p-2 bg-slate-700 rounded-lg"><svg class="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z"></path></svg></div>
+                            <h5 class="font-bold text-white">Idle Mascot</h5>
+                        </div>
+                        <p class="text-sm text-slate-400">Menyusut menjadi titik / jam kecil / maskot saat tidak ada aktivitas sistem, menyembunyikan diri tanpa distorsi.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 4: UI/UX Guidelines -->
+            <section id="ui-ux" class="space-y-6 scroll-mt-20">
+                <h3 class="text-2xl font-bold text-white border-b border-slate-700 pb-2">Pedoman UI/UX & Fisika Gerak</h3>
+                
+                <div class="prose prose-invert max-w-none">
+                    <ul class="space-y-4 list-none pl-0">
+                        <li class="glass p-4 rounded-xl">
+                            <strong class="text-brand-400 block mb-1">1. Animasi Pegas (Mass-Spring-Damper)</strong>
+                            Alih-alih transisi CSS linear/kubik, animasi merespons dengan kurva kinetik <code class="text-xs bg-slate-800 px-1 rounded">spring(bounce)</code>. Memiliki bobot massa, kekakuan, dan redaman. Menghindari osilasi berlebih namun melampaui batas dengan elegan sebelum berhenti presisi.
+                        </li>
+                        <li class="glass p-4 rounded-xl">
+                            <strong class="text-brand-400 block mb-1">2. Hit-Testing & Penembusan Klik (Passthrough)</strong>
+                            Saat idle (menyusut), area transparan jendela harus menembuskan klik tetikus ke desktop atau aplikasi di belakangnya (mereturn <code class="text-xs bg-slate-800 px-1 rounded">HTTRANSPARENT</code> lewat interupsi <code class="text-xs bg-slate-800 px-1 rounded">WM_NCHITTEST</code>). Saat berinteraksi dengan tombol hamparan, rutekan klik ke <code class="text-xs bg-slate-800 px-1 rounded">HTCLIENT</code>.
+                        </li>
+                        <li class="glass p-4 rounded-xl">
+                            <strong class="text-brand-400 block mb-1">3. Estetika Layer & Windows DWM</strong>
+                            Gunakan style jendela <code class="text-xs bg-slate-800 px-1 rounded">WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW</code> agar tidak muncul di Taskbar/Alt-Tab dan selalu di atas. Gunakan <code class="text-xs bg-slate-800 px-1 rounded">SetWindowCompositionAttribute</code> untuk mencuri efek <i>Blur Behind</i> (Mica/Acrylic) bawaan OS tanpa merender blur di CPU secara manual.
+                        </li>
+                    </ul>
+                </div>
+            </section>
+
+            <!-- Section 5: Tech Stack & Architecture -->
+            <section id="tech-stack" class="space-y-6 scroll-mt-20">
+                <h3 class="text-2xl font-bold text-white border-b border-slate-700 pb-2">Pemilihan Stack & Komparasi Memori</h3>
+                
+                <div class="overflow-x-auto rounded-xl border border-slate-700/50">
+                    <table class="w-full text-sm text-left">
+                        <thead class="text-xs text-slate-300 uppercase bg-slate-800/80">
+                            <tr>
+                                <th scope="col" class="px-6 py-4 rounded-tl-xl">Pendekatan Rendering</th>
+                                <th scope="col" class="px-6 py-4">Penggunaan RAM</th>
+                                <th scope="col" class="px-6 py-4">Beban Inisialisasi</th>
+                                <th scope="col" class="px-6 py-4 rounded-tr-xl">Keputusan</th>
+                            </tr>
+                        </thead>
+                        <tbody class="divide-y divide-slate-700/50 bg-dark-900/50">
+                            <tr>
+                                <td class="px-6 py-4 font-medium text-white">Electron / Webview</td>
+                                <td class="px-6 py-4 text-red-400">150MB - 300MB</td>
+                                <td class="px-6 py-4">Sangat Tinggi</td>
+                                <td class="px-6 py-4 text-red-500 font-bold flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg> Ditolak
+                                </td>
+                            </tr>
+                            <tr>
+                                <td class="px-6 py-4 font-medium text-white">WGPU / DirectX (GPU Accel)</td>
+                                <td class="px-6 py-4 text-yellow-400">70MB - 135MB</td>
+                                <td class="px-6 py-4">Tinggi (Memuat Driver GPU)</td>
+                                <td class="px-6 py-4 text-red-500 font-bold flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"></path></svg> Ditolak
+                                </td>
+                            </tr>
+                            <tr class="bg-brand-900/10">
+                                <td class="px-6 py-4 font-medium text-brand-300">Native Rust + Software Renderer (CPU)</td>
+                                <td class="px-6 py-4 text-green-400 font-bold">15MB - 30MB</td>
+                                <td class="px-6 py-4 text-green-400">Nirketergantungan Eksternal</td>
+                                <td class="px-6 py-4 text-green-500 font-bold flex items-center gap-1">
+                                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5 13l4 4L19 7"></path></svg> Dipilih
+                                </td>
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+
+                <div class="grid grid-cols-1 md:grid-cols-2 gap-6 mt-6">
+                    <div class="glass p-5 rounded-xl border-l-4 border-l-brand-500">
+                        <h5 class="text-white font-bold mb-2">Kerangka Kerja UI</h5>
+                        <p class="text-sm text-slate-400">Disarankan menggunakan <strong class="text-brand-300">Slint UI</strong>. Menggunakan arsitektur <i>retained-mode</i>, sangat ringan, dan dikompilasi langsung ke biner Rust. Penyangga piksel <i>(dirty-region tracking)</i> menghemat siklus CPU.</p>
+                    </div>
+                    <div class="glass p-5 rounded-xl border-l-4 border-l-emerald-500">
+                        <h5 class="text-white font-bold mb-2">Alokator Memori</h5>
+                        <p class="text-sm text-slate-400">Implementasi <strong class="text-emerald-300">mimalloc</strong> dari Microsoft Research. Menggantikan alokator standar untuk membasmi fragmentasi memori, menangani alokasi string UI dinamis dengan kecepatan tinggi tanpa jejak RAM membengkak seiring waktu.</p>
+                    </div>
+                </div>
+            </section>
+
+            <!-- Section 6: Extreme Optimization (EcoQoS) -->
+            <section id="extreme-opt" class="space-y-6 scroll-mt-20">
+                <h3 class="text-2xl font-bold text-white border-b border-slate-700 pb-2">Ide Berkinerja Lanjutan: Trik Kernel EcoQoS</h3>
+                <p class="text-slate-400">Agar keberadaan aplikasi tidak disadari oleh sistem manajemen daya (baterai) laptop, arsitektur memaksakan 3 modifikasi tingkat rendah Windows:</p>
+
+                <div class="space-y-4 mt-4">
+                    <div class="p-4 bg-slate-800/40 rounded-xl border border-slate-700">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="text-white font-semibold">1. Penguncian Utas ke Inti Efisiensi (E-Cores)</h4>
+                            <span class="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300">SetProcessInformation</span>
+                        </div>
+                        <p class="text-sm text-slate-400">Lewat properti <code class="text-brand-300">PROCESS_POWER_THROTTLING_EXECUTION_SPEED</code>, kernel diinstruksikan untuk selalu menjadwalkan komputasi aplikasi ke dalam Efficiency Cores CPU, dengan tegangan voltase terendah.</p>
+                    </div>
+
+                    <div class="p-4 bg-slate-800/40 rounded-xl border border-slate-700">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="text-white font-semibold">2. Mitigasi Resolusi Pewaktu</h4>
+                            <span class="text-xs bg-slate-700 px-2 py-1 rounded text-slate-300">Ignore Timer Resolution</span>
+                        </div>
+                        <p class="text-sm text-slate-400">Banyak UI menaikkan *timer resolution* sistem dari 15.6ms ke 1ms untuk animasi. Hamparan ini harus menerapkan atribut <code class="text-brand-300">PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION</code> agar Windows bisa mengelompokkan interupsi dan memasuki mode pemadaman terdalam (Deep C-States).</p>
+                    </div>
+
+                    <div class="p-4 bg-slate-800/40 rounded-xl border border-slate-700">
+                        <div class="flex justify-between items-center mb-2">
+                            <h4 class="text-white font-semibold">3. Idle Trimming (Sinkronisasi Memori)</h4>
+                            <span class="text-xs border border-red-500/30 bg-red-500/10 px-2 py-1 rounded text-red-300">Brutal Force Memory Release</span>
+                        </div>
+                        <p class="text-sm text-slate-400">Ketika animasi selesai dan modul idle, sistem memanggil <code class="text-brand-300">SetProcessWorkingSetSizeEx</code> dengan parameter maksimal dan minimal diset ke <code class="text-white">-1</code>. Dikombinasikan dengan <i>flag</i> <code class="text-brand-300">QUOTA_LIMITS_HARDWS_MIN_ENABLE</code>, sistem operasi akan dipaksa menyita <i>page cache</i> aplikasi ini dan memindahkannya ke Pagefile virtual, mereset konsumsi RAM hanya menjadi ~1MB hingga 5MB residu.</p>
+                    </div>
+                </div>
+            </section>
+        </div>
+
+        <!-- Footer -->
+        <footer class="border-t border-slate-800 mt-12 py-8 text-center text-sm text-slate-500">
+            <p>Dirancang secara kolaboratif untuk referensi eksekusi masa depan.</p>
+        </footer>
+    </main>
+
+    <!-- ScrollSpy & Interaction Script -->
+    <script>
+        document.addEventListener('DOMContentLoaded', () => {
+            const sections = document.querySelectorAll('section');
+            const navLinks = document.querySelectorAll('.nav-link');
+
+            const observerOptions = {
+                root: null,
+                rootMargin: '-20% 0px -60% 0px',
+                threshold: 0
+            };
+
+            const observer = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    if (entry.isIntersecting) {
+                        // Remove active state from all
+                        navLinks.forEach(link => {
+                            link.classList.remove('text-brand-400', 'bg-slate-800/50');
+                            link.classList.add('text-slate-400');
+                        });
+                        
+                        // Add active state to current
+                        const id = entry.target.getAttribute('id');
+                        const activeLink = document.querySelector(`.nav-link[href="#${id}"]`);
+                        if (activeLink) {
+                            activeLink.classList.remove('text-slate-400');
+                            activeLink.classList.add('text-brand-400', 'bg-slate-800/50');
+                        }
+                    }
+                });
+            }, observerOptions);
+
+            sections.forEach(section => {
+                observer.observe(section);
+            });
+        });
+    </script>
+</body>
+</html>
