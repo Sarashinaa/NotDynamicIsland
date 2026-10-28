@@ -15,6 +15,7 @@ pub enum ExpandedPage {
     Shelf = 1,
     ToDo = 2,
     Timer = 3,
+    Tools = 4,
 }
 
 impl ExpandedPage {
@@ -24,17 +25,19 @@ impl ExpandedPage {
             Self::Music => Self::Shelf,
             Self::Shelf => Self::ToDo,
             Self::ToDo => Self::Timer,
-            Self::Timer => Self::Music,
+            Self::Timer => Self::Tools,
+            Self::Tools => Self::Music,
         }
     }
 
     #[allow(dead_code)]
     pub fn prev(&self) -> Self {
         match self {
-            Self::Music => Self::Timer,
+            Self::Music => Self::Tools,
             Self::Shelf => Self::Music,
             Self::ToDo => Self::Shelf,
             Self::Timer => Self::ToDo,
+            Self::Tools => Self::Timer,
         }
     }
 
@@ -209,9 +212,16 @@ impl IslandState {
             }
             ExpandedPage::Timer => {
                 if forward {
-                    ExpandedPage::Timer
+                    ExpandedPage::Tools
                 } else {
                     ExpandedPage::ToDo
+                }
+            }
+            ExpandedPage::Tools => {
+                if forward {
+                    ExpandedPage::Tools
+                } else {
+                    ExpandedPage::Timer
                 }
             }
         };

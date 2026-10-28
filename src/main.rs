@@ -602,6 +602,7 @@ pub unsafe extern "system" fn window_proc(
                         let _ = AppendMenuW(hmenu, MF_STRING, 1002, windows::core::w!("📁  File Shelf (Up to 5 files)"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1003, windows::core::w!("✅  TodoList"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1015, windows::core::w!("⏱️  Focus Timer & Stopwatch"));
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1022, windows::core::w!("🛠️  Tools & Control Center"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1004, windows::core::w!("💬  Toggle Synced Lyrics"));
                         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
                         let _ = AppendMenuW(hmenu, MF_STRING, 1016, windows::core::w!("🎯  Pick Screen Color (Eyedropper)"));
@@ -664,6 +665,7 @@ pub unsafe extern "system" fn window_proc(
                                             app.island_state.is_energy_saver = !current;
                                         }
                                         1015 => app.island_state.select_page(ExpandedPage::Timer),
+                                        1022 => app.island_state.select_page(ExpandedPage::Tools),
                                         1016 => {
                                             app.island_state.is_color_picker_active = true;
                                             let _ = SetCapture(hwnd);
