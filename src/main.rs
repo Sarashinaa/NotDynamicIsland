@@ -24,7 +24,7 @@ use render::{PixelBuffer, TextRenderer};
 use system::{
     enable_eco_qos, trim_working_set, BrightnessListener, KeyboardHook, MediaController,
     NetworkListener, NotificationListener, PowerListener, PrivacyListener, ToastNotificationPayload, VolumeListener,
-    WM_APP_BRIGHTNESS_CHANGED, WM_APP_CAPSLOCK_CHANGED, WM_APP_MEDIA_CHANGED,
+    WM_APP_BRIGHTNESS_CHANGED, WM_APP_CALENDAR_UPDATED, WM_APP_CAPSLOCK_CHANGED, WM_APP_MEDIA_CHANGED,
     WM_APP_NETWORK_CHANGED, WM_APP_NOTIFICATION_ARRIVED, WM_APP_POWER_CHANGED, WM_APP_PRIVACY_CHANGED,
     WM_APP_TIME_TICK, WM_APP_TODO_UPDATED, WM_APP_VOLUME_CHANGED,
 };
@@ -541,6 +541,45 @@ pub unsafe extern "system" fn window_proc(
                             app.island_state.focus_timer.set_duration_mins(new_mins);
                             wake_animation(hwnd, app);
                         }
+                        Some(ClickAction::CalendarPrevMonth) => {
+                            app.island_state.calendar.prev_month();
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::CalendarNextMonth) => {
+                            app.island_state.calendar.next_month();
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::CalendarJumpToToday) => {
+                            app.island_state.calendar.jump_to_today();
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::CalendarSelectDay(d)) => {
+                            app.island_state.calendar.select_day(d);
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::CalendarPromptAddEvent) => {
+                            app.island_state.calendar.start_input();
+                            unsafe {
+                                let _ = SetFocus(hwnd);
+                            }
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::CalendarCommitAddEvent) => {
+                            app.island_state.calendar.commit_input();
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::CalendarCancelAddEvent) => {
+                            app.island_state.calendar.cancel_input();
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::CalendarDeleteEvent(id)) => {
+                            app.island_state.calendar.delete_event(id);
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::CalendarSyncGoogle) => {
+                            app.island_state.calendar.trigger_sync(hwnd);
+                            wake_animation(hwnd, app);
+                        }
                         Some(ClickAction::ToggleMicMute) => {
                             if let Some(muted) = system::privacy::toggle_default_mic_mute() {
                                 app.island_state.privacy.mic_muted = muted;
@@ -601,6 +640,7 @@ pub unsafe extern "system" fn window_proc(
                         let _ = AppendMenuW(hmenu, MF_STRING, 1001, windows::core::w!("🎵  Music Controller"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1002, windows::core::w!("📁  File Shelf (Up to 5 files)"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1003, windows::core::w!("✅  TodoList"));
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1028, windows::core::w!("📅  Calendar & Agenda"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1015, windows::core::w!("⏱️  Focus Timer & Stopwatch"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1022, windows::core::w!("🛠️  Tools & Control Center"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1004, windows::core::w!("💬  Toggle Synced Lyrics"));
@@ -651,6 +691,7 @@ pub unsafe extern "system" fn window_proc(
                                         1001 => app.island_state.select_page(ExpandedPage::Music),
                                         1002 => app.island_state.select_page(ExpandedPage::Shelf),
                                         1003 => app.island_state.select_page(ExpandedPage::ToDo),
+                                        1028 => app.island_state.select_page(ExpandedPage::Calendar),
                                         1004 => app.island_state.toggle_lyrics(),
                                         1005 => app.island_state.set_charging(true, 70),
                                         1006 => app.island_state.set_headphones("AirBuds Pro".to_string(), 85, true),
@@ -786,6 +827,25 @@ pub unsafe extern "system" fn window_proc(
                                 wake_animation(hwnd, app);
                             }
                         }
+                    } else if app.island_state.calendar.is_input_active {
+                        if code == 13 {
+                            // Enter: commit calendar event
+                            app.island_state.calendar.commit_input();
+                            wake_animation(hwnd, app);
+                        } else if code == 27 {
+                            // Esc: cancel calendar input
+                            app.island_state.calendar.cancel_input();
+                            wake_animation(hwnd, app);
+                        } else if code == 8 {
+                            // Backspace
+                            app.island_state.calendar.input_backspace();
+                            wake_animation(hwnd, app);
+                        } else if let Some(ch) = char::from_u32(code as u32) {
+                            if !ch.is_control() {
+                                app.island_state.calendar.input_char(ch);
+                                wake_animation(hwnd, app);
+                            }
+                        }
                     }
                 }
             }
@@ -813,6 +873,18 @@ pub unsafe extern "system" fn window_proc(
                                 app.island_state.todo.scroll_up();
                             } else {
                                 app.island_state.todo.scroll_down();
+                            }
+                            app.island_state.vwheel_accum = 0;
+                            wake_animation(hwnd, app);
+                        }
+                    } else if let IslandMode::Expanded(ExpandedPage::Calendar) = app.island_state.mode {
+                        // In Calendar page: scroll month backwards/forwards
+                        app.island_state.vwheel_accum += delta as i32;
+                        if app.island_state.vwheel_accum.abs() >= 80 {
+                            if app.island_state.vwheel_accum > 0 {
+                                app.island_state.calendar.prev_month();
+                            } else {
+                                app.island_state.calendar.next_month();
                             }
                             app.island_state.vwheel_accum = 0;
                             wake_animation(hwnd, app);
@@ -1243,6 +1315,23 @@ pub unsafe extern "system" fn window_proc(
         WM_APP_TIME_TICK => {
             if let Ok(mut lock) = APP.lock() {
                 if let Some(app) = lock.as_mut() {
+                    let cur_minute = unsafe {
+                        windows::Win32::System::SystemInformation::GetLocalTime().wMinute
+                    };
+                    if cur_minute % 20 == 0 {
+                        app.island_state.calendar.trigger_sync(hwnd);
+                    }
+                    app.island_state.calendar.update_today();
+                    wake_animation(hwnd, app);
+                }
+            }
+            LRESULT(0)
+        }
+
+        WM_APP_CALENDAR_UPDATED => {
+            if let Ok(mut lock) = APP.lock() {
+                if let Some(app) = lock.as_mut() {
+                    app.island_state.calendar.on_sync_completed();
                     wake_animation(hwnd, app);
                 }
             }
@@ -1367,6 +1456,7 @@ pub unsafe extern "system" fn window_proc(
                             || app.island_state.is_dragging_slider
                             || app.island_state.pending_shelf_drag.is_some()
                             || app.island_state.todo.is_input_active
+                            || app.island_state.calendar.is_input_active
                             || app.island_state.focus_timer.is_running
                             || app.island_state.active_call.is_active
                             || app.island_state.is_color_picker_active
@@ -1494,6 +1584,7 @@ fn main() {
     let pixel_buffer = PixelBuffer::new(CANVAS_W, CANVAS_H);
     let layout = LayoutManager::new();
     let mut island_state = IslandState::new();
+    island_state.calendar.trigger_sync(hwnd);
 
     // 6. Connect System Listeners
     let mut volume_listener = VolumeListener::new();

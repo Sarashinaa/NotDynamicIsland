@@ -883,3 +883,23 @@ pub fn draw_snip_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, color:
     // Center crosshair
     draw_circle(buf, cx, cy, 1.0, color);
 }
+
+/// Renders a sharp, elegant Refresh / Sync Icon (circular arrow)
+pub fn draw_refresh_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, r: f32, color: Color) {
+    let steps = 18;
+    // 270-degree arc from -PI/2 to PI
+    for i in 0..steps {
+        let angle = -std::f32::consts::FRAC_PI_2 + (i as f32 / steps as f32) * (std::f32::consts::PI * 1.55);
+        let px = cx + angle.cos() * r;
+        let py = cy + angle.sin() * r;
+        draw_circle(buf, px, py, 0.75, color);
+    }
+    // Arrow head at top end
+    let tip_x = cx + 0.5;
+    let tip_y = cy - r;
+    for i in 0..4 {
+        let t = i as f32 / 3.0;
+        draw_circle(buf, tip_x - t * 2.5, tip_y - 1.5 + t * 1.5, 0.75, color);
+        draw_circle(buf, tip_x - t * 2.5, tip_y + 1.5 - t * 1.5, 0.75, color);
+    }
+}

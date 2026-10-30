@@ -1,6 +1,7 @@
 pub mod artwork;
 pub mod audio;
 pub mod brightness;
+pub mod calendar;
 pub mod color_picker;
 pub mod eco_qos;
 pub mod keyboard;
@@ -19,6 +20,8 @@ pub mod todo;
 pub use artwork::ArtworkManager;
 pub use audio::{VolumeListener, WM_APP_VOLUME_CHANGED};
 pub use brightness::{BrightnessListener, WM_APP_BRIGHTNESS_CHANGED};
+#[allow(unused_imports)]
+pub use calendar::{CalendarEvent, CalendarManager, WM_APP_CALENDAR_UPDATED};
 pub use eco_qos::{enable_eco_qos, trim_working_set};
 pub use keyboard::{KeyboardHook, WM_APP_CAPSLOCK_CHANGED};
 #[allow(unused_imports)]

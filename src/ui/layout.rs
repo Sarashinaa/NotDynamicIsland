@@ -6,7 +6,7 @@ use crate::render::{
     draw_battery_circle_ring, draw_bell_icon, draw_camera_icon, draw_circle, draw_close_button,
     draw_eyedropper_icon, draw_headphones_badge, draw_lyrics_button, draw_microphone_icon, draw_monochrome_sound_wave,
     draw_nav_arrow_button, draw_next_icon, draw_page_indicators, draw_pause_icon, draw_play_icon, draw_prev_icon,
-    draw_progress_bar, draw_rounded_rect, draw_rounded_rect_stroke, draw_seek_backward_button,
+    draw_progress_bar, draw_refresh_icon, draw_rounded_rect, draw_rounded_rect_stroke, draw_seek_backward_button,
     draw_seek_forward_button, draw_snip_icon, draw_speaker_icon, draw_sun_icon, draw_timer_icon,
     draw_todo_checkbox, draw_top_notch, draw_top_notch_liquid_glass, draw_top_notch_shadow, draw_top_notch_stroke,
     Color, PixelBuffer, TextRenderer,
@@ -39,6 +39,16 @@ pub enum ClickAction {
     ToggleMicMute,
     TriggerSnip,
     StartColorPicker,
+    // Calendar actions
+    CalendarPrevMonth,
+    CalendarNextMonth,
+    CalendarJumpToToday,
+    CalendarSelectDay(u8),
+    CalendarPromptAddEvent,
+    CalendarCommitAddEvent,
+    CalendarCancelAddEvent,
+    CalendarDeleteEvent(u32),
+    CalendarSyncGoogle,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -150,6 +160,8 @@ impl LayoutManager {
             IslandMode::Expanded(ExpandedPage::Shelf) => (426.0, 146.0, 24.0),
             // To-do: Increased height to 148px for beautiful typography spacing
             IslandMode::Expanded(ExpandedPage::ToDo) => (446.0, 148.0, 24.0),
+            // Calendar & Agenda: Dual-pane month grid + daily agenda (456x152)
+            IslandMode::Expanded(ExpandedPage::Calendar) => (456.0, 152.0, 24.0),
             // Timer & Focus: Spacious 400x150, matches design aesthetic
             IslandMode::Expanded(ExpandedPage::Timer) => (400.0, 150.0, 24.0),
             // Tools & Control Center: 3 Apple-style utility cards (420x148)
@@ -255,6 +267,9 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             }
             IslandMode::Expanded(ExpandedPage::ToDo) => {
                 self.render_todo(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+            }
+            IslandMode::Expanded(ExpandedPage::Calendar) => {
+                self.render_calendar(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
             }
             IslandMode::Expanded(ExpandedPage::Timer) => {
                 self.render_timer(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
@@ -781,10 +796,10 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
         draw_seek_forward_button(buf, text_renderer, x + w - 28.0, ctrl_y, 18.0, seek_fwd_hover, opacity);
         self.click_targets.push((seek_fwd_rect, ClickAction::SeekRelative(5)));
 
-        // Bottom Page Indicator Dots (— • • • •) positioned safely at cy = 138.0 with plenty of breathing room!
+        // Bottom Page Indicator Dots (— • • • • •) positioned safely at cy = 138.0 with plenty of breathing room!
         let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 0, 5, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 5);
+        draw_page_indicators(buf, center_x, indicator_y, 0, 6, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 6);
     }
 
 /// Intelligently wraps a single lyric line into up to two sub-lines if it exceeds max_width.
@@ -1302,10 +1317,10 @@ fn wrap_lyric_line<'a>(
             }
         }
 
-        // Bottom Page Indicator Dots (• — • • •)
+        // Bottom Page Indicator Dots (• — • • • •)
         let indicator_y = 134.0;
-        draw_page_indicators(buf, x + w * 0.5, indicator_y, 1, 5, opacity);
-        self.register_page_dot_targets(x + w * 0.5, indicator_y, 5);
+        draw_page_indicators(buf, x + w * 0.5, indicator_y, 1, 6, opacity);
+        self.register_page_dot_targets(x + w * 0.5, indicator_y, 6);
     }
 
     /// Mode 6: To-do - Clean typography spacing, task statistics, scrollable task items
@@ -1513,10 +1528,321 @@ fn wrap_lyric_line<'a>(
             draw_rounded_rect(buf, sb_x, thumb_y, 3.0, thumb_h, 1.5, Color::rgba(255, 255, 255, 0.35 * opacity));
         }
 
-        // Bottom Page Indicator Dots (• • — • •)
+        // Bottom Page Indicator Dots (• • — • • •)
         let indicator_y = 136.0;
-        draw_page_indicators(buf, x + w * 0.5, indicator_y, 2, 5, opacity);
-        self.register_page_dot_targets(x + w * 0.5, indicator_y, 5);
+        draw_page_indicators(buf, x + w * 0.5, indicator_y, 2, 6, opacity);
+        self.register_page_dot_targets(x + w * 0.5, indicator_y, 6);
+    }
+
+    /// Mode: Calendar & Agenda (Page 3 / 4th Page) - Interactive Month Grid & Google Calendar Sync
+    fn render_calendar(
+        &mut self,
+        buf: &mut PixelBuffer,
+        text_renderer: &TextRenderer,
+        x: f32,
+        w: f32,
+        _h: f32,
+        state: &IslandState,
+        opacity: f32,
+        cursor_pos: Option<(f32, f32)>,
+    ) {
+        let center_x = x + w * 0.5;
+
+        // Top Header Row (cy = 18.0)
+        let cy = 18.0;
+        text_renderer.draw_text(
+            buf,
+            "Calendar",
+            x + 16.0,
+            cy + 5.0,
+            13.0,
+            Color::rgba(255, 255, 255, 0.95 * opacity),
+            true,
+        );
+
+        // Center Time & Battery
+        draw_battery_circle_ring(
+            buf,
+            center_x - 72.0,
+            cy,
+            6.0,
+            state.battery_percent,
+            state.is_charging,
+            state.is_energy_saver,
+            opacity,
+        );
+        let header_time = get_formatted_header_time();
+        text_renderer.draw_text(
+            buf,
+            &header_time,
+            center_x - 58.0,
+            cy + 4.0,
+            11.5,
+            Color::rgba(255, 255, 255, 0.95 * opacity),
+            true,
+        );
+
+        // Right side: Sound wave if media playing
+        if state.media_info.is_playing {
+            draw_monochrome_sound_wave(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity);
+        }
+
+        // Nav Arrows: < to To-Do, > to Focus Timer
+        let prev_btn_rect = Rect { x: x + 10.0, y: 56.0, w: 20.0, h: 24.0 };
+        let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
+        draw_nav_arrow_button(buf, x + 18.0, 68.0, 10.0, false, prev_hover, opacity);
+        self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
+
+        let next_btn_rect = Rect { x: x + w - 28.0, y: 56.0, w: 20.0, h: 24.0 };
+        let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
+        draw_nav_arrow_button(buf, x + w - 18.0, 68.0, 10.0, true, next_hover, opacity);
+        self.click_targets.push((next_btn_rect, ClickAction::NextPage));
+
+        // LEFT PANE: Mini Interactive Month Grid
+        let left_x = x + 34.0;
+        let left_w = 188.0;
+
+        // Header Row: Month & Year on left, [<] [>] [Today] on right
+        let m_header_y = 31.0;
+
+        // Month Title (e.g. OCTOBER 2026)
+        let m_name = crate::system::calendar::month_name(state.calendar.view_month);
+        let m_title = format!("{} {}", m_name, state.calendar.view_year);
+        text_renderer.draw_text(buf, &m_title, left_x + 2.0, m_header_y + 11.0, 9.5, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+
+        // Prev Month [<]
+        let pm_rect = Rect { x: left_x + left_w - 70.0, y: m_header_y, w: 16.0, h: 15.0 };
+        let pm_hover = cursor_pos.map(|(px, py)| pm_rect.contains(px, py)).unwrap_or(false);
+        let pm_bg = if pm_hover { Color::rgba(255, 255, 255, 0.20 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+        draw_rounded_rect(buf, pm_rect.x, pm_rect.y, pm_rect.w, pm_rect.h, 3.5, pm_bg);
+        text_renderer.draw_text(buf, "<", pm_rect.x + 4.5, m_header_y + 11.0, 9.0, Color::rgba(255, 255, 255, 0.90 * opacity), true);
+        self.click_targets.push((pm_rect, ClickAction::CalendarPrevMonth));
+
+        // Next Month [>]
+        let nm_rect = Rect { x: left_x + left_w - 51.0, y: m_header_y, w: 16.0, h: 15.0 };
+        let nm_hover = cursor_pos.map(|(px, py)| nm_rect.contains(px, py)).unwrap_or(false);
+        let nm_bg = if nm_hover { Color::rgba(255, 255, 255, 0.20 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+        draw_rounded_rect(buf, nm_rect.x, nm_rect.y, nm_rect.w, nm_rect.h, 3.5, nm_bg);
+        text_renderer.draw_text(buf, ">", nm_rect.x + 5.0, m_header_y + 11.0, 9.0, Color::rgba(255, 255, 255, 0.90 * opacity), true);
+        self.click_targets.push((nm_rect, ClickAction::CalendarNextMonth));
+
+        // [Today] Pill button
+        let today_btn_rect = Rect { x: left_x + left_w - 32.0, y: m_header_y, w: 32.0, h: 15.0 };
+        let today_hover = cursor_pos.map(|(px, py)| today_btn_rect.contains(px, py)).unwrap_or(false);
+        let today_bg = if today_hover { Color::rgba(255, 255, 255, 0.22 * opacity) } else { Color::rgba(255, 255, 255, 0.10 * opacity) };
+        draw_rounded_rect(buf, today_btn_rect.x, today_btn_rect.y, today_btn_rect.w, today_btn_rect.h, 4.0, today_bg);
+        text_renderer.draw_text(buf, "Today", today_btn_rect.x + 4.0, today_btn_rect.y + 11.0, 8.5, Color::rgba(255, 255, 255, 0.90 * opacity), false);
+        self.click_targets.push((today_btn_rect, ClickAction::CalendarJumpToToday));
+
+        // Day of Week Header row: Su Mo Tu We Th Fr Sa
+        let dow_y = 57.0;
+        let col_w = left_w / 7.0;
+        let dows = ["S", "M", "T", "W", "T", "F", "S"];
+        for (i, d_str) in dows.iter().enumerate() {
+            let cx = left_x + (i as f32 + 0.5) * col_w;
+            let (dw, _) = text_renderer.measure_text(d_str, 8.5, false);
+            text_renderer.draw_text(buf, d_str, cx - dw * 0.5, dow_y, 8.5, Color::rgba(148, 163, 184, 0.75 * opacity), false);
+        }
+
+        // Days Grid: 1..=days_in_month
+        let start_dow = crate::system::calendar::day_of_week(state.calendar.view_year, state.calendar.view_month, 1);
+        let total_days = crate::system::calendar::days_in_month(state.calendar.view_year, state.calendar.view_month);
+        let grid_start_y = 70.0;
+        let row_h = 11.5;
+
+        for d in 1..=total_days {
+            let offset = (start_dow + d - 1) as usize;
+            let col = offset % 7;
+            let row = offset / 7;
+            let cx = left_x + (col as f32 + 0.5) * col_w;
+            let cy = grid_start_y + (row as f32) * row_h;
+
+            let is_today = state.calendar.today_year == state.calendar.view_year
+                && state.calendar.today_month == state.calendar.view_month
+                && state.calendar.today_day == d;
+            let is_selected = state.calendar.selected_day == d;
+            let has_event = state.calendar.has_events_on_day(state.calendar.view_year, state.calendar.view_month, d);
+
+            let day_rect = Rect { x: cx - col_w * 0.5, y: cy - 2.0, w: col_w, h: row_h };
+            let is_hovered = cursor_pos.map(|(px, py)| day_rect.contains(px, py)).unwrap_or(false);
+
+            if is_selected {
+                draw_rounded_rect(buf, cx - 8.0, cy - 1.0, 16.0, 12.0, 3.5, Color::rgba(255, 255, 255, 0.25 * opacity));
+            } else if is_hovered {
+                draw_rounded_rect(buf, cx - 8.0, cy - 1.0, 16.0, 12.0, 3.5, Color::rgba(255, 255, 255, 0.10 * opacity));
+            }
+
+            if is_today {
+                draw_rounded_rect_stroke(buf, cx - 8.0, cy - 1.0, 16.0, 12.0, 3.5, 1.0, Color::rgba(34, 197, 94, 0.95 * opacity));
+            }
+
+            let num_str = d.to_string();
+            let (nw, _) = text_renderer.measure_text(&num_str, 8.5, is_today || is_selected);
+            let num_col = if is_selected {
+                Color::rgba(255, 255, 255, 1.0 * opacity)
+            } else if is_today {
+                Color::rgba(34, 197, 94, 0.98 * opacity)
+            } else {
+                Color::rgba(226, 232, 240, 0.85 * opacity)
+            };
+            text_renderer.draw_text(buf, &num_str, cx - nw * 0.5, cy + 8.0, 8.5, num_col, is_today || is_selected);
+
+            if has_event {
+                // Tiny event dot below number
+                draw_circle(buf, cx, cy + 10.0, 0.9, Color::rgba(56, 189, 248, 0.95 * opacity));
+            }
+
+            self.click_targets.push((day_rect, ClickAction::CalendarSelectDay(d)));
+        }
+
+        // VERTICAL DIVIDER LINE between panes
+        let div_x = left_x + left_w + 10.0;
+        let min_y = 36.0 as usize;
+        let max_y = 132.0 as usize;
+        for py in min_y..=max_y {
+            buf.blend_pixel(div_x as usize, py, 255, 255, 255, 0.08 * opacity);
+        }
+
+        // RIGHT PANE: Daily Agenda & Events
+        let right_x = div_x + 12.0;
+        let right_w = x + w - 34.0 - right_x;
+
+        // Header: Day, Date Month (e.g. Sat, 31 Oct) + [+] [↻]
+        let dow_sel = crate::system::calendar::day_of_week(state.calendar.view_year, state.calendar.view_month, state.calendar.selected_day);
+        let dow_name = crate::system::calendar::day_name_short(dow_sel);
+        let m_sel_name = crate::system::calendar::month_short(state.calendar.view_month);
+        let header_str = format!("{}, {} {}", dow_name, state.calendar.selected_day, m_sel_name);
+        text_renderer.draw_text(buf, &header_str, right_x, 46.0, 11.5, Color::rgba(255, 255, 255, 0.98 * opacity), true);
+
+        // Action Buttons: [+] Add Event & [↻] Sync
+        let sync_btn_rect = Rect { x: right_x + right_w - 22.0, y: 34.0, w: 20.0, h: 18.0 };
+        let sync_hover = cursor_pos.map(|(px, py)| sync_btn_rect.contains(px, py)).unwrap_or(false);
+        let sync_bg = if sync_hover { Color::rgba(255, 255, 255, 0.20 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+        draw_rounded_rect(buf, sync_btn_rect.x, sync_btn_rect.y, sync_btn_rect.w, sync_btn_rect.h, 4.0, sync_bg);
+        let sync_col = if sync_hover { Color::rgba(255, 255, 255, 1.0 * opacity) } else { Color::rgba(203, 213, 225, 0.85 * opacity) };
+        draw_refresh_icon(buf, sync_btn_rect.x + 10.0, sync_btn_rect.y + 9.0, 4.5, sync_col);
+        self.click_targets.push((sync_btn_rect, ClickAction::CalendarSyncGoogle));
+
+        let add_btn_rect = Rect { x: right_x + right_w - 46.0, y: 34.0, w: 20.0, h: 18.0 };
+        let add_hover = cursor_pos.map(|(px, py)| add_btn_rect.contains(px, py)).unwrap_or(false);
+        let add_bg = if add_hover { Color::rgba(255, 255, 255, 0.20 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+        draw_rounded_rect(buf, add_btn_rect.x, add_btn_rect.y, add_btn_rect.w, add_btn_rect.h, 4.0, add_bg);
+        text_renderer.draw_text(buf, "+", add_btn_rect.x + 6.0, add_btn_rect.y + 13.5, 12.0, Color::rgba(255, 255, 255, 0.90 * opacity), true);
+        self.click_targets.push((add_btn_rect, ClickAction::CalendarPromptAddEvent));
+
+        // Agenda Items or Inline Input
+        if state.calendar.is_input_active {
+            // Render Input Box
+            let input_rect = Rect { x: right_x, y: 56.0, w: right_w, h: 26.0 };
+            draw_rounded_rect(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, Color::rgba(18, 22, 28, 0.95 * opacity));
+            draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.0, Color::rgba(255, 255, 255, 0.35 * opacity));
+
+            let val = &state.calendar.input_buffer;
+            if val.is_empty() {
+                text_renderer.draw_text(buf, "e.g. 14:00 Review", input_rect.x + 8.0, input_rect.y + 17.0, 10.0, Color::rgba(148, 163, 184, 0.7 * opacity), false);
+            } else {
+                text_renderer.draw_text(buf, val, input_rect.x + 8.0, input_rect.y + 17.0, 10.0, Color::rgba(255, 255, 255, 0.98 * opacity), false);
+            }
+
+            // Blinking cursor
+            let cursor_visible = (state.anim_time * 2.5).fract() < 0.5;
+            if cursor_visible {
+                let (vw, _) = text_renderer.measure_text(val, 10.0, false);
+                let cx = (input_rect.x + 8.0 + vw + 1.0) as usize;
+                let min_y = (input_rect.y + 6.0) as usize;
+                let max_y = (input_rect.y + 19.0) as usize;
+                for py in min_y..=max_y {
+                    buf.blend_pixel(cx, py, 255, 255, 255, 0.95 * opacity);
+                }
+            }
+
+            // Save ✓ & Cancel ×
+            let ok_rect = Rect { x: input_rect.x + input_rect.w - 34.0, y: input_rect.y + 2.0, w: 15.0, h: 22.0 };
+            let ok_hover = cursor_pos.map(|(px, py)| ok_rect.contains(px, py)).unwrap_or(false);
+            let ok_col = if ok_hover { Color::rgba(34, 197, 94, 1.0 * opacity) } else { Color::rgba(34, 197, 94, 0.70 * opacity) };
+            text_renderer.draw_text(buf, "✓", ok_rect.x + 2.0, ok_rect.y + 16.0, 12.0, ok_col, true);
+            self.click_targets.push((ok_rect, ClickAction::CalendarCommitAddEvent));
+
+            let cancel_rect = Rect { x: input_rect.x + input_rect.w - 17.0, y: input_rect.y + 2.0, w: 15.0, h: 22.0 };
+            let cancel_hover = cursor_pos.map(|(px, py)| cancel_rect.contains(px, py)).unwrap_or(false);
+            let cancel_col = if cancel_hover { Color::rgba(239, 68, 68, 1.0 * opacity) } else { Color::rgba(239, 68, 68, 0.70 * opacity) };
+            text_renderer.draw_text(buf, "×", cancel_rect.x + 2.0, cancel_rect.y + 16.0, 13.0, cancel_col, true);
+            self.click_targets.push((cancel_rect, ClickAction::CalendarCancelAddEvent));
+        } else {
+            let events = state.calendar.get_events_for_selected();
+            if events.is_empty() {
+                // Empty state
+                text_renderer.draw_text(buf, "No events scheduled", right_x, 72.0, 10.5, Color::rgba(148, 163, 184, 0.70 * opacity), false);
+                text_renderer.draw_text(buf, "Free all day • Enjoy! ✨", right_x, 88.0, 9.5, Color::rgba(100, 116, 139, 0.60 * opacity), false);
+            } else {
+                // List up to 3 events
+                let item_h = 22.0;
+                let start_item_y = 55.0;
+                let visible_count = events.len().min(3);
+                for i in 0..visible_count {
+                    let e = events[i];
+                    let iy = start_item_y + (i as f32) * (item_h + 3.0);
+                    let item_rect = Rect { x: right_x, y: iy, w: right_w, h: item_h };
+                    let is_hover = cursor_pos.map(|(px, py)| item_rect.contains(px, py)).unwrap_or(false);
+
+                    let bg = if is_hover { Color::rgba(255, 255, 255, 0.12 * opacity) } else { Color::rgba(255, 255, 255, 0.06 * opacity) };
+                    draw_rounded_rect(buf, item_rect.x, item_rect.y, item_rect.w, item_rect.h, 5.0, bg);
+
+                    // Color Strip
+                    let bar_col = match e.color_idx {
+                        1 => Color::rgba(34, 197, 94, 0.95 * opacity),  // Emerald
+                        2 => Color::rgba(234, 163, 0, 0.95 * opacity),   // Amber
+                        3 => Color::rgba(168, 85, 247, 0.95 * opacity),  // Purple
+                        4 => Color::rgba(244, 63, 94, 0.95 * opacity),   // Rose
+                        _ => Color::rgba(56, 189, 248, 0.95 * opacity),  // Sky Blue
+                    };
+                    draw_rounded_rect(buf, item_rect.x + 3.0, item_rect.y + 3.0, 2.5, item_h - 6.0, 1.0, bar_col);
+
+                    // Time Text
+                    text_renderer.draw_text(buf, &e.time_str, item_rect.x + 9.0, item_rect.y + 15.0, 9.0, Color::rgba(203, 213, 225, 0.90 * opacity), true);
+                    let (time_w, _) = text_renderer.measure_text(&e.time_str, 9.0, true);
+
+                    // Title Text
+                    let title_x = item_rect.x + 13.0 + time_w;
+                    let max_title_w = right_w - (title_x - item_rect.x) - if e.is_gcal { 34.0 } else { 16.0 };
+                    text_renderer.draw_text_truncated(buf, &e.title, title_x, item_rect.y + 15.0, 9.5, max_title_w, Color::rgba(255, 255, 255, 0.98 * opacity), false);
+
+                    if e.is_gcal {
+                        let gcal_tag = "GCal";
+                        let (gt_w, _) = text_renderer.measure_text(gcal_tag, 8.0, false);
+                        let gt_x = item_rect.x + item_rect.w - gt_w - 6.0;
+                        draw_rounded_rect(buf, gt_x - 3.0, item_rect.y + 4.0, gt_w + 6.0, 14.0, 3.0, Color::rgba(56, 189, 248, 0.18 * opacity));
+                        text_renderer.draw_text(buf, gcal_tag, gt_x, item_rect.y + 14.0, 8.0, Color::rgba(56, 189, 248, 0.95 * opacity), false);
+                    } else if is_hover {
+                        // Delete X button on hover
+                        let del_rect = Rect { x: item_rect.x + item_rect.w - 14.0, y: item_rect.y + 2.0, w: 12.0, h: 18.0 };
+                        text_renderer.draw_text(buf, "×", del_rect.x, del_rect.y + 13.0, 11.0, Color::rgba(239, 68, 68, 0.85 * opacity), false);
+                        self.click_targets.push((del_rect, ClickAction::CalendarDeleteEvent(e.id)));
+                    }
+                }
+            }
+        }
+
+        // Bottom Status Text: Google Calendar Sync / Offline status with vector dot
+        let dot_color = if state.calendar.gcal_url.is_empty() {
+            Color::rgba(148, 163, 184, 0.85 * opacity)
+        } else if state.calendar.is_syncing {
+            Color::rgba(234, 163, 0, 0.95 * opacity)
+        } else {
+            Color::rgba(34, 197, 94, 0.95 * opacity)
+        };
+        draw_circle(buf, right_x + 4.0, 127.5, 2.5, dot_color);
+        let status_text = if state.calendar.gcal_url.is_empty() {
+            "Local (set Google link in calendar_sync.txt)"
+        } else {
+            &state.calendar.sync_status
+        };
+        text_renderer.draw_text(buf, status_text, right_x + 11.0, 131.0, 8.5, Color::rgba(148, 163, 184, 0.80 * opacity), false);
+
+        // Bottom Page Indicator Dots (• • • — • •) positioned at cy = 138.0
+        let indicator_y = 138.0;
+        draw_page_indicators(buf, center_x, indicator_y, 3, 6, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 6);
     }
 
     /// Mode 7: Focus Timer & Stopwatch (Page 3)
@@ -1699,10 +2025,10 @@ fn wrap_lyric_line<'a>(
         text_renderer.draw_text(buf, "Reset", rst_x + 12.0, ctrl_y + 4.0, 11.0, Color::rgba(203, 213, 225, 0.90 * opacity), false);
         self.click_targets.push((rst_rect, ClickAction::ResetTimer));
 
-        // Bottom Page Indicator Dots (• • • — •)
+        // Bottom Page Indicator Dots (• • • • — •)
         let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 3, 5, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 5);
+        draw_page_indicators(buf, center_x, indicator_y, 4, 6, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 6);
     }
 
     /// Mode 8: Tools & Utilities (Page 4 / 5th Page) - Apple Control Center cards for Eyedropper, Screen Snip, and Mic Mute
@@ -1946,10 +2272,10 @@ fn wrap_lyric_line<'a>(
             self.click_targets.push((c_rect, ClickAction::ToggleMicMute));
         }
 
-        // Bottom Page Indicator Dots (• • • • —)
+        // Bottom Page Indicator Dots (• • • • • —)
         let indicator_y = 134.0;
-        draw_page_indicators(buf, center_x, indicator_y, 4, 5, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 5);
+        draw_page_indicators(buf, center_x, indicator_y, 5, 6, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 6);
     }
     fn render_charging(
         &self,
@@ -2396,7 +2722,8 @@ fn wrap_lyric_line<'a>(
                 0 => ExpandedPage::Music,
                 1 => ExpandedPage::Shelf,
                 2 => ExpandedPage::ToDo,
-                3 => ExpandedPage::Timer,
+                3 => ExpandedPage::Calendar,
+                4 => ExpandedPage::Timer,
                 _ => ExpandedPage::Tools,
             };
             self.click_targets.push((rect, ClickAction::SelectPage(page)));
@@ -2898,7 +3225,59 @@ mod tests {
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::TriggerSnip));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleMicMute));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
-            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 5);
+            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 6);
+        }
+
+        // 9b. Calendar & Agenda Page
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Expanded(ExpandedPage::Calendar);
+            state.calendar.view_year = 2026;
+            state.calendar.view_month = 10;
+            state.calendar.selected_day = 31;
+            state.calendar.today_year = 2026;
+            state.calendar.today_month = 10;
+            state.calendar.today_day = 31;
+            state.calendar.events.clear();
+            state.calendar.events.push(crate::system::calendar::CalendarEvent {
+                id: 1,
+                title: "Daily Standup & Sync".to_string(),
+                year: 2026,
+                month: 10,
+                day: 31,
+                time_str: "09:30".to_string(),
+                color_idx: 0,
+                is_gcal: false,
+            });
+            state.calendar.events.push(crate::system::calendar::CalendarEvent {
+                id: 2,
+                title: "Review Design Nova".to_string(),
+                year: 2026,
+                month: 10,
+                day: 31,
+                time_str: "14:00".to_string(),
+                color_idx: 1,
+                is_gcal: true,
+            });
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            let lyrics = SyncedLyrics::default();
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            save_bmp(&buf, &format!(r"{}\render_calendar.bmp", scratch_dir));
+
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarPrevMonth));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarNextMonth));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarJumpToToday));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarPromptAddEvent));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarSyncGoogle));
+            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 6);
         }
 
         // 10. Voice Call HUD in Resting Mode

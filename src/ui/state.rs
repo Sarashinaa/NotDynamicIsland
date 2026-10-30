@@ -2,6 +2,7 @@
 //! Implements exact designs from follow_this_design (Resting, Closed, Music, Lyrics, Shelf, To-do, Notifications)
 
 use std::time::Instant;
+use crate::system::calendar::CalendarManager;
 use crate::system::media::MediaTrackInfo;
 use crate::system::network::NetworkSpeed;
 use crate::system::privacy::PrivacyStatus;
@@ -14,8 +15,9 @@ pub enum ExpandedPage {
     Music = 0,
     Shelf = 1,
     ToDo = 2,
-    Timer = 3,
-    Tools = 4,
+    Calendar = 3,
+    Timer = 4,
+    Tools = 5,
 }
 
 impl ExpandedPage {
@@ -24,7 +26,8 @@ impl ExpandedPage {
         match self {
             Self::Music => Self::Shelf,
             Self::Shelf => Self::ToDo,
-            Self::ToDo => Self::Timer,
+            Self::ToDo => Self::Calendar,
+            Self::Calendar => Self::Timer,
             Self::Timer => Self::Tools,
             Self::Tools => Self::Music,
         }
@@ -36,7 +39,8 @@ impl ExpandedPage {
             Self::Music => Self::Tools,
             Self::Shelf => Self::Music,
             Self::ToDo => Self::Shelf,
-            Self::Timer => Self::ToDo,
+            Self::Calendar => Self::ToDo,
+            Self::Timer => Self::Calendar,
             Self::Tools => Self::Timer,
         }
     }
@@ -118,6 +122,7 @@ pub struct IslandState {
     pub pending_shelf_drag: Option<(usize, f32, f32)>,
     pub privacy: PrivacyStatus,
     pub focus_timer: FocusTimer,
+    pub calendar: CalendarManager,
     pub network_speed: NetworkSpeed,
     pub is_color_picker_active: bool,
     #[allow(dead_code)]
@@ -157,6 +162,7 @@ impl IslandState {
             pending_shelf_drag: None,
             privacy: PrivacyStatus::default(),
             focus_timer: FocusTimer::new(),
+            calendar: CalendarManager::new(),
             network_speed: NetworkSpeed::default(),
             is_color_picker_active: false,
             recording_start_time: None,
@@ -226,6 +232,7 @@ impl IslandState {
     /// User requirement: Clamped navigation so gesture/scrollwheel stops at the ends ("mentok")
     pub fn navigate_page_clamped(&mut self, forward: bool) {
         self.todo.cancel_input();
+        self.calendar.cancel_input();
         let target = match self.active_page {
             ExpandedPage::Music => {
                 if forward {
@@ -243,16 +250,23 @@ impl IslandState {
             }
             ExpandedPage::ToDo => {
                 if forward {
-                    ExpandedPage::Timer
+                    ExpandedPage::Calendar
                 } else {
                     ExpandedPage::Shelf
+                }
+            }
+            ExpandedPage::Calendar => {
+                if forward {
+                    ExpandedPage::Timer
+                } else {
+                    ExpandedPage::ToDo
                 }
             }
             ExpandedPage::Timer => {
                 if forward {
                     ExpandedPage::Tools
                 } else {
-                    ExpandedPage::ToDo
+                    ExpandedPage::Calendar
                 }
             }
             ExpandedPage::Tools => {
@@ -271,6 +285,7 @@ impl IslandState {
 
     pub fn select_page(&mut self, page: ExpandedPage) {
         self.todo.cancel_input();
+        self.calendar.cancel_input();
         self.active_page = page;
         self.mode = IslandMode::Expanded(page);
     }

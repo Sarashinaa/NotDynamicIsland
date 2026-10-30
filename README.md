@@ -83,10 +83,13 @@ d:\PROJECT ISENG\NotDynamicIsland\
 │   ├── system\
 │   │   ├── mod.rs
 │   │   ├── audio.rs         # WASAPI Core Audio volume callback
+│   │   ├── calendar.rs      # Interactive Month Grid, Daily Agenda, and native WinHttp Google Calendar Sync
 │   │   ├── media.rs         # WinRT GSMTC listener & interactive controller
 │   │   ├── power.rs         # Power broadcast notifier (AC/DC charger)
 │   │   ├── keyboard.rs      # Low-level hook untuk status Caps Lock
 │   │   ├── shelf.rs         # Zero-copy file shelf dengan SHGetFileInfoW & DestroyIcon
+│   │   ├── timer.rs         # Focus Timer & Stopwatch Pomodoro
+│   │   ├── todo.rs          # Todo List dengan task storage lokal
 │   │   └── eco_qos.rs       # EcoQoS execution speed throttling & memory trim
 │   ├── ui\
 │   │   ├── mod.rs
