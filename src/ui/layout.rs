@@ -6,7 +6,7 @@ use crate::render::{
     draw_battery_circle_ring, draw_bell_icon, draw_camera_icon, draw_circle, draw_close_button,
     draw_eyedropper_icon, draw_headphones_badge, draw_lyrics_button, draw_microphone_icon, draw_monochrome_sound_wave,
     draw_nav_arrow_button, draw_next_icon, draw_page_indicators, draw_pause_icon, draw_play_icon, draw_prev_icon,
-    draw_progress_bar, draw_refresh_icon, draw_rounded_rect, draw_rounded_rect_stroke, draw_seek_backward_button,
+    draw_progress_bar, draw_refresh_icon, draw_romaji_button, draw_rounded_rect, draw_rounded_rect_stroke, draw_seek_backward_button,
     draw_seek_forward_button, draw_snip_icon, draw_speaker_icon, draw_sun_icon, draw_timer_icon,
     draw_todo_checkbox, draw_top_notch, draw_top_notch_liquid_glass, draw_top_notch_shadow, draw_top_notch_stroke,
     Color, PixelBuffer, TextRenderer,
@@ -22,6 +22,7 @@ pub enum ClickAction {
     SeekRelative(i32),
     SeekMedia(u32),
     ToggleLyrics,
+    ToggleRomaji,
     PrevPage,
     NextPage,
     SelectPage(ExpandedPage),
@@ -92,13 +93,19 @@ impl LayoutManager {
         text_renderer: &TextRenderer,
         lyrics: &'a SyncedLyrics,
         lyrics_max_w: f32,
+        show_romaji: bool,
     ) -> Vec<LyricLineLayout<'a>> {
-        let mut layouts = Vec::with_capacity(lyrics.lines.len());
+        let active_lines = if show_romaji && lyrics.has_romaji() {
+            &lyrics.romaji_lines
+        } else {
+            &lyrics.lines
+        };
+        let mut layouts = Vec::with_capacity(active_lines.len());
         let mut cur_y = 0.0f32;
         let line_step = 18.0f32;
         let item_gap = 28.0f32;
 
-        for (timestamp, text) in &lyrics.lines {
+        for (timestamp, text) in active_lines {
             let (l1, l2_opt) = Self::wrap_lyric_line(text_renderer, text, 13.0, lyrics_max_w, true);
             let is_wrapped = l2_opt.is_some();
             let y = cur_y;
@@ -158,8 +165,8 @@ impl LayoutManager {
             IslandMode::Expanded(ExpandedPage::Music) => (392.0, 150.0, 24.0),
             // Shelf:
             IslandMode::Expanded(ExpandedPage::Shelf) => (426.0, 146.0, 24.0),
-            // To-do: Increased height to 148px for beautiful typography spacing
-            IslandMode::Expanded(ExpandedPage::ToDo) => (446.0, 148.0, 24.0),
+            // To-do: Increased width to 480px for navigation arrows and breathing room
+            IslandMode::Expanded(ExpandedPage::ToDo) => (480.0, 148.0, 24.0),
             // Calendar & Agenda: Dual-pane month grid + daily agenda (456x152)
             IslandMode::Expanded(ExpandedPage::Calendar) => (456.0, 152.0, 24.0),
             // Timer & Focus: Spacious 400x150, matches design aesthetic
@@ -233,14 +240,14 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
         }
 
         if Self::USE_DARK_LIQUID_GLASS {
-            // Style 1: Dark Liquid Glass with specular light reflection and double ambient depth
-            draw_top_notch_shadow(buf, cur_x, cur_w, cur_h, cur_r, 22.0, 0.46 * opacity);
-            draw_top_notch_shadow(buf, cur_x, cur_w, cur_h, cur_r, 8.0, 0.30 * opacity);
+            // Style 1: Authentic Apple Dark Liquid Glass with dual ambient drop shadow and cut-glass rim
+            draw_top_notch_shadow(buf, cur_x, cur_w, cur_h, cur_r, 26.0, 0.42 * opacity);
+            draw_top_notch_shadow(buf, cur_x, cur_w, cur_h, cur_r, 7.0, 0.32 * opacity);
 
             draw_top_notch_liquid_glass(buf, cur_x, cur_w, cur_h, cur_r, opacity);
 
-            // Refraction cut glass rim highlight
-            let rim_color = Color::rgba(255, 255, 255, 0.20 * opacity);
+            // Refraction cut-glass rim highlight
+            let rim_color = Color::rgba(255, 255, 255, 0.18 * opacity);
             draw_top_notch_stroke(buf, cur_x, cur_w, cur_h, cur_r, rim_color);
         } else {
             // Style 2: Classic solid #07080c
@@ -803,8 +810,8 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
     }
 
 /// Intelligently wraps a single lyric line into up to two sub-lines if it exceeds max_width.
-/// Prefers splitting at natural punctuation (, ; - — ... :) near the middle if both parts fit,
-/// otherwise performs greedy word wrap on whitespace boundaries.
+/// Prefers splitting at natural punctuation (, ; - — ... : 、 。) near the middle if both parts fit,
+/// otherwise performs greedy word wrap on whitespace boundaries, with full UTF-8/CJK safety.
 fn wrap_lyric_line<'a>(
     text_renderer: &TextRenderer,
     text: &'a str,
@@ -817,15 +824,15 @@ fn wrap_lyric_line<'a>(
         return (text, None);
     }
 
-    // 1. Try punctuation-aware split (commas, semicolons, dashes)
-    let punc_patterns = [", ", "; ", " - ", "—", "... ", ": "];
+    // 1. Try punctuation-aware split (commas, semicolons, dashes, CJK punctuation)
+    let punc_patterns = [", ", "; ", " - ", "—", "... ", ": ", "、", "。"];
     for punc in punc_patterns {
         let mut search_from = 0;
         while let Some(rel_pos) = text[search_from..].find(punc) {
             let pos = search_from + rel_pos;
             let split_at = pos + punc.len();
             let ratio = split_at as f32 / text.len().max(1) as f32;
-            if (0.25..=0.75).contains(&ratio) {
+            if (0.25..=0.75).contains(&ratio) && text.is_char_boundary(split_at) {
                 let l1 = text[..split_at].trim();
                 let l2 = text[split_at..].trim();
                 let (w1, _) = text_renderer.measure_text(l1, font_size, is_bold);
@@ -841,27 +848,20 @@ fn wrap_lyric_line<'a>(
         }
     }
 
-    // 2. Greedy word-by-word wrapping
-    let words: Vec<&str> = text.split_whitespace().collect();
-    if words.len() <= 1 {
-        return (text, None);
-    }
-
+    // 2. Greedy word-by-word wrapping on whitespace boundaries (guaranteed UTF-8 char boundaries)
     let mut best_split = 0;
-    let mut byte_pos = 0;
-
-    for word in &words {
-        let cand_end = byte_pos + word.len();
-        if cand_end <= text.len() {
-            let cand = text[..cand_end].trim();
-            let (cw, _) = text_renderer.measure_text(cand, font_size, is_bold);
-            if cw <= max_w {
-                best_split = cand_end;
-            } else {
-                break;
+    for (idx, ch) in text.char_indices() {
+        if ch.is_whitespace() {
+            let cand = text[..idx].trim();
+            if !cand.is_empty() {
+                let (cw, _) = text_renderer.measure_text(cand, font_size, is_bold);
+                if cw <= max_w {
+                    best_split = idx;
+                } else {
+                    break;
+                }
             }
         }
-        byte_pos += word.len() + 1;
     }
 
     if best_split > 0 && best_split < text.len() {
@@ -872,11 +872,44 @@ fn wrap_lyric_line<'a>(
         }
     }
 
-    // Fallback: split at nearest whitespace before half
-    if let Some(space_idx) = text[..text.len() / 2].rfind(' ') {
-        let l1 = text[..space_idx].trim();
-        let l2 = text[space_idx..].trim();
-        return (l1, Some(l2));
+    // 3. Fallback for text with spaces: split at the nearest whitespace before midpoint
+    let half_byte = text.len() / 2;
+    let mut safe_half = half_byte;
+    while safe_half > 0 && !text.is_char_boundary(safe_half) {
+        safe_half -= 1;
+    }
+    if safe_half > 0 {
+        if let Some(space_idx) = text[..safe_half].rfind(' ') {
+            let l1 = text[..space_idx].trim();
+            let l2 = text[space_idx..].trim();
+            if !l2.is_empty() {
+                return (l1, Some(l2));
+            }
+        }
+    }
+
+    // 4. Fallback for text without spaces (CJK / Japanese / Chinese lyrics or continuous words):
+    // Find largest char boundary where prefix fits within max_w
+    let mut best_cjk_split = 0;
+    for (idx, _) in text.char_indices() {
+        if idx == 0 {
+            continue;
+        }
+        let cand = &text[..idx];
+        let (cw, _) = text_renderer.measure_text(cand, font_size, is_bold);
+        if cw <= max_w {
+            best_cjk_split = idx;
+        } else {
+            break;
+        }
+    }
+
+    if best_cjk_split > 0 && best_cjk_split < text.len() {
+        let l1 = text[..best_cjk_split].trim();
+        let l2 = text[best_cjk_split..].trim();
+        if !l2.is_empty() {
+            return (l1, Some(l2));
+        }
     }
 
     (text, None)
@@ -1018,8 +1051,18 @@ fn wrap_lyric_line<'a>(
 
         // Lyrics Button
         let lyr_rect = Rect { x: x + 12.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
-        draw_lyrics_button(buf, x + 24.0, ctrl_y, 18.0, true, false, opacity);
+        let lyr_hover = cursor_pos.map(|(px, py)| lyr_rect.contains(px, py)).unwrap_or(false);
+        draw_lyrics_button(buf, x + 24.0, ctrl_y, 18.0, true, lyr_hover, opacity);
         self.click_targets.push((lyr_rect, ClickAction::ToggleLyrics));
+
+        // Romaji Toggle Button (appears when Japanese or Korean lyrics are present)
+        if lyrics.has_romaji() {
+            let ro_cx = x + 50.0;
+            let ro_rect = Rect { x: ro_cx - 12.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
+            let ro_hover = cursor_pos.map(|(px, py)| ro_rect.contains(px, py)).unwrap_or(false);
+            draw_romaji_button(buf, text_renderer, ro_cx, ctrl_y, 18.0, state.show_romaji, ro_hover, opacity);
+            self.click_targets.push((ro_rect, ClickAction::ToggleRomaji));
+        }
 
         // Playback Controls Cluster centered around pb_center = x + 150.0
         let pb_center = x + 150.0;
@@ -1102,7 +1145,7 @@ fn wrap_lyric_line<'a>(
         let playback_time = state.get_current_playback_time();
         let active_idx = lyrics.get_active_index(playback_time);
 
-        let layouts = Self::compute_lyric_layouts(text_renderer, lyrics, lyrics_max_w);
+        let layouts = Self::compute_lyric_layouts(text_renderer, lyrics, lyrics_max_w, state.show_romaji);
         let scroll_y = state.lyrics_scroll_y;
         let line_step = 18.0f32;
 
@@ -1345,11 +1388,22 @@ fn wrap_lyric_line<'a>(
         let header_time = get_formatted_header_time();
         text_renderer.draw_text(buf, &header_time, x + w * 0.5 - 58.0, cy + 4.0, 11.5, Color::rgba(255, 255, 255, 0.95 * opacity), true);
 
+        // Right side: Sound wave if media playing
+        if state.media_info.is_playing {
+            draw_monochrome_sound_wave(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity);
+        }
+
         // Prev Arrow Button (<) to cycle to Shelf
         let prev_btn_rect = Rect { x: x + 12.0, y: 56.0, w: 24.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
         draw_nav_arrow_button(buf, x + 24.0, 68.0, 11.0, false, prev_hover, opacity);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
+
+        // Next Arrow Button (>) to cycle to Calendar
+        let next_btn_rect = Rect { x: x + w - 36.0, y: 56.0, w: 24.0, h: 24.0 };
+        let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
+        draw_nav_arrow_button(buf, x + w - 24.0, 68.0, 11.0, true, next_hover, opacity);
+        self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // Left Column: Statistics "X/Y Task Done Today" with clean vertical spacing
         let left_x = x + 44.0;
@@ -1467,8 +1521,8 @@ fn wrap_lyric_line<'a>(
         }
 
         // Right Column: Scrollable Task List Items
-        let right_x = x + 192.0;
-        let right_w = w - 212.0;
+        let right_x = x + 196.0;
+        let right_w = w - 250.0;
         let item_h = 24.0;
         let item_gap = 4.0;
 
@@ -2751,9 +2805,17 @@ fn format_media_display(raw_title: &str, raw_artist: &str) -> (String, String) {
         " - HBO Max", " | HBO Max", " - Apple TV", " | Apple TV",
     ];
     for suf in &suffixes {
-        if let Some(idx) = title.to_lowercase().rfind(&suf.to_lowercase()) {
-            title = title[..idx].trim();
-            is_streaming_service = true;
+        let lower_title = title.to_lowercase();
+        let lower_suf = suf.to_lowercase();
+        if lower_title.ends_with(&lower_suf) {
+            let mut cut = title.len().saturating_sub(suf.len());
+            while cut > 0 && !title.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            if cut > 0 {
+                title = title[..cut].trim();
+                is_streaming_service = true;
+            }
         }
     }
 
@@ -3069,7 +3131,7 @@ mod tests {
                 (55.0, "To break the charms that brought me harm that all but would erase me".to_string()),
                 (65.0, "I never would no thought I could".to_string()),
             ];
-            let layouts = LayoutManager::compute_lyric_layouts(&tr, &lyrics, 304.0);
+            let layouts = LayoutManager::compute_lyric_layouts(&tr, &lyrics, 304.0, state.show_romaji);
             state.lyrics_scroll_y = LayoutManager::get_lyric_target_y(&layouts, 1);
             let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
             let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
@@ -3322,6 +3384,76 @@ mod tests {
             let lyrics = SyncedLyrics::default();
             lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
             save_bmp(&buf, &format!(r"{}\render_call_video.bmp", scratch_dir));
+        }
+
+        // 12. Multibyte CJK & Japanese Lyrics Wrapping UTF-8 Safety
+        {
+            let japanese_lyric = "Romanceの神様 どうもありがとう";
+            let (l1, l2) = LayoutManager::wrap_lyric_line(&tr, japanese_lyric, 13.0, 150.0, true);
+            assert!(!l1.is_empty());
+            assert!(l2.is_some());
+
+            // Continuous Japanese string with no spaces
+            let continuous_cjk = "私のお気に入りの曲を聴きながら散歩する午後";
+            let (c1, c2) = LayoutManager::wrap_lyric_line(&tr, continuous_cjk, 13.0, 120.0, true);
+            assert!(!c1.is_empty());
+            assert!(c2.is_some());
+        }
+
+        // 13. Romaji Toggle Functionality & Button Hit-Target
+        {
+            let mut lyrics = SyncedLyrics::default();
+            lyrics.has_cjk = true;
+            lyrics.lines = vec![
+                (10.0, "Romanceの神様".to_string()),
+                (20.0, "どうもありがとう".to_string()),
+            ];
+            lyrics.romaji_lines = vec![
+                (10.0, "Romance no kamisama".to_string()),
+                (20.0, "doumo arigatou".to_string()),
+            ];
+
+            assert!(lyrics.has_romaji());
+
+            // With show_romaji = true
+            let layouts_ro = LayoutManager::compute_lyric_layouts(&tr, &lyrics, 300.0, true);
+            assert_eq!(layouts_ro[0].line1, "Romance no kamisama");
+
+            // With show_romaji = false
+            let layouts_orig = LayoutManager::compute_lyric_layouts(&tr, &lyrics, 300.0, false);
+            assert_eq!(layouts_orig[0].line1, "Romanceの神様");
+
+            // Test render registers ToggleRomaji click target
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Lyrics;
+            state.media_info.has_media = true;
+            state.media_info.title = "Romance".to_string();
+            let mut lm_test = LayoutManager::new();
+            lm_test.render_lyrics(&mut buf, &tr, 110.0, 600.0, 150.0, &state, &lyrics, 1.0, None);
+            assert!(lm_test.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleRomaji));
+        }
+
+        // 14. To-Do Navigation Arrows (both < PrevPage and > NextPage)
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Expanded(ExpandedPage::ToDo);
+            let (tx, _ty, tw, th, _tr_val) = lm.compute_target_geometry(820.0, &state);
+            assert_eq!(tw, 480.0);
+
+            let mut lm_todo = LayoutManager::new();
+            lm_todo.render_todo(&mut buf, &tr, tx, tw, th, &state, 1.0, None);
+
+            // Must have PrevPage and NextPage click targets
+            let has_prev = lm_todo.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage);
+            let has_next = lm_todo.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage);
+            assert!(has_prev, "ToDo must have PrevPage arrow (<)");
+            assert!(has_next, "ToDo must have NextPage arrow (>)");
+
+            // Verify next button is on the far right edge of the island
+            let next_target = lm_todo.click_targets.iter().find(|(_, a)| *a == ClickAction::NextPage).unwrap();
+            assert!(next_target.0.x >= tx + tw - 40.0);
         }
     }
 }

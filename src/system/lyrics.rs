@@ -10,15 +10,22 @@ use windows::Win32::Networking::WinHttp::{
     WinHttpReceiveResponse, WinHttpSendRequest, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
     WINHTTP_FLAG_SECURE,
 };
+use crate::system::romaji::{contains_cjk_or_hangul, fetch_google_romaji_all, offline_romanize};
 
 #[derive(Clone, Debug, Default)]
 pub struct SyncedLyrics {
     #[allow(dead_code)]
     pub track_title: String,
     pub lines: Vec<(f32, String)>, // (timestamp in seconds, lyric line text)
+    pub romaji_lines: Vec<(f32, String)>, // (timestamp in seconds, romanized text)
+    pub has_cjk: bool,
 }
 
 impl SyncedLyrics {
+    /// Returns true if romanized lyrics are available for Japanese or Korean songs
+    pub fn has_romaji(&self) -> bool {
+        self.has_cjk && !self.romaji_lines.is_empty()
+    }
     /// Returns the active index in `lines` based on current high-resolution playback time.
     /// Incorporates a calibrated 0.30s vocal anticipation lead so lyrics highlight right as the singer articulates.
     pub fn get_active_index(&self, position_secs: f32) -> usize {
@@ -104,9 +111,41 @@ impl LyricsManager {
         let current_arc = self.current.clone();
 
         thread::spawn(move || {
-            let lyrics = fetch_lrclib_lyrics(&title_clean, &artist_clean);
+            let mut lyrics = fetch_lrclib_lyrics(&title_clean, &artist_clean);
+            let has_cjk = lyrics.lines.iter().any(|(_, text)| contains_cjk_or_hangul(text));
+            lyrics.has_cjk = has_cjk;
+
+            if has_cjk {
+                // Generate immediate offline romaji so button & lyrics are available instantly
+                lyrics.romaji_lines = lyrics
+                    .lines
+                    .iter()
+                    .map(|(t, text)| (*t, offline_romanize(text)))
+                    .collect();
+            }
+
             if let Ok(mut lock) = current_arc.lock() {
-                *lock = lyrics;
+                *lock = lyrics.clone();
+            }
+
+            // In background, enrich with context-aware Google Translate transliteration for Kanji/Hangul
+            if has_cjk && !lyrics.lines.is_empty() {
+                let raw_lines: Vec<String> = lyrics.lines.iter().map(|(_, t)| t.clone()).collect();
+                let enriched = fetch_google_romaji_all(&raw_lines);
+                if enriched.len() == lyrics.lines.len() {
+                    let mut updated_romaji = Vec::with_capacity(lyrics.lines.len());
+                    for (i, (t, _)) in lyrics.lines.iter().enumerate() {
+                        let text = if !enriched[i].trim().is_empty() {
+                            enriched[i].clone()
+                        } else {
+                            lyrics.romaji_lines[i].1.clone()
+                        };
+                        updated_romaji.push((*t, text));
+                    }
+                    if let Ok(mut lock) = current_arc.lock() {
+                        lock.romaji_lines = updated_romaji;
+                    }
+                }
             }
         });
     }
@@ -116,6 +155,8 @@ fn fetch_lrclib_lyrics(title: &str, artist: &str) -> SyncedLyrics {
     let mut result = SyncedLyrics {
         track_title: title.to_string(),
         lines: Vec::new(),
+        romaji_lines: Vec::new(),
+        has_cjk: false,
     };
 
     // Construct query URL: /api/get?track_name=...&artist_name=...

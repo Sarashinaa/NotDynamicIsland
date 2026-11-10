@@ -140,8 +140,16 @@ pub fn clean_media_title(raw: &str) -> String {
         " - Apple TV", " | Apple TV", " - Hulu", " | Hulu",
     ];
     for suf in &suffixes {
-        if let Some(idx) = title.to_lowercase().rfind(&suf.to_lowercase()) {
-            title = title[..idx].trim().to_string();
+        let lower_title = title.to_lowercase();
+        let lower_suf = suf.to_lowercase();
+        if lower_title.ends_with(&lower_suf) {
+            let mut cut = title.len().saturating_sub(suf.len());
+            while cut > 0 && !title.is_char_boundary(cut) {
+                cut -= 1;
+            }
+            if cut > 0 {
+                title = title[..cut].trim().to_string();
+            }
         }
     }
 

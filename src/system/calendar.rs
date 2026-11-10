@@ -9,7 +9,7 @@ use std::thread;
 use windows::core::PCWSTR;
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::Networking::WinHttp::*;
-use windows::Win32::System::SystemInformation::GetLocalTime;
+use windows::Win32::System::SystemInformation::{GetLocalTime, GetSystemTime};
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
 pub const WM_APP_CALENDAR_UPDATED: u32 = 0x800F;
@@ -310,18 +310,30 @@ impl CalendarManager {
     pub fn load_sync_url(&mut self) {
         if self.sync_url_path.exists() {
             if let Ok(content) = fs::read_to_string(&self.sync_url_path) {
-                let trimmed = content.trim().to_string();
-                if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-                    self.gcal_url = trimmed;
-                    self.sync_status = "GCal Ready".to_string();
-                    return;
+                for line in content.lines() {
+                    let mut trimmed = line.trim();
+                    if trimmed.starts_with('#') {
+                        let without_hash = trimmed.trim_start_matches('#').trim();
+                        if let Some(after_example) = without_hash.strip_prefix("Example:") {
+                            trimmed = after_example.trim();
+                        } else if without_hash.starts_with("http://") || without_hash.starts_with("https://") {
+                            trimmed = without_hash;
+                        } else {
+                            continue;
+                        }
+                    }
+                    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                        self.gcal_url = trimmed.to_string();
+                        self.sync_status = "GCal Ready".to_string();
+                        return;
+                    }
                 }
             }
-        } else {
-            // Write a helpful sample config file so user can easily paste their Google Calendar link
-            let help = "# Paste your Google Calendar secret iCal URL below:\n# Example: https://calendar.google.com/calendar/ical/.../basic.ics\n";
-            let _ = fs::write(&self.sync_url_path, help);
         }
+
+        // Help template for users to paste their own Google Calendar secret iCal link
+        let help = "# Paste your Google Calendar secret iCal URL below:\n# Example: https://calendar.google.com/calendar/ical/.../basic.ics\n";
+        let _ = fs::write(&self.sync_url_path, help);
     }
 
     pub fn load_local(&mut self) {
@@ -332,7 +344,7 @@ impl CalendarManager {
 
                 while let Some(start_obj) = rest.find('{') {
                     let after_start = &rest[start_obj..];
-                    if let Some(end_obj) = after_start.find('}') {
+                    if let Some(end_obj) = find_matching_brace(after_start) {
                         let obj_str = &after_start[..=end_obj];
                         let id = extract_json_num(obj_str, "\"id\":").unwrap_or(0);
                         let year = extract_json_num(obj_str, "\"year\":").unwrap_or(2026) as u16;
@@ -451,11 +463,45 @@ fn parse_user_event_input(text: &str) -> (String, String) {
     ("All Day".to_string(), text.to_string())
 }
 
+fn find_matching_brace(s: &str) -> Option<usize> {
+    let bytes = s.as_bytes();
+    let mut in_str = false;
+    let mut escape = false;
+    for (i, &b) in bytes.iter().enumerate() {
+        if in_str {
+            if escape {
+                escape = false;
+            } else if b == b'\\' {
+                escape = true;
+            } else if b == b'"' {
+                in_str = false;
+            }
+        } else {
+            if b == b'"' {
+                in_str = true;
+            } else if b == b'}' {
+                return Some(i);
+            }
+        }
+    }
+    None
+}
+
 fn extract_json_str(source: &str, key: &str) -> Option<String> {
     let key_pos = source.find(key)?;
     let val_start = key_pos + key.len();
     let quote1 = source[val_start..].find('"')? + val_start + 1;
-    let quote2 = source[quote1..].find('"')? + quote1;
+    let mut quote2 = quote1;
+    let bytes = source.as_bytes();
+    while quote2 < bytes.len() {
+        if bytes[quote2] == b'"' && (quote2 == 0 || bytes[quote2 - 1] != b'\\') {
+            break;
+        }
+        quote2 += 1;
+    }
+    if quote2 >= bytes.len() {
+        return None;
+    }
     Some(source[quote1..quote2].replace("\\\"", "\"").replace("\\\\", "\\"))
 }
 
@@ -586,7 +632,18 @@ pub fn parse_ics_feed(content: &str) -> Vec<CalendarEvent> {
     let mut in_vevent = false;
     let mut event_id = 1000u32;
 
+    // RFC 5545 line unfolding: lines starting with space or tab continue the previous line
+    let mut unfolded: Vec<String> = Vec::new();
     for line in content.lines() {
+        if (line.starts_with(' ') || line.starts_with('\t')) && !unfolded.is_empty() {
+            let last = unfolded.last_mut().unwrap();
+            last.push_str(&line[1..]);
+        } else {
+            unfolded.push(line.to_string());
+        }
+    }
+
+    for line in unfolded {
         let trimmed = line.trim();
         if trimmed == "BEGIN:VEVENT" {
             in_vevent = true;
@@ -610,8 +667,18 @@ pub fn parse_ics_feed(content: &str) -> Vec<CalendarEvent> {
             }
             in_vevent = false;
         } else if in_vevent {
-            if trimmed.starts_with("SUMMARY:") {
-                cur_title = trimmed["SUMMARY:".len()..].to_string();
+            if trimmed.starts_with("SUMMARY:") || trimmed.starts_with("SUMMARY;") {
+                if let Some(colon) = trimmed.find(':') {
+                    let raw = &trimmed[colon + 1..];
+                    cur_title = raw
+                        .replace(r"\,", ",")
+                        .replace(r"\;", ";")
+                        .replace(r"\\", "\\")
+                        .replace(r"\n", " ")
+                        .replace(r"\N", " ")
+                        .trim()
+                        .to_string();
+                }
             } else if trimmed.starts_with("DTSTART") {
                 if let Some(colon) = trimmed.find(':') {
                     cur_dtstart = trimmed[colon + 1..].to_string();
@@ -625,6 +692,7 @@ pub fn parse_ics_feed(content: &str) -> Vec<CalendarEvent> {
 fn parse_ics_dtstart(val: &str) -> Option<(u16, u8, u8, String)> {
     // Formats:
     // 20261031T090000Z
+    // 20261031T090000
     // 20261031
     if val.len() < 8 {
         return None;
@@ -633,16 +701,66 @@ fn parse_ics_dtstart(val: &str) -> Option<(u16, u8, u8, String)> {
     let month = val[4..6].parse::<u8>().ok()?;
     let day = val[6..8].parse::<u8>().ok()?;
 
-    let time_str = if val.len() >= 13 && val.contains('T') {
+    if val.contains('T') {
         let t_pos = val.find('T')?;
-        let hh = &val[t_pos + 1..t_pos + 3];
-        let mm = &val[t_pos + 3..t_pos + 5];
-        format!("{}:{}", hh, mm)
-    } else {
-        "All Day".to_string()
-    };
+        if val.len() >= t_pos + 5 {
+            let mut hh = val[t_pos + 1..t_pos + 3].parse::<i32>().ok()?;
+            let mm = val[t_pos + 3..t_pos + 5].parse::<u32>().ok()?;
 
-    Some((year, month, day, time_str))
+            let (mut y, mut m, mut d) = (year, month, day);
+            if val.ends_with('Z') {
+                // UTC timestamp: convert to local time offset
+                let offset_hours = get_local_tz_offset_hours();
+                hh += offset_hours;
+                if hh >= 24 {
+                    hh -= 24;
+                    d += 1;
+                    let max_d = days_in_month(y, m);
+                    if d > max_d {
+                        d = 1;
+                        m += 1;
+                        if m > 12 {
+                            m = 1;
+                            y += 1;
+                        }
+                    }
+                } else if hh < 0 {
+                    hh += 24;
+                    if d > 1 {
+                        d -= 1;
+                    } else {
+                        if m > 1 {
+                            m -= 1;
+                        } else {
+                            m = 12;
+                            y -= 1;
+                        }
+                        d = days_in_month(y, m);
+                    }
+                }
+            }
+
+            return Some((y, m, d, format!("{:02}:{:02}", hh, mm)));
+        }
+    }
+
+    Some((year, month, day, "All Day".to_string()))
+}
+
+fn get_local_tz_offset_hours() -> i32 {
+    unsafe {
+        let lt = GetLocalTime();
+        let st = GetSystemTime();
+        let mut diff = lt.wHour as i32 - st.wHour as i32;
+        if lt.wDay != st.wDay {
+            if lt.wDay > st.wDay || (lt.wDay == 1 && st.wDay > 25) {
+                diff += 24;
+            } else {
+                diff -= 24;
+            }
+        }
+        diff
+    }
 }
 
 fn merge_gcal_events(file_path: &PathBuf, gcal_events: Vec<CalendarEvent>) {
@@ -653,7 +771,7 @@ fn merge_gcal_events(file_path: &PathBuf, gcal_events: Vec<CalendarEvent>) {
             let mut rest = content.as_str();
             while let Some(start_obj) = rest.find('{') {
                 let after_start = &rest[start_obj..];
-                if let Some(end_obj) = after_start.find('}') {
+                if let Some(end_obj) = find_matching_brace(after_start) {
                     let obj_str = &after_start[..=end_obj];
                     let is_gcal = obj_str.contains("\"gcal\":true");
                     if !is_gcal {
@@ -700,4 +818,72 @@ fn merge_gcal_events(file_path: &PathBuf, gcal_events: Vec<CalendarEvent>) {
     }
     json.push_str("]\n");
     let _ = fs::write(file_path, json);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_parse_ics_feed_with_folding_and_utc() {
+        let sample_ics = r#"BEGIN:VCALENDAR
+VERSION:2.0
+BEGIN:VEVENT
+DTSTART;TZID=Asia/Jakarta:20261111T170000
+SUMMARY:ILT-SS4-A26-AB: Innovation and Collaboration: Think\, Create\, and 
+ Collaborate
+END:VEVENT
+BEGIN:VEVENT
+DTSTART:20261103T020000Z
+SUMMARY:Morning Sync Session
+END:VEVENT
+END:VCALENDAR"#;
+
+        let events = parse_ics_feed(sample_ics);
+        assert_eq!(events.len(), 2);
+        assert_eq!(events[0].title, "ILT-SS4-A26-AB: Innovation and Collaboration: Think, Create, and Collaborate");
+        assert_eq!(events[0].year, 2026);
+        assert_eq!(events[0].month, 11);
+        assert_eq!(events[0].day, 11);
+        assert_eq!(events[0].time_str, "17:00");
+        assert!(events[0].is_gcal);
+
+        assert_eq!(events[1].title, "Morning Sync Session");
+        assert_eq!(events[1].year, 2026);
+        assert_eq!(events[1].month, 11);
+        assert!(events[1].is_gcal);
+    }
+
+    #[test]
+    fn test_parse_user_event_input() {
+        let (time, title) = parse_user_event_input("14:30 Meeting with Prof");
+        assert_eq!(time, "14:30");
+        assert_eq!(title, "Meeting with Prof");
+
+        let (time2, title2) = parse_user_event_input("No Time Event");
+        assert_eq!(time2, "All Day");
+        assert_eq!(title2, "No Time Event");
+    }
+
+    #[test]
+    fn test_live_sync_gcal() {
+        let app_data = std::env::var("APPDATA").unwrap_or_default();
+        let sync_file = if !app_data.is_empty() {
+            std::path::PathBuf::from(&app_data).join("NotDynamicIsland").join("calendar_sync.txt")
+        } else {
+            std::path::PathBuf::from("calendar_sync.txt")
+        };
+        if let Ok(content) = fs::read_to_string(&sync_file) {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("https://") {
+                    if let Ok(ics) = fetch_url_native(trimmed) {
+                        let events = parse_ics_feed(&ics);
+                        assert!(!events.is_empty(), "Should parse events from Google Calendar feed");
+                    }
+                    break;
+                }
+            }
+        }
+    }
 }

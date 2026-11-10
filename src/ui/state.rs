@@ -125,6 +125,7 @@ pub struct IslandState {
     pub calendar: CalendarManager,
     pub network_speed: NetworkSpeed,
     pub is_color_picker_active: bool,
+    pub show_romaji: bool,
     #[allow(dead_code)]
     pub recording_start_time: Option<Instant>,
 }
@@ -165,6 +166,7 @@ impl IslandState {
             calendar: CalendarManager::new(),
             network_speed: NetworkSpeed::default(),
             is_color_picker_active: false,
+            show_romaji: true,
             recording_start_time: None,
             active_call: ActiveCallInfo::default(),
         }

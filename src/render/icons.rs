@@ -579,17 +579,23 @@ pub fn draw_lyrics_button(
 ) {
     if is_active || is_hovered {
         let bg = if is_active {
-            Color::rgba(56, 189, 248, 0.28 * opacity) // blue glow active
+            if is_hovered {
+                Color::rgba(255, 255, 255, 0.35 * opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.24 * opacity)
+            }
         } else {
-            Color::rgba(255, 255, 255, 0.18 * opacity)
+            Color::rgba(255, 255, 255, 0.14 * opacity)
         };
         draw_circle(buf, cx, cy, size * 0.65, bg);
     }
 
     let icon_color = if is_active {
-        Color::rgba(56, 189, 248, 0.98 * opacity)
+        Color::rgba(255, 255, 255, 0.98 * opacity)
+    } else if is_hovered {
+        Color::rgba(255, 255, 255, 0.90 * opacity)
     } else {
-        Color::rgba(255, 255, 255, 0.85 * opacity)
+        Color::rgba(255, 255, 255, 0.65 * opacity)
     };
 
     let w = size * 0.8;
@@ -599,10 +605,57 @@ pub fn draw_lyrics_button(
     draw_rounded_rect(buf, x, y, w, h, 3.0, icon_color);
 
     // Inner dark dots inside speech bubble
-    let inner_dot_color = Color::rgba(0, 0, 0, 0.8 * opacity);
+    let inner_dot_color = Color::rgba(0, 0, 0, 0.85 * opacity);
     draw_circle(buf, cx - 3.0, cy, 1.0, inner_dot_color);
     draw_circle(buf, cx, cy, 1.0, inner_dot_color);
     draw_circle(buf, cx + 3.0, cy, 1.0, inner_dot_color);
+}
+
+/// Renders Romaji toggle button ("RO" badge) right beside lyrics button
+pub fn draw_romaji_button(
+    buf: &mut PixelBuffer,
+    text_renderer: &super::text::TextRenderer,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    is_active: bool,
+    is_hovered: bool,
+    opacity: f32,
+) {
+    if is_active || is_hovered {
+        let bg = if is_active {
+            if is_hovered {
+                Color::rgba(255, 255, 255, 0.35 * opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.24 * opacity)
+            }
+        } else {
+            Color::rgba(255, 255, 255, 0.14 * opacity)
+        };
+        draw_circle(buf, cx, cy, size * 0.65, bg);
+    } else {
+        draw_circle(buf, cx, cy, size * 0.65, Color::rgba(255, 255, 255, 0.08 * opacity));
+    }
+
+    let text_color = if is_active {
+        Color::rgba(255, 255, 255, 0.98 * opacity)
+    } else if is_hovered {
+        Color::rgba(255, 255, 255, 0.90 * opacity)
+    } else {
+        Color::rgba(156, 163, 175, 0.65 * opacity)
+    };
+
+    let font_size = 9.0;
+    let (tw, th) = text_renderer.measure_text("RO", font_size, true);
+    text_renderer.draw_text(
+        buf,
+        "RO",
+        (cx - tw * 0.5).round(),
+        (cy + th * 0.35).round(),
+        font_size,
+        text_color,
+        true,
+    );
 }
 
 /// Renders To-Do Checkbox (Green Checkmark or Gray Circle) from to-do.png

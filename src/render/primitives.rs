@@ -275,7 +275,10 @@ pub fn draw_top_notch(
     }
 }
 
-/// Renders authentic Dark Liquid Glass notch with specular surface sheen and frosted liquid depth
+/// Renders authentic Apple Dark Liquid Glass notch:
+/// - Pure deep smoked obsidian crystal body (uniform, high contrast, zero AI-slop face gradients)
+/// - Subtle internal cut-glass refraction bevel along the 3D perimeter
+/// - Flawless optical clarity for monochrome typography, controls, and media artwork
 pub fn draw_top_notch_liquid_glass(
     buf: &mut PixelBuffer,
     x: f32,
@@ -296,28 +299,28 @@ pub fn draw_top_notch_liquid_glass(
     let min_y = 0usize;
     let max_y = (h + 1.5).ceil().min(buf.height as f32) as usize;
 
+    // Deep smoked obsidian glass body (Apple Dark Liquid Glass)
+    let base_r = 7u8;
+    let base_g = 8u8;
+    let base_b = 11u8;
+    let base_alpha = 0.96 * opacity;
+
     for py in min_y..max_y {
         let p_yf = py as f32 + 0.5;
-        let y_ratio = (p_yf / h).clamp(0.0, 1.0);
-
-        // Dark liquid glass base color: pure neutral deep smoked obsidian
-        let base_r = (10.0 - y_ratio * 7.0) as u8;
-        let base_g = (10.0 - y_ratio * 7.0) as u8;
-        let base_b = (12.0 - y_ratio * 7.0) as u8;
-        let base_alpha = (0.76 + y_ratio * 0.08) * opacity;
 
         for px in min_x..max_x {
             let p_xf = px as f32 + 0.5;
             let dist = top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top);
             let coverage = (0.5 - dist).clamp(0.0, 1.0);
             if coverage > 0.0 {
-                // Liquid glass body
+                // Liquid glass body: rich, deep, unified obsidian
                 buf.blend_pixel(px, py, base_r, base_g, base_b, coverage * base_alpha);
 
-                // Top specular liquid sheen (glass reflection)
-                if p_yf <= h * 0.40 && dist <= -0.5 {
-                    let sheen = ((1.0 - (p_yf / (h * 0.40))) * 0.14 * opacity).max(0.0);
-                    buf.blend_pixel(px, py, 255, 255, 255, sheen * coverage);
+                // Subtle internal refraction bevel along the curved glass perimeter (2px inside rim)
+                if dist > -2.5 && dist <= -0.2 {
+                    let edge_factor = ((-dist) / 2.5).clamp(0.0, 1.0);
+                    let rim_sheen = (1.0 - edge_factor) * 0.05 * opacity;
+                    buf.blend_pixel(px, py, 255, 255, 255, rim_sheen * coverage);
                 }
             }
         }
@@ -362,7 +365,7 @@ pub fn draw_top_notch_shadow(
     }
 }
 
-/// Renders subtle glass stroke around the perimeter of the top notch
+/// Renders subtle cut-glass refraction stroke around the perimeter of the top notch
 pub fn draw_top_notch_stroke(
     buf: &mut PixelBuffer,
     x: f32,
@@ -395,7 +398,17 @@ pub fn draw_top_notch_stroke(
             let dist = top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top);
             let coverage = (0.5 - (dist.abs() - 0.5)).clamp(0.0, 1.0);
             if coverage > 0.0 {
-                buf.blend_pixel(px, py, color.r, color.g, color.b, coverage * color.a);
+                // Adaptive glass rim lighting:
+                // Upper flaring shoulders and bottom rounded corners catch specular reflections
+                let stroke_alpha = if p_yf <= r_top + 2.0 {
+                    color.a * 1.15
+                } else if p_yf >= h - r_bottom {
+                    color.a * 0.85
+                } else {
+                    color.a * 0.55
+                };
+
+                buf.blend_pixel(px, py, color.r, color.g, color.b, coverage * stroke_alpha);
             }
         }
     }

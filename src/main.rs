@@ -422,6 +422,10 @@ pub unsafe extern "system" fn window_proc(
                             app.island_state.toggle_lyrics();
                             wake_animation(hwnd, app);
                         }
+                        Some(ClickAction::ToggleRomaji) => {
+                            app.island_state.show_romaji = !app.island_state.show_romaji;
+                            wake_animation(hwnd, app);
+                        }
                         Some(ClickAction::SeekRelative(delta)) => {
                             let cur_pos = app.island_state.media_info.position_secs;
                             let dur = app.island_state.media_info.duration_secs;
@@ -1424,7 +1428,7 @@ pub unsafe extern "system" fn window_proc(
                         // High-resolution active index & bounded spring translation
                         let playback_time = app.island_state.get_current_playback_time();
                         let active_idx = lyrics.get_active_index(playback_time);
-                        let lyric_layouts = LayoutManager::compute_lyric_layouts(&app.text_renderer, &lyrics, 304.0);
+                        let lyric_layouts = LayoutManager::compute_lyric_layouts(&app.text_renderer, &lyrics, 304.0, app.island_state.show_romaji);
                         let active_y = LayoutManager::get_lyric_target_y(&lyric_layouts, active_idx);
 
                         // Strict boundary clamping: cannot scroll above line 0 or below the last line!

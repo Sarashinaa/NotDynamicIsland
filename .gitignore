@@ -1,4 +1,6 @@
 /target
 *.log
 todo.json
+calendar.json
+calendar_sync.txt
 *.zip

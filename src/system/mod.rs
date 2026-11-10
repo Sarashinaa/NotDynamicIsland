@@ -11,6 +11,7 @@ pub mod network;
 pub mod notifications;
 pub mod power;
 pub mod privacy;
+pub mod romaji;
 pub mod shelf;
 pub mod snip;
 pub mod timer;
