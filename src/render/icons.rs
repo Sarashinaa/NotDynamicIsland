@@ -4,7 +4,7 @@
 //! Renders sharp icons without relying on external image files.
 
 use super::buffer::PixelBuffer;
-use super::primitives::{draw_circle, draw_rounded_rect, Color};
+use super::primitives::{draw_circle, draw_rounded_rect, draw_rounded_rect_stroke, Color};
 
 /// Renders a Play triangle
 pub fn draw_play_icon(buf: &mut PixelBuffer, x: f32, y: f32, size: f32, color: Color) {
@@ -462,7 +462,7 @@ pub fn draw_lightning_bolt(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, c
 }
 
 /// Renders the Monochrome Sound Wave from closed.png
-pub fn draw_monochrome_sound_wave(
+pub fn draw_monochrome_sound_wave_ex(
     buf: &mut PixelBuffer,
     x: f32,
     y: f32,
@@ -471,6 +471,7 @@ pub fn draw_monochrome_sound_wave(
     is_playing: bool,
     anim_time: f32,
     opacity: f32,
+    _is_light: bool,
 ) {
     let bar_count = 5;
     let bar_w = 2.4;
@@ -493,8 +494,21 @@ pub fn draw_monochrome_sound_wave(
     }
 }
 
+pub fn draw_monochrome_sound_wave(
+    buf: &mut PixelBuffer,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    is_playing: bool,
+    anim_time: f32,
+    opacity: f32,
+) {
+    draw_monochrome_sound_wave_ex(buf, x, y, w, h, is_playing, anim_time, opacity, false);
+}
+
 /// Renders Navigation Arrow Circle Button (< or >) from music.png & shelf.png
-pub fn draw_nav_arrow_button(
+pub fn draw_nav_arrow_button_ex(
     buf: &mut PixelBuffer,
     cx: f32,
     cy: f32,
@@ -502,6 +516,7 @@ pub fn draw_nav_arrow_button(
     is_right: bool,
     is_hovered: bool,
     opacity: f32,
+    _is_light: bool,
 ) {
     let bg_color = if is_hovered {
         Color::rgba(255, 255, 255, 0.28 * opacity)
@@ -524,18 +539,34 @@ pub fn draw_nav_arrow_button(
     }
 }
 
+pub fn draw_nav_arrow_button(
+    buf: &mut PixelBuffer,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    is_right: bool,
+    is_hovered: bool,
+    opacity: f32,
+) {
+    draw_nav_arrow_button_ex(buf, cx, cy, radius, is_right, is_hovered, opacity, false);
+}
+
 /// Renders the Bottom Page Indicator Dots (e.g. — • •) from music.png, shelf.png, to-do.png
-pub fn draw_page_indicators(
+pub fn draw_page_indicators_ex(
     buf: &mut PixelBuffer,
     cx: f32,
     cy: f32,
     active_idx: usize,
     total: usize,
     opacity: f32,
+    _is_light: bool,
 ) {
     let dot_spacing = 11.0;
     let total_w = (total - 1) as f32 * dot_spacing + 12.0;
     let start_x = cx - total_w * 0.5;
+
+    let active_color = Color::rgba(255, 255, 255, 0.95 * opacity);
+    let inactive_color = Color::rgba(255, 255, 255, 0.35 * opacity);
 
     let mut cur_x = start_x;
     for i in 0..total {
@@ -550,7 +581,7 @@ pub fn draw_page_indicators(
                 pill_w,
                 pill_h,
                 pill_h * 0.5,
-                Color::rgba(255, 255, 255, 0.95 * opacity),
+                active_color,
             );
             cur_x += pill_w + 6.0;
         } else {
@@ -560,14 +591,80 @@ pub fn draw_page_indicators(
                 cur_x + 2.0,
                 cy,
                 2.2,
-                Color::rgba(255, 255, 255, 0.35 * opacity),
+                inactive_color,
             );
             cur_x += dot_spacing;
         }
     }
 }
 
+pub fn draw_page_indicators(
+    buf: &mut PixelBuffer,
+    cx: f32,
+    cy: f32,
+    active_idx: usize,
+    total: usize,
+    opacity: f32,
+) {
+    draw_page_indicators_ex(buf, cx, cy, active_idx, total, opacity, false);
+}
+
 /// Renders Lyrics Speech Bubble Button 💬 from music.png & lyrics.png
+pub fn draw_lyrics_button_ex(
+    buf: &mut PixelBuffer,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    is_active: bool,
+    is_hovered: bool,
+    opacity: f32,
+    is_light: bool,
+) {
+    if is_active || is_hovered {
+        let bg = if is_light {
+            if is_active {
+                if is_hovered {
+                    Color::rgba(255, 255, 255, 0.45 * opacity)
+                } else {
+                    Color::rgba(255, 255, 255, 0.32 * opacity)
+                }
+            } else {
+                Color::rgba(255, 255, 255, 0.18 * opacity)
+            }
+        } else {
+            if is_active {
+                if is_hovered {
+                    Color::rgba(255, 255, 255, 0.35 * opacity)
+                } else {
+                    Color::rgba(255, 255, 255, 0.24 * opacity)
+                }
+            } else {
+                Color::rgba(255, 255, 255, 0.14 * opacity)
+            }
+        };
+        draw_circle(buf, cx, cy, size * 0.65, bg);
+    }
+
+    let icon_color = if is_active {
+        Color::rgba(255, 255, 255, 1.0 * opacity)
+    } else if is_hovered {
+        Color::rgba(255, 255, 255, 0.95 * opacity)
+    } else {
+        Color::rgba(255, 255, 255, 0.70 * opacity)
+    };
+
+    let w = size * 0.8;
+    let h = size * 0.6;
+    let x = cx - w * 0.5;
+    let y = cy - h * 0.5;
+    draw_rounded_rect(buf, x, y, w, h, 3.0, icon_color);
+
+    let inner_dot_color = Color::rgba(0, 0, 0, 0.85 * opacity);
+    draw_circle(buf, cx - 3.0, cy, 1.0, inner_dot_color);
+    draw_circle(buf, cx, cy, 1.0, inner_dot_color);
+    draw_circle(buf, cx + 3.0, cy, 1.0, inner_dot_color);
+}
+
 pub fn draw_lyrics_button(
     buf: &mut PixelBuffer,
     cx: f32,
@@ -577,42 +674,11 @@ pub fn draw_lyrics_button(
     is_hovered: bool,
     opacity: f32,
 ) {
-    if is_active || is_hovered {
-        let bg = if is_active {
-            if is_hovered {
-                Color::rgba(255, 255, 255, 0.35 * opacity)
-            } else {
-                Color::rgba(255, 255, 255, 0.24 * opacity)
-            }
-        } else {
-            Color::rgba(255, 255, 255, 0.14 * opacity)
-        };
-        draw_circle(buf, cx, cy, size * 0.65, bg);
-    }
-
-    let icon_color = if is_active {
-        Color::rgba(255, 255, 255, 0.98 * opacity)
-    } else if is_hovered {
-        Color::rgba(255, 255, 255, 0.90 * opacity)
-    } else {
-        Color::rgba(255, 255, 255, 0.65 * opacity)
-    };
-
-    let w = size * 0.8;
-    let h = size * 0.6;
-    let x = cx - w * 0.5;
-    let y = cy - h * 0.5;
-    draw_rounded_rect(buf, x, y, w, h, 3.0, icon_color);
-
-    // Inner dark dots inside speech bubble
-    let inner_dot_color = Color::rgba(0, 0, 0, 0.85 * opacity);
-    draw_circle(buf, cx - 3.0, cy, 1.0, inner_dot_color);
-    draw_circle(buf, cx, cy, 1.0, inner_dot_color);
-    draw_circle(buf, cx + 3.0, cy, 1.0, inner_dot_color);
+    draw_lyrics_button_ex(buf, cx, cy, size, is_active, is_hovered, opacity, false);
 }
 
 /// Renders Romaji toggle button ("RO" badge) right beside lyrics button
-pub fn draw_romaji_button(
+pub fn draw_romaji_button_ex(
     buf: &mut PixelBuffer,
     text_renderer: &super::text::TextRenderer,
     cx: f32,
@@ -621,28 +687,46 @@ pub fn draw_romaji_button(
     is_active: bool,
     is_hovered: bool,
     opacity: f32,
+    is_light: bool,
 ) {
     if is_active || is_hovered {
-        let bg = if is_active {
-            if is_hovered {
-                Color::rgba(255, 255, 255, 0.35 * opacity)
+        let bg = if is_light {
+            if is_active {
+                if is_hovered {
+                    Color::rgba(255, 255, 255, 0.45 * opacity)
+                } else {
+                    Color::rgba(255, 255, 255, 0.32 * opacity)
+                }
             } else {
-                Color::rgba(255, 255, 255, 0.24 * opacity)
+                Color::rgba(255, 255, 255, 0.18 * opacity)
             }
         } else {
-            Color::rgba(255, 255, 255, 0.14 * opacity)
+            if is_active {
+                if is_hovered {
+                    Color::rgba(255, 255, 255, 0.35 * opacity)
+                } else {
+                    Color::rgba(255, 255, 255, 0.24 * opacity)
+                }
+            } else {
+                Color::rgba(255, 255, 255, 0.14 * opacity)
+            }
         };
         draw_circle(buf, cx, cy, size * 0.65, bg);
     } else {
-        draw_circle(buf, cx, cy, size * 0.65, Color::rgba(255, 255, 255, 0.08 * opacity));
+        let default_bg = if is_light {
+            Color::rgba(255, 255, 255, 0.10 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.08 * opacity)
+        };
+        draw_circle(buf, cx, cy, size * 0.65, default_bg);
     }
 
     let text_color = if is_active {
-        Color::rgba(255, 255, 255, 0.98 * opacity)
+        Color::rgba(255, 255, 255, 1.0 * opacity)
     } else if is_hovered {
-        Color::rgba(255, 255, 255, 0.90 * opacity)
+        Color::rgba(255, 255, 255, 0.95 * opacity)
     } else {
-        Color::rgba(156, 163, 175, 0.65 * opacity)
+        Color::rgba(255, 255, 255, 0.72 * opacity)
     };
 
     let font_size = 9.0;
@@ -656,6 +740,19 @@ pub fn draw_romaji_button(
         text_color,
         true,
     );
+}
+
+pub fn draw_romaji_button(
+    buf: &mut PixelBuffer,
+    text_renderer: &super::text::TextRenderer,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    is_active: bool,
+    is_hovered: bool,
+    opacity: f32,
+) {
+    draw_romaji_button_ex(buf, text_renderer, cx, cy, size, is_active, is_hovered, opacity, false);
 }
 
 /// Renders To-Do Checkbox (Green Checkmark or Gray Circle) from to-do.png
@@ -740,7 +837,7 @@ pub fn draw_headphones_badge(buf: &mut PixelBuffer, cx: f32, cy: f32, radius: f3
 }
 
 /// Renders Seek Backward Button (↺ 5) for scrubbing -5 seconds
-pub fn draw_seek_backward_button(
+pub fn draw_seek_backward_button_ex(
     buf: &mut PixelBuffer,
     text_renderer: &super::text::TextRenderer,
     cx: f32,
@@ -748,9 +845,15 @@ pub fn draw_seek_backward_button(
     size: f32,
     is_hovered: bool,
     opacity: f32,
+    is_light: bool,
 ) {
     if is_hovered {
-        draw_circle(buf, cx, cy, size * 0.55, Color::rgba(255, 255, 255, 0.16 * opacity));
+        let hover_bg = if is_light {
+            Color::rgba(255, 255, 255, 0.22 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.16 * opacity)
+        };
+        draw_circle(buf, cx, cy, size * 0.55, hover_bg);
     }
 
     let color = Color::rgba(255, 255, 255, if is_hovered { 0.98 } else { 0.88 } * opacity);
@@ -787,8 +890,7 @@ pub fn draw_seek_backward_button(
     );
 }
 
-/// Renders Seek Forward Button (↻ 5) for scrubbing +5 seconds
-pub fn draw_seek_forward_button(
+pub fn draw_seek_backward_button(
     buf: &mut PixelBuffer,
     text_renderer: &super::text::TextRenderer,
     cx: f32,
@@ -797,8 +899,27 @@ pub fn draw_seek_forward_button(
     is_hovered: bool,
     opacity: f32,
 ) {
+    draw_seek_backward_button_ex(buf, text_renderer, cx, cy, size, is_hovered, opacity, false);
+}
+
+/// Renders Seek Forward Button (↻ 5) for scrubbing +5 seconds
+pub fn draw_seek_forward_button_ex(
+    buf: &mut PixelBuffer,
+    text_renderer: &super::text::TextRenderer,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    is_hovered: bool,
+    opacity: f32,
+    is_light: bool,
+) {
     if is_hovered {
-        draw_circle(buf, cx, cy, size * 0.55, Color::rgba(255, 255, 255, 0.16 * opacity));
+        let hover_bg = if is_light {
+            Color::rgba(255, 255, 255, 0.22 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.16 * opacity)
+        };
+        draw_circle(buf, cx, cy, size * 0.55, hover_bg);
     }
 
     let color = Color::rgba(255, 255, 255, if is_hovered { 0.98 } else { 0.88 } * opacity);
@@ -833,6 +954,18 @@ pub fn draw_seek_forward_button(
         color,
         true,
     );
+}
+
+pub fn draw_seek_forward_button(
+    buf: &mut PixelBuffer,
+    text_renderer: &super::text::TextRenderer,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    is_hovered: bool,
+    opacity: f32,
+) {
+    draw_seek_forward_button_ex(buf, text_renderer, cx, cy, size, is_hovered, opacity, false);
 }
 
 /// Renders Camera Icon (Apple Style)
@@ -955,4 +1088,101 @@ pub fn draw_refresh_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, r: f32, color:
         draw_circle(buf, tip_x - t * 2.5, tip_y - 1.5 + t * 1.5, 0.75, color);
         draw_circle(buf, tip_x - t * 2.5, tip_y + 1.5 - t * 1.5, 0.75, color);
     }
+}
+
+/// Renders a sharp Crescent Moon Icon 🌙 for Dark mode toggle
+pub fn draw_moon_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, r: f32, color: Color) {
+    let min_x = (cx - r - 1.0).floor().max(0.0) as usize;
+    let max_x = (cx + r + 1.0).ceil().min(buf.width as f32) as usize;
+    let min_y = (cy - r - 1.0).floor().max(0.0) as usize;
+    let max_y = (cy + r + 1.0).ceil().min(buf.height as f32) as usize;
+
+    let cutout_cx = cx + r * 0.44;
+    let cutout_cy = cy - r * 0.20;
+    let cutout_r = r * 0.82;
+
+    for py in min_y..max_y {
+        let pyf = py as f32 + 0.5;
+        for px in min_x..max_x {
+            let pxf = px as f32 + 0.5;
+            let d_main = (pxf - cx).hypot(pyf - cy);
+            let d_cut = (pxf - cutout_cx).hypot(pyf - cutout_cy);
+
+            let cov_main = (r - d_main + 0.5).clamp(0.0, 1.0);
+            let cov_cut = (d_cut - cutout_r + 0.5).clamp(0.0, 1.0);
+            let cov = cov_main * cov_cut;
+
+            if cov > 0.0 {
+                buf.blend_pixel(px, py, color.r, color.g, color.b, cov * color.a);
+            }
+        }
+    }
+}
+
+/// Renders Apple-style Sun/Moon theme toggle pill with kinetic sliding thumb animation
+pub fn draw_theme_toggle_animated(
+    buf: &mut PixelBuffer,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    theme_t: f32, // 0.0 = Sun (Light), 1.0 = Moon (Dark)
+    is_hovered: bool,
+    opacity: f32,
+) {
+    let r = h * 0.5;
+    let t_clamped = theme_t.clamp(0.0, 1.0);
+
+    // Pill capsule background: clean crystal glass in both themes
+    let bg_alpha = if is_hovered { 0.22 } else { 0.12 } * opacity;
+    let bg_color = Color::rgba(255, 255, 255, bg_alpha);
+    let stroke_color = Color::rgba(255, 255, 255, 0.22 * opacity);
+    draw_rounded_rect(buf, x, y, w, h, r, bg_color);
+    draw_rounded_rect_stroke(buf, x, y, w, h, r, 0.75, stroke_color);
+
+    let thumb_r = r - 1.5;
+    let sun_cx = x + r + 0.5;
+    let moon_cx = x + w - r - 0.5;
+    let cy = y + r;
+
+    // Smooth sliding thumb position driven by mass-spring physics
+    let thumb_cx = sun_cx + (moon_cx - sun_cx) * theme_t;
+
+    // Thumb background: blends between bright white jewel (Sun) and frosted dark obsidian (Moon)
+    let thumb_alpha = (0.95 - t_clamped * 0.65) * opacity;
+    let thumb_bg = Color::rgba(255, 255, 255, thumb_alpha);
+    draw_circle(buf, thumb_cx, cy, thumb_r, thumb_bg);
+
+    // Sun icon on left (glows golden when active near t = 0)
+    let sun_glow = (1.0 - t_clamped * 1.5).clamp(0.0, 1.0);
+    let sun_color = if sun_glow > 0.05 {
+        Color::rgba(
+            (200.0 + 45.0 * sun_glow).min(255.0) as u8,
+            (200.0 - 42.0 * sun_glow) as u8,
+            (200.0 - 189.0 * sun_glow) as u8,
+            (0.50 + 0.48 * sun_glow) * opacity,
+        )
+    } else {
+        Color::rgba(200, 205, 215, 0.45 * opacity)
+    };
+    draw_sun_icon(buf, sun_cx, cy, 4.2, sun_color);
+
+    // Moon icon on right (glows crisp white when active near t = 1)
+    let moon_glow = ((theme_t - 0.3) / 0.7).clamp(0.0, 1.0);
+    let moon_color = Color::rgba(255, 255, 255, (0.45 + 0.53 * moon_glow) * opacity);
+    draw_moon_icon(buf, moon_cx, cy, 4.0, moon_color);
+}
+
+pub fn draw_theme_toggle(
+    buf: &mut PixelBuffer,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    is_dark: bool,
+    is_hovered: bool,
+    opacity: f32,
+) {
+    let t = if is_dark { 1.0 } else { 0.0 };
+    draw_theme_toggle_animated(buf, x, y, w, h, t, is_hovered, opacity);
 }

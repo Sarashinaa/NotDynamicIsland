@@ -1,107 +1,109 @@
 # NotDynamicIsland 🏝️
 
-A lightweight, native Dynamic Island desktop overlay for Windows 11 and 10, written from scratch in **pure Rust**.
+A native, ultra-lightweight Dynamic Island companion for Windows 10 & 11, written from scratch in pure Rust.
 
-No Electron. No Chromium. No heavy UI runtimes. Just clean Win32 APIs, software-rendered Signed Distance Fields (SDF), and smooth spring physics.
-
----
-
-## ✨ Features
-
-### 🎵 Media Controller & Synced Lyrics
-- **Universal Media Controls**: Integrates with Windows System Media Transport Controls (GSMTC) — works out of the box with Spotify, Apple Music, YouTube Music, Chrome, and local players.
-- **Real-Time Synced Lyrics**: Fetches synchronized LRC lyrics automatically with smooth, kinetic auto-scrolling.
-- **Romaji & Romanization Toggle ("RO")**:
-  - Automatically romanizes **Japanese (Hiragana, Katakana, Kanji)** and **Korean (Hangul)** lyrics.
-  - Zero-lag Korean mathematical Unicode syllable decomposition.
-  - Seamless toggle button to switch between original script and Romaji in 1:1 synchronization.
-  - 100% monochrome Apple glass badge styling.
-
-### 💎 Dark Liquid Glass Design
-- **Smoked Obsidian Material**: Rich, uniform dark glass without artificial washed-out vertical gradients or cloudy gray bands.
-- **Refractive Bevel Lighting**: Physics-based edge lighting and specular cut-glass rim highlights that trace the notch contour.
-- **Dual Atmospheric Shadows**: Layered contact and ambient drop shadows that let the island float naturally over any wallpaper.
-- **Click-Through Passthrough**: Transparent areas outside the notch pass clicks through directly (`HTTRANSPARENT`), so you can click windows behind it without interference.
-
-### 📋 Productivity & Tools
-- **File Shelf**: Drag and drop any file onto the island for quick temporary storage. Click to reveal in File Explorer.
-- **To-Do List**: Inline task manager with checkboxes, task count stats, smooth mouse wheel scrolling, and navigation arrows.
-- **Calendar & Agenda**: Interactive monthly calendar grid with daily event agenda.
-  - **Google Calendar Sync**: Native background synchronization via secret `.ics` feed URL.
-  - **Local Timezone Offset**: Automatic UTC-to-local conversion.
-- **Focus Timer**: Configurable Pomodoro focus timer and stopwatch with one-click presets.
-
-### 🔔 System HUD & Notifications
-- **Volume OSD**: Event-driven volume slider via Windows Core Audio (WASAPI).
-- **Power & Battery**: Live battery ring indicator, charging pulse, and battery percentage HUD.
-- **Display Brightness**: Smooth brightness percentage OSD.
-- **Privacy Indicators**: Green and orange dots when microphone or camera are accessed by any app.
-- **Screen Snip & Color Picker**: Quick-action system utilities integrated into the island tools menu.
+No Electron, no Chromium, and no heavy runtime dependencies. It uses direct Win32 layered window APIs, an in-house software Signed Distance Field (SDF) rasterizer, and mass-spring-damper kinetics to deliver a fluid desktop experience with near-zero resource consumption.
 
 ---
 
-## ⚡ Performance
+## What's New in v1.1
+
+- **Liquid Glass Materials**: Choose between **Dark Obsidian** (deep, translucent tinted glass) and **Crystal-Clear Light** (high-clarity translucent glass). Features dual-stroke optical beveling (1px gradient outer edge + 1.5px prism refraction) and a 1.8px wet-look specular light arc on the top notch curve.
+- **Kinetic Sun / Moon Toggle**: Apple-style sliding spring toggle with critically damped physics (`ζ ≈ 0.717`). Clicking the switch glides the thumb capsule and smoothly morphs the notch glass between themes in real time.
+- **Synced Lyrics & Navigation**:
+  - Borderless, clean scrolling lyrics with Apple Music-style edge fades.
+  - **Romaji Toggle (`RO`)**: 1-click romanization for Japanese (Kanji / Kana) and Korean (Hangul) songs.
+  - Instant ±5 second seek scrub buttons and interactive dragging slider.
+- **To-Do Navigation**: Added dedicated right navigation arrow (`>`) for seamless cycling across all pages.
+- **High-Contrast Monochrome HIG**: Crisp white typography and icons across all modes for optimal readability over dark and light desktop wallpapers.
+
+---
+
+## Features
+
+### 🎵 Media Player & Synchronized Lyrics
+- **Universal Media Controls**: Reads playback state via Windows System Media Transport Controls (GSMTC) — works out of the box with Spotify, Apple Music, YouTube Music, web browsers, and local players.
+- **Live Synced Lyrics**: Fetches synchronized LRC lyrics automatically with smooth auto-scroll.
+- **Romanization Engine**: On-the-fly Japanese phonetic transliteration and mathematical Unicode Hangul syllable decomposition.
+- **Scrubbing & Controls**: Interactive progress bar with circular thumb knob, play/pause, track skipping, and ±5-second jump buttons.
+
+### 💎 Liquid Glass Design
+- **Two Optical Themes**: Dark Obsidian and Crystal-Clear Light, selectable at runtime with saved preference.
+- **Physics-Based Refraction**: Clean internal edge refraction and top specular reflections without artificial gray banding or milky haze.
+- **Seamless Desktop Passthrough**: Precision hit-testing (`HTTRANSPARENT`) outside the curved notch allows clicking and dragging windows directly behind the canvas.
+
+### 🛠️ Desktop Utilities
+- **Drop Shelf**: Drag and drop files onto the island for quick temporary staging. Click to reveal in File Explorer.
+- **To-Do List**: Inline task list with completion checkboxes, progress counter, mouse wheel scrolling, and navigation arrows.
+- **Calendar & Agenda**: Monthly calendar view with daily agenda. Supports private Google Calendar background sync via secret iCal URL (`calendar_sync.txt`).
+- **Focus Timer**: Pomodoro focus timer and stopwatch with one-click presets.
+
+### 🔔 Native System HUDs
+- **Volume OSD**: Event-driven volume HUD hooked into Windows Core Audio (WASAPI).
+- **Battery & Power**: Circular battery ring gauge, charging status, and battery saver indicator.
+- **Display Brightness**: Smooth brightness HUD.
+- **Privacy Indicators**: Real-time microphone and camera access indicator dots.
+
+---
+
+## Performance
 
 | Metric | Measured |
 | :--- | :--- |
-| **RAM Usage** | **~3 – 8 MB** (resets to ~1.9 MB on idle) |
-| **CPU Usage (Idle)** | **0.0%** (event-driven message loop, sleeps completely when not animating) |
-| **Binary Size** | **~860 KB** (single standalone executable) |
-| **GPU VRAM** | **0 MB** (CPU software rasterizer with per-pixel alpha blending) |
-| **Startup Time** | **< 50 ms** instant launch |
+| **RAM Usage** | **~3 – 8 MB** active (trimmed to **~1.8 MB** at idle) |
+| **CPU Usage (Idle)** | **0.0%** (blocks on `GetMessageW`, zero polling) |
+| **Executable Size** | **~844 KB** (single standalone `.exe`, zero install required) |
+| **GPU VRAM** | **0 MB** (efficient CPU software rasterizer with per-pixel alpha blending) |
+| **Cold Startup** | **< 50 ms** |
 
 ---
 
-## 🚀 Getting Started
+## Getting Started
 
-### Pre-built Binary
-1. Download `not_dynamic_island.exe` from the [Releases](https://github.com/Sarashinaa/NotDynamicIsland/releases/latest) page.
-2. Double-click `not_dynamic_island.exe` to run.
-3. The island will anchor itself to the top-center of your primary display.
-
-> **Tip (Auto-start on Boot):**  
-> Press `Win + R`, type `shell:startup`, and place a shortcut to `not_dynamic_island.exe` inside that folder.
+### Download
+1. Grab the latest standalone `not_dynamic_island.exe` from [GitHub Releases](https://github.com/Sarashinaa/NotDynamicIsland/releases/latest).
+2. Run `not_dynamic_island.exe`. It automatically anchors to the top center of your primary display.
+3. To start automatically on boot: press `Win + R`, type `shell:startup`, and place a shortcut to the executable there.
 
 ---
 
-## 🎮 Navigation & Controls
+## Controls
 
 | Action | Control |
 | :--- | :--- |
-| **Expand / Collapse** | Left-click on the notch |
-| **Switch Pages** | Click `<` / `>` buttons, or click the bottom page indicator dots |
-| **Scroll (Lyrics / To-Do)** | Scroll mouse wheel over the expanded pane |
-| **Toggle Lyrics** | Click the speech bubble icon `💬` in the music controller |
+| **Expand / Collapse** | Left-click the notch |
+| **Toggle Light / Dark Mode** | Click the Sun / Moon toggle at the top-left of the Music player |
+| **Cycle Pages** | Click `<` / `>` arrows, or click the bottom page indicator dots |
+| **Open Lyrics** | Click the speech bubble icon `💬` in the Music player |
 | **Toggle Romaji** | Click the `RO` badge beside the lyrics button |
-| **Google Calendar Sync** | Paste your Google Calendar secret iCal URL into `calendar_sync.txt` |
-| **Drag & Drop Shelf** | Drag any file from File Explorer and drop it onto the island |
+| **Seek ±5s** | Click `↺ 5` or `↻ 5` buttons |
+| **Scroll Lists** | Scroll mouse wheel over lyrics, to-do list, or shelf |
+| **Temporary File Staging** | Drag any file from Windows Explorer onto the island |
 
 ---
 
-## 🛠️ Building from Source
+## Building from Source
 
-### Prerequisites
+### Requirements
 - Windows 10 or 11
-- [Rust toolchain](https://rustup.rs/) (stable, 2021 edition)
+- [Rust toolchain](https://rustup.rs/) (stable channel, edition 2024 / 2021)
 
-### Build Commands
 ```powershell
 # Clone the repository
 git clone https://github.com/Sarashinaa/NotDynamicIsland.git
 cd NotDynamicIsland
 
-# Run tests
+# Run the test suite
 cargo test
 
-# Build optimized release binary
+# Compile release binary
 cargo build --release
 ```
 
-The compiled standalone executable will be located at:
-`target\release\not_dynamic_island.exe`
+The resulting standalone executable will be at `target\release\not_dynamic_island.exe`.
 
 ---
 
-## 📄 License
+## License
 
 This project is licensed under the [MIT License](LICENSE).

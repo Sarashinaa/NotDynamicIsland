@@ -1,6 +1,24 @@
+# Build output
 /target
-*.log
-todo.json
-calendar.json
-calendar_sync.txt
 *.zip
+*.exe
+
+# User personal data & credentials (calendar, notes, tokens, themes)
+calendar_sync.txt
+calendar.json
+todo.json
+glass_theme.txt
+*.ics
+*.env
+*.key
+*.pem
+*.token
+credentials.json
+token.json
+
+# Temporary files & logs
+*.log
+*.tmp
+*.bak
+*.bmp
+

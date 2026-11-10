@@ -275,17 +275,22 @@ pub fn draw_top_notch(
     }
 }
 
-/// Renders authentic Apple Dark Liquid Glass notch:
-/// - Pure deep smoked obsidian crystal body (uniform, high contrast, zero AI-slop face gradients)
-/// - Subtle internal cut-glass refraction bevel along the 3D perimeter
-/// - Flawless optical clarity for monochrome typography, controls, and media artwork
-pub fn draw_top_notch_liquid_glass(
+
+
+/// Unified Pristine Liquid Glass Shader Core
+/// Used for both Liquid Light and Liquid Dark modes:
+/// - Crystal-clear transparent substrate (zero muddy gray, zero blur artifacts)
+/// - Dual-stroke optical thickness (1px outer vertical gradient, 1.5px inner refraction)
+/// - Specular wet-look highlight arc (1.8px at top lip, 75% pure white fading out to edges)
+/// - Clean, pristine surface: zero dust, zero bubbles, zero scratches, zero rainbow/pelangi
+pub fn draw_top_notch_liquid_glass_core(
     buf: &mut PixelBuffer,
     x: f32,
     w: f32,
     h: f32,
     bottom_radius: f32,
     opacity: f32,
+    theme_progress: f32, // 0.0 = Clear Light, 1.0 = Dark Obsidian
 ) {
     if opacity <= 0.001 || w <= 0.0 || h <= 0.0 {
         return;
@@ -294,40 +299,116 @@ pub fn draw_top_notch_liquid_glass(
     let r_bottom = bottom_radius.min(w * 0.5).min(h * 0.5);
     let r_top = r_bottom;
 
-    let min_x = (x - r_top - 1.5).floor().max(0.0) as usize;
-    let max_x = (x + w + r_top + 1.5).ceil().min(buf.width as f32) as usize;
+    let min_x = (x - r_top - 1.0).floor().max(0.0) as usize;
+    let max_x = (x + w + r_top + 1.0).ceil().min(buf.width as f32) as usize;
     let min_y = 0usize;
-    let max_y = (h + 1.5).ceil().min(buf.height as f32) as usize;
+    let max_y = (h + 1.0).ceil().min(buf.height as f32) as usize;
 
-    // Deep smoked obsidian glass body (Apple Dark Liquid Glass)
-    let base_r = 7u8;
-    let base_g = 8u8;
-    let base_b = 11u8;
-    let base_alpha = 0.96 * opacity;
+    let half_w = w * 0.5;
+    let cx = x + half_w;
+    let t = theme_progress.clamp(0.0, 1.0);
 
     for py in min_y..max_y {
         let p_yf = py as f32 + 0.5;
+        let vert_t = (p_yf / h).clamp(0.0, 1.0);
+
+        // Substrate color & opacity:
+        // Dark: 32% opacity obsidian dark (10, 12, 16)
+        // Light: crystal clear 7.5% at top lip -> 4% at bottom (255, 255, 255)
+        let dark_alpha = 0.32;
+        let light_alpha = 0.075 - vert_t * 0.035;
+        let base_alpha = (light_alpha + (dark_alpha - light_alpha) * t) * opacity;
+
+        let base_r = (255.0 + (10.0 - 255.0) * t).round() as u8;
+        let base_g = (255.0 + (12.0 - 255.0) * t).round() as u8;
+        let base_b = (255.0 + (16.0 - 255.0) * t).round() as u8;
 
         for px in min_x..max_x {
             let p_xf = px as f32 + 0.5;
             let dist = top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top);
             let coverage = (0.5 - dist).clamp(0.0, 1.0);
             if coverage > 0.0 {
-                // Liquid glass body: rich, deep, unified obsidian
+                // 1. Crystal-clear Liquid Glass Substrate
                 buf.blend_pixel(px, py, base_r, base_g, base_b, coverage * base_alpha);
 
-                // Subtle internal refraction bevel along the curved glass perimeter (2px inside rim)
-                if dist > -2.5 && dist <= -0.2 {
-                    let edge_factor = ((-dist) / 2.5).clamp(0.0, 1.0);
-                    let rim_sheen = (1.0 - edge_factor) * 0.05 * opacity;
-                    buf.blend_pixel(px, py, 255, 255, 255, rim_sheen * coverage);
+                // 2. Dual-Stroke Optical Thickness:
+                // a) Outer Stroke (1px): Vertical linear gradient from top (38%) to bottom (5%)
+                if dist > -1.0 && dist <= 0.0 {
+                    let outer_alpha = (0.38 - vert_t * 0.33) * opacity;
+                    buf.blend_pixel(px, py, 255, 255, 255, coverage * outer_alpha);
+                }
+
+                // b) Inner Stroke (1.5px at 1px padding): subtle internal refraction
+                if dist > -2.5 && dist <= -1.0 {
+                    let inner_t = 1.0 - (dist + 1.75).abs() / 0.75;
+                    let inner_alpha = inner_t * (0.08 + (1.0 - t) * 0.03) * opacity;
+                    buf.blend_pixel(px, py, 185, 192, 205, coverage * inner_alpha);
+                }
+
+                // 3. Specular Wet-Look Highlight:
+                // 1.8px arc along top lip (75% pure white, smooth fade towards shoulders)
+                if p_yf <= 2.2 && dist <= 0.0 {
+                    let norm_x = (p_xf - cx).abs() / half_w;
+                    let fade_x = (1.0 - ((norm_x - 0.38) / 0.45).clamp(0.0, 1.0)).powf(1.5);
+                    let vert_sheen = (1.0 - (p_yf / 2.2)).clamp(0.0, 1.0);
+                    let wet_specular = fade_x * vert_sheen * 0.75 * opacity;
+                    buf.blend_pixel(px, py, 255, 255, 255, coverage * wet_specular);
                 }
             }
         }
     }
 }
 
-/// Renders soft ambient shadow for the top notch
+/// Style 1: Pristine Dark Liquid Glass (Moon mode 🌙)
+pub fn draw_top_notch_dark_liquid_glass(
+    buf: &mut PixelBuffer,
+    x: f32,
+    w: f32,
+    h: f32,
+    bottom_radius: f32,
+    opacity: f32,
+) {
+    draw_top_notch_liquid_glass_core(buf, x, w, h, bottom_radius, opacity, 1.0);
+}
+
+/// Style 2: Pristine Light Liquid Glass (Sun mode ☀️)
+pub fn draw_top_notch_frosted_liquid_glass(
+    buf: &mut PixelBuffer,
+    x: f32,
+    w: f32,
+    h: f32,
+    bottom_radius: f32,
+    opacity: f32,
+) {
+    draw_top_notch_liquid_glass_core(buf, x, w, h, bottom_radius, opacity, 0.0);
+}
+
+/// Interpolated Liquid Glass for smooth animated transitions between Light and Dark
+pub fn draw_top_notch_liquid_glass_interpolated(
+    buf: &mut PixelBuffer,
+    x: f32,
+    w: f32,
+    h: f32,
+    bottom_radius: f32,
+    opacity: f32,
+    theme_progress: f32,
+) {
+    draw_top_notch_liquid_glass_core(buf, x, w, h, bottom_radius, opacity, theme_progress);
+}
+
+/// Backwards compatibility wrapper for dark liquid glass
+pub fn draw_top_notch_liquid_glass(
+    buf: &mut PixelBuffer,
+    x: f32,
+    w: f32,
+    h: f32,
+    bottom_radius: f32,
+    opacity: f32,
+) {
+    draw_top_notch_dark_liquid_glass(buf, x, w, h, bottom_radius, opacity);
+}
+
+/// Renders directional soft ambient drop shadow for the top notch
 pub fn draw_top_notch_shadow(
     buf: &mut PixelBuffer,
     x: f32,
@@ -335,6 +416,7 @@ pub fn draw_top_notch_shadow(
     h: f32,
     bottom_radius: f32,
     shadow_blur: f32,
+    shadow_offset_y: f32,
     shadow_opacity: f32,
 ) {
     if shadow_opacity <= 0.001 || shadow_blur <= 0.0 {
@@ -347,13 +429,15 @@ pub fn draw_top_notch_shadow(
     let min_x = (x - r_top - shadow_blur).floor().max(0.0) as usize;
     let max_x = (x + w + r_top + shadow_blur).ceil().min(buf.width as f32) as usize;
     let min_y = 0usize;
-    let max_y = (h + shadow_blur).ceil().min(buf.height as f32) as usize;
+    let max_y = (h + shadow_offset_y + shadow_blur).ceil().min(buf.height as f32) as usize;
 
     for py in min_y..max_y {
         let p_yf = py as f32 + 0.5;
+        let shadow_yf = p_yf - shadow_offset_y;
+
         for px in min_x..max_x {
             let p_xf = px as f32 + 0.5;
-            let dist = top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top);
+            let dist = top_notch_sdf(p_xf, shadow_yf, x, w, h, r_bottom, r_top);
 
             if dist > 0.0 && dist < shadow_blur {
                 let t = dist / shadow_blur;
@@ -398,14 +482,16 @@ pub fn draw_top_notch_stroke(
             let dist = top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top);
             let coverage = (0.5 - (dist.abs() - 0.5)).clamp(0.0, 1.0);
             if coverage > 0.0 {
-                // Adaptive glass rim lighting:
-                // Upper flaring shoulders and bottom rounded corners catch specular reflections
+                // Adaptive 3D glass rim lighting:
+                // Upper shoulders catch direct light -> prominent specular catch-light
+                // Bottom rounded corners catch ambient bounce light
+                // Vertical sides remain clean and subtle
                 let stroke_alpha = if p_yf <= r_top + 2.0 {
-                    color.a * 1.15
+                    color.a * 1.45
                 } else if p_yf >= h - r_bottom {
-                    color.a * 0.85
+                    color.a * 0.88
                 } else {
-                    color.a * 0.55
+                    color.a * 0.50
                 };
 
                 buf.blend_pixel(px, py, color.r, color.g, color.b, coverage * stroke_alpha);

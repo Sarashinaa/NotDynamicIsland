@@ -1,4 +1,4 @@
 pub mod spring;
 
-pub use spring::SpringRect;
+pub use spring::{Spring, SpringRect};
 

@@ -4,15 +4,19 @@
 use crate::physics::SpringRect;
 use crate::render::{
     draw_battery_circle_ring, draw_bell_icon, draw_camera_icon, draw_circle, draw_close_button,
-    draw_eyedropper_icon, draw_headphones_badge, draw_lyrics_button, draw_microphone_icon, draw_monochrome_sound_wave,
-    draw_nav_arrow_button, draw_next_icon, draw_page_indicators, draw_pause_icon, draw_play_icon, draw_prev_icon,
-    draw_progress_bar, draw_refresh_icon, draw_romaji_button, draw_rounded_rect, draw_rounded_rect_stroke, draw_seek_backward_button,
-    draw_seek_forward_button, draw_snip_icon, draw_speaker_icon, draw_sun_icon, draw_timer_icon,
-    draw_todo_checkbox, draw_top_notch, draw_top_notch_liquid_glass, draw_top_notch_shadow, draw_top_notch_stroke,
+    draw_eyedropper_icon, draw_headphones_badge, draw_lyrics_button_ex,
+    draw_microphone_icon, draw_monochrome_sound_wave,
+    draw_nav_arrow_button, draw_nav_arrow_button_ex, draw_next_icon, draw_page_indicators,
+    draw_pause_icon, draw_play_icon, draw_prev_icon,
+    draw_progress_bar, draw_refresh_icon, draw_romaji_button_ex,
+    draw_rounded_rect, draw_rounded_rect_stroke,
+    draw_seek_backward_button_ex, draw_seek_forward_button_ex,
+    draw_snip_icon, draw_speaker_icon, draw_sun_icon, draw_theme_toggle_animated, draw_timer_icon,
+    draw_todo_checkbox, draw_top_notch_liquid_glass_interpolated,
     Color, PixelBuffer, TextRenderer,
 };
 use crate::system::lyrics::SyncedLyrics;
-use crate::ui::state::{ExpandedPage, IslandMode, IslandState, NotificationKind};
+use crate::ui::state::{ExpandedPage, GlassTheme, IslandMode, IslandState, NotificationKind};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClickAction {
@@ -23,6 +27,7 @@ pub enum ClickAction {
     SeekMedia(u32),
     ToggleLyrics,
     ToggleRomaji,
+    ToggleGlassTheme,
     PrevPage,
     NextPage,
     SelectPage(ExpandedPage),
@@ -215,7 +220,6 @@ impl LayoutManager {
         }
     }
 
-pub const USE_DARK_LIQUID_GLASS: bool = true;
 
     /// Renders the complete dynamic island frame into pixel buffer
     pub fn render(
@@ -239,24 +243,16 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             return;
         }
 
-        if Self::USE_DARK_LIQUID_GLASS {
-            // Style 1: Authentic Apple Dark Liquid Glass with dual ambient drop shadow and cut-glass rim
-            draw_top_notch_shadow(buf, cur_x, cur_w, cur_h, cur_r, 26.0, 0.42 * opacity);
-            draw_top_notch_shadow(buf, cur_x, cur_w, cur_h, cur_r, 7.0, 0.32 * opacity);
-
-            draw_top_notch_liquid_glass(buf, cur_x, cur_w, cur_h, cur_r, opacity);
-
-            // Refraction cut-glass rim highlight
-            let rim_color = Color::rgba(255, 255, 255, 0.18 * opacity);
-            draw_top_notch_stroke(buf, cur_x, cur_w, cur_h, cur_r, rim_color);
-        } else {
-            // Style 2: Classic solid #07080c
-            draw_top_notch_shadow(buf, cur_x, cur_w, cur_h, cur_r, 18.0, 0.42 * opacity);
-            let body_color = Color::rgba(7, 8, 12, 0.98 * opacity);
-            draw_top_notch(buf, cur_x, cur_w, cur_h, cur_r, body_color);
-            let rim_color = Color::rgba(255, 255, 255, 0.15 * opacity);
-            draw_top_notch_stroke(buf, cur_x, cur_w, cur_h, cur_r, rim_color);
-        }
+        let theme_progress = state.theme_spring.current.clamp(0.0, 1.0);
+        draw_top_notch_liquid_glass_interpolated(
+            buf,
+            cur_x,
+            cur_w,
+            cur_h,
+            cur_r,
+            opacity,
+            theme_progress,
+        );
 
         // 4. Render component contents based on state
         match &state.mode {
@@ -556,6 +552,29 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
         // Top Header: Battery Ring + Date & Time + Soundwave
         self.render_header_bar(buf, text_renderer, x, w, state, opacity);
 
+        // Sun ☀️ / Moon 🌙 Theme Toggle in top-left vacant area (y: 9.0..27.0, aligned with cy=18.0)
+        let theme_rect = Rect {
+            x: x + 16.0,
+            y: 9.0,
+            w: 38.0,
+            h: 18.0,
+        };
+        let theme_hover = cursor_pos
+            .map(|(px, py)| theme_rect.contains(px, py))
+            .unwrap_or(false);
+        draw_theme_toggle_animated(
+            buf,
+            theme_rect.x,
+            theme_rect.y,
+            theme_rect.w,
+            theme_rect.h,
+            state.theme_spring.current,
+            theme_hover,
+            opacity,
+        );
+        self.click_targets
+            .push((theme_rect, ClickAction::ToggleGlassTheme));
+
         // Middle Row: Album Artwork Tile
         let art_size = 46.0;
         let art_x = x + 16.0;
@@ -584,6 +603,13 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
         let title = &title_buf;
         let artist = &artist_buf;
 
+        let is_light = state.glass_theme == GlassTheme::FrostedLight;
+
+        let title_color = Color::rgba(255, 255, 255, 0.98 * opacity);
+        let artist_color = Color::rgba(156, 163, 175, 0.85 * opacity);
+        let time_text_color = Color::rgba(156, 163, 175, 0.80 * opacity);
+        let icon_primary_color = Color::rgba(255, 255, 255, 0.95 * opacity);
+
         text_renderer.draw_text_truncated(
             buf,
             title,
@@ -591,7 +617,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             art_y + 16.0,
             13.5,
             text_max_w,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
+            title_color,
             true,
         );
         text_renderer.draw_text_truncated(
@@ -601,7 +627,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             art_y + 32.0,
             11.5,
             text_max_w,
-            Color::rgba(156, 163, 175, 0.85 * opacity),
+            artist_color,
             false,
         );
 
@@ -615,7 +641,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             h: 24.0,
         };
         let next_page_hover = cursor_pos.map(|(px, py)| next_page_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, next_page_btn_x, next_page_btn_y, 11.0, true, next_page_hover, opacity);
+        draw_nav_arrow_button_ex(buf, next_page_btn_x, next_page_btn_y, 11.0, true, next_page_hover, opacity, is_light);
         self.click_targets.push((next_page_rect, ClickAction::NextPage));
 
         // Interactive Progress Bar Row
@@ -651,7 +677,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             x + 16.0,
             bar_y + 4.0,
             10.0,
-            Color::rgba(156, 163, 175, 0.8 * opacity),
+            time_text_color,
             false,
         );
 
@@ -671,7 +697,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
         let bar_fill = if is_bar_active {
             Color::rgba(255, 255, 255, 1.0 * opacity)
         } else {
-            Color::rgba(255, 255, 255, 0.88 * opacity)
+            Color::rgba(255, 255, 255, 0.95 * opacity)
         };
 
         // Render progress bar
@@ -690,10 +716,10 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
         if (is_bar_active || is_bar_hovered) && state.media_info.duration_secs > 0 {
             let thumb_x = progress_x + progress_val * progress_w;
             let thumb_y = bar_y;
-            // Outer halo glow
-            draw_circle(buf, thumb_x, thumb_y, 7.5, Color::rgba(255, 255, 255, 0.38 * opacity));
-            // Inner solid white knob
-            draw_circle(buf, thumb_x, thumb_y, 5.5, Color::rgba(255, 255, 255, 1.0 * opacity));
+            let halo_color = Color::rgba(255, 255, 255, 0.38 * opacity);
+            let knob_color = Color::rgba(255, 255, 255, 1.0 * opacity);
+            draw_circle(buf, thumb_x, thumb_y, 7.5, halo_color);
+            draw_circle(buf, thumb_x, thumb_y, 5.5, knob_color);
         }
 
         // Progress bar click & seek target
@@ -711,7 +737,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             x + w - 48.0,
             bar_y + 4.0,
             10.0,
-            Color::rgba(156, 163, 175, 0.8 * opacity),
+            time_text_color,
             false,
         );
 
@@ -726,7 +752,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             h: 24.0,
         };
         let lyrics_hover = cursor_pos.map(|(px, py)| lyrics_rect.contains(px, py)).unwrap_or(false);
-        draw_lyrics_button(buf, x + 28.0, ctrl_y, 18.0, false, lyrics_hover, opacity);
+        draw_lyrics_button_ex(buf, x + 28.0, ctrl_y, 18.0, false, lyrics_hover, opacity, is_light);
         self.click_targets.push((lyrics_rect, ClickAction::ToggleLyrics));
 
         // Center Media Controls: Previous, Play/Pause, Next
@@ -741,9 +767,10 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
         };
         let prev_hover = cursor_pos.map(|(px, py)| prev_rect.contains(px, py)).unwrap_or(false);
         if prev_hover {
-            draw_circle(buf, center_x - 36.0, ctrl_y, 12.0, Color::rgba(255, 255, 255, 0.14));
+            let hover_circle = Color::rgba(255, 255, 255, 0.16 * opacity);
+            draw_circle(buf, center_x - 36.0, ctrl_y, 12.0, hover_circle);
         }
-        draw_prev_icon(buf, center_x - 43.0, ctrl_y - 6.0, 13.0, Color::rgba(255, 255, 255, 0.95 * opacity));
+        draw_prev_icon(buf, center_x - 43.0, ctrl_y - 6.0, 13.0, icon_primary_color);
         self.click_targets.push((prev_rect, ClickAction::SkipPrev));
 
         // Play/Pause Button
@@ -761,9 +788,9 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
         };
         draw_circle(buf, center_x, ctrl_y, 14.0, play_bg);
         if state.media_info.is_playing {
-            draw_pause_icon(buf, center_x - 5.0, ctrl_y - 6.0, 12.0, Color::rgba(255, 255, 255, 0.98 * opacity));
+            draw_pause_icon(buf, center_x - 5.0, ctrl_y - 6.0, 12.0, icon_primary_color);
         } else {
-            draw_play_icon(buf, center_x - 4.5, ctrl_y - 6.0, 12.0, Color::rgba(255, 255, 255, 0.98 * opacity));
+            draw_play_icon(buf, center_x - 4.5, ctrl_y - 6.0, 12.0, icon_primary_color);
         }
         self.click_targets.push((play_rect, ClickAction::TogglePlayPause));
 
@@ -776,9 +803,10 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
         };
         let next_hover = cursor_pos.map(|(px, py)| next_rect.contains(px, py)).unwrap_or(false);
         if next_hover {
-            draw_circle(buf, center_x + 36.0, ctrl_y, 12.0, Color::rgba(255, 255, 255, 0.14));
+            let hover_circle = Color::rgba(255, 255, 255, 0.16 * opacity);
+            draw_circle(buf, center_x + 36.0, ctrl_y, 12.0, hover_circle);
         }
-        draw_next_icon(buf, center_x + 29.0, ctrl_y - 6.0, 13.0, Color::rgba(255, 255, 255, 0.95 * opacity));
+        draw_next_icon(buf, center_x + 29.0, ctrl_y - 6.0, 13.0, icon_primary_color);
         self.click_targets.push((next_rect, ClickAction::SkipNext));
 
         // Seek Backward 5s Button (↺ 5) on right side (opposite to video button)
@@ -789,7 +817,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             h: 24.0,
         };
         let seek_back_hover = cursor_pos.map(|(px, py)| seek_back_rect.contains(px, py)).unwrap_or(false);
-        draw_seek_backward_button(buf, text_renderer, x + w - 56.0, ctrl_y, 18.0, seek_back_hover, opacity);
+        draw_seek_backward_button_ex(buf, text_renderer, x + w - 56.0, ctrl_y, 18.0, seek_back_hover, opacity, is_light);
         self.click_targets.push((seek_back_rect, ClickAction::SeekRelative(-5)));
 
         // Seek Forward 5s Button (↻ 5) on rightmost edge (opposite to lyrics button)
@@ -800,7 +828,7 @@ pub const USE_DARK_LIQUID_GLASS: bool = true;
             h: 24.0,
         };
         let seek_fwd_hover = cursor_pos.map(|(px, py)| seek_fwd_rect.contains(px, py)).unwrap_or(false);
-        draw_seek_forward_button(buf, text_renderer, x + w - 28.0, ctrl_y, 18.0, seek_fwd_hover, opacity);
+        draw_seek_forward_button_ex(buf, text_renderer, x + w - 28.0, ctrl_y, 18.0, seek_fwd_hover, opacity, is_light);
         self.click_targets.push((seek_fwd_rect, ClickAction::SeekRelative(5)));
 
         // Bottom Page Indicator Dots (— • • • • •) positioned safely at cy = 138.0 with plenty of breathing room!
@@ -959,6 +987,13 @@ fn wrap_lyric_line<'a>(
         let title = &title_buf;
         let artist = &artist_buf;
 
+        let is_light = matches!(state.glass_theme, GlassTheme::FrostedLight);
+        let (title_col, artist_col, time_col) = (
+            Color::rgba(255, 255, 255, 0.98 * opacity),
+            Color::rgba(156, 163, 175, 0.85 * opacity),
+            Color::rgba(156, 163, 175, 0.80 * opacity),
+        );
+
         text_renderer.draw_text_truncated(
             buf,
             title,
@@ -966,7 +1001,7 @@ fn wrap_lyric_line<'a>(
             art_y + 16.0,
             13.0,
             text_max_w,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
+            title_col,
             true,
         );
         text_renderer.draw_text_truncated(
@@ -976,7 +1011,7 @@ fn wrap_lyric_line<'a>(
             art_y + 30.0,
             11.0,
             text_max_w,
-            Color::rgba(156, 163, 175, 0.85 * opacity),
+            artist_col,
             false,
         );
 
@@ -1007,7 +1042,7 @@ fn wrap_lyric_line<'a>(
             "-00:00".to_string()
         };
 
-        text_renderer.draw_text(buf, &cur_time_str, x + 14.0, bar_y + 4.0, 9.5, Color::rgba(156, 163, 175, 0.8 * opacity), false);
+        text_renderer.draw_text(buf, &cur_time_str, x + 14.0, bar_y + 4.0, 9.5, time_col, false);
 
         let p_val = if state.media_info.duration_secs > 0 {
             (effective_secs as f32 / state.media_info.duration_secs as f32).clamp(0.0, 1.0)
@@ -1016,15 +1051,18 @@ fn wrap_lyric_line<'a>(
         };
 
         let bar_h = if is_bar_active { 5.5 } else { 3.5 };
-        let bar_bg = if is_bar_active {
-            Color::rgba(255, 255, 255, 0.28 * opacity)
-        } else {
-            Color::rgba(255, 255, 255, 0.16 * opacity)
-        };
-        let bar_fill = if is_bar_active {
-            Color::rgba(255, 255, 255, 1.0 * opacity)
-        } else {
-            Color::rgba(255, 255, 255, 0.95 * opacity)
+        let (bar_bg, bar_fill) = {
+            let bg = if is_bar_active {
+                Color::rgba(255, 255, 255, 0.28 * opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.16 * opacity)
+            };
+            let fill = if is_bar_active {
+                Color::rgba(255, 255, 255, 1.0 * opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.95 * opacity)
+            };
+            (bg, fill)
         };
 
         draw_progress_bar(buf, p_x, bar_y - (bar_h * 0.5), p_w, bar_h, p_val, bar_bg, bar_fill);
@@ -1044,7 +1082,7 @@ fn wrap_lyric_line<'a>(
             }
         }
 
-        text_renderer.draw_text(buf, &rem_time_str, p_x + p_w + 6.0, bar_y + 4.0, 9.5, Color::rgba(156, 163, 175, 0.8 * opacity), false);
+        text_renderer.draw_text(buf, &rem_time_str, p_x + p_w + 6.0, bar_y + 4.0, 9.5, time_col, false);
 
         // Controls Row
         let ctrl_y = 112.0;
@@ -1052,7 +1090,7 @@ fn wrap_lyric_line<'a>(
         // Lyrics Button
         let lyr_rect = Rect { x: x + 12.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
         let lyr_hover = cursor_pos.map(|(px, py)| lyr_rect.contains(px, py)).unwrap_or(false);
-        draw_lyrics_button(buf, x + 24.0, ctrl_y, 18.0, true, lyr_hover, opacity);
+        draw_lyrics_button_ex(buf, x + 24.0, ctrl_y, 18.0, true, lyr_hover, opacity, is_light);
         self.click_targets.push((lyr_rect, ClickAction::ToggleLyrics));
 
         // Romaji Toggle Button (appears when Japanese or Korean lyrics are present)
@@ -1060,26 +1098,29 @@ fn wrap_lyric_line<'a>(
             let ro_cx = x + 50.0;
             let ro_rect = Rect { x: ro_cx - 12.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
             let ro_hover = cursor_pos.map(|(px, py)| ro_rect.contains(px, py)).unwrap_or(false);
-            draw_romaji_button(buf, text_renderer, ro_cx, ctrl_y, 18.0, state.show_romaji, ro_hover, opacity);
+            draw_romaji_button_ex(buf, text_renderer, ro_cx, ctrl_y, 18.0, state.show_romaji, ro_hover, opacity, is_light);
             self.click_targets.push((ro_rect, ClickAction::ToggleRomaji));
         }
 
         // Playback Controls Cluster centered around pb_center = x + 150.0
         let pb_center = x + 150.0;
+        let ctrl_icon_col = Color::rgba(255, 255, 255, 0.92 * opacity);
+        let play_icon_col = Color::rgba(255, 255, 255, 0.98 * opacity);
+        let hover_bg = Color::rgba(255, 255, 255, 0.14 * opacity);
 
         // Seek Backward (-5s)
         let seek_back_rect = Rect { x: pb_center - 68.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
         let seek_back_hover = cursor_pos.map(|(px, py)| seek_back_rect.contains(px, py)).unwrap_or(false);
-        draw_seek_backward_button(buf, text_renderer, pb_center - 56.0, ctrl_y, 18.0, seek_back_hover, opacity);
+        draw_seek_backward_button_ex(buf, text_renderer, pb_center - 56.0, ctrl_y, 18.0, seek_back_hover, opacity, is_light);
         self.click_targets.push((seek_back_rect, ClickAction::SeekRelative(-5)));
 
         // Prev Track
         let prev_rect = Rect { x: pb_center - 40.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_rect.contains(px, py)).unwrap_or(false);
         if prev_hover {
-            draw_circle(buf, pb_center - 28.0, ctrl_y, 11.0, Color::rgba(255, 255, 255, 0.14));
+            draw_circle(buf, pb_center - 28.0, ctrl_y, 11.0, hover_bg);
         }
-        draw_prev_icon(buf, pb_center - 34.0, ctrl_y - 5.0, 11.0, Color::rgba(255, 255, 255, 0.9 * opacity));
+        draw_prev_icon(buf, pb_center - 34.0, ctrl_y - 5.0, 11.0, ctrl_icon_col);
         self.click_targets.push((prev_rect, ClickAction::SkipPrev));
 
         // Play/Pause
@@ -1092,9 +1133,9 @@ fn wrap_lyric_line<'a>(
         };
         draw_circle(buf, pb_center, ctrl_y, 13.0, play_bg);
         if state.media_info.is_playing {
-            draw_pause_icon(buf, pb_center - 5.0, ctrl_y - 5.0, 11.0, Color::rgba(255, 255, 255, 0.98 * opacity));
+            draw_pause_icon(buf, pb_center - 5.0, ctrl_y - 5.0, 11.0, play_icon_col);
         } else {
-            draw_play_icon(buf, pb_center - 4.5, ctrl_y - 5.0, 11.0, Color::rgba(255, 255, 255, 0.98 * opacity));
+            draw_play_icon(buf, pb_center - 4.5, ctrl_y - 5.0, 11.0, play_icon_col);
         }
         self.click_targets.push((play_rect, ClickAction::TogglePlayPause));
 
@@ -1102,20 +1143,25 @@ fn wrap_lyric_line<'a>(
         let next_rect = Rect { x: pb_center + 16.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_rect.contains(px, py)).unwrap_or(false);
         if next_hover {
-            draw_circle(buf, pb_center + 28.0, ctrl_y, 11.0, Color::rgba(255, 255, 255, 0.14));
+            draw_circle(buf, pb_center + 28.0, ctrl_y, 11.0, hover_bg);
         }
-        draw_next_icon(buf, pb_center + 23.0, ctrl_y - 5.0, 11.0, Color::rgba(255, 255, 255, 0.9 * opacity));
+        draw_next_icon(buf, pb_center + 23.0, ctrl_y - 5.0, 11.0, ctrl_icon_col);
         self.click_targets.push((next_rect, ClickAction::SkipNext));
 
         // Seek Forward (+5s)
         let seek_fwd_rect = Rect { x: pb_center + 44.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
         let seek_fwd_hover = cursor_pos.map(|(px, py)| seek_fwd_rect.contains(px, py)).unwrap_or(false);
-        draw_seek_forward_button(buf, text_renderer, pb_center + 56.0, ctrl_y, 18.0, seek_fwd_hover, opacity);
+        draw_seek_forward_button_ex(buf, text_renderer, pb_center + 56.0, ctrl_y, 18.0, seek_fwd_hover, opacity, is_light);
         self.click_targets.push((seek_fwd_rect, ClickAction::SeekRelative(5)));
 
         // Right Column: Synced Lyrics Display (clean borderless transition, zero divider line)
         let lyrics_x = x + left_w + 20.0;
         let lyrics_max_w = w - left_w - 36.0;
+
+        let (no_lyr_head, no_lyr_sub) = (
+            Color::rgba(255, 255, 255, 0.95 * opacity),
+            Color::rgba(148, 163, 184, 0.70 * opacity),
+        );
 
         if !has_track || lyrics.lines.is_empty() {
             // Clean fallback state when no track is playing or lyrics not found
@@ -1126,7 +1172,7 @@ fn wrap_lyric_line<'a>(
                 70.0,
                 14.0,
                 lyrics_max_w,
-                Color::rgba(255, 255, 255, 0.95 * opacity),
+                no_lyr_head,
                 true,
             );
             text_renderer.draw_text_truncated(
@@ -1136,7 +1182,7 @@ fn wrap_lyric_line<'a>(
                 94.0,
                 11.0,
                 lyrics_max_w,
-                Color::rgba(148, 163, 184, 0.7 * opacity),
+                no_lyr_sub,
                 false,
             );
             return;
@@ -2751,6 +2797,8 @@ fn wrap_lyric_line<'a>(
         let bat_cx = x + w * 0.5 - 72.0;
         draw_battery_circle_ring(buf, bat_cx, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity);
 
+        let header_time_color = Color::rgba(255, 255, 255, 0.95 * opacity);
+
         let header_time = get_formatted_header_time();
         text_renderer.draw_text(
             buf,
@@ -2758,7 +2806,7 @@ fn wrap_lyric_line<'a>(
             bat_cx + 14.0,
             cy + 4.0,
             11.5,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            header_time_color,
             true,
         );
 
@@ -3052,11 +3100,13 @@ mod tests {
                     let g = (((p >> 8) & 0xFF) as f32).min(255.0);
                     let b = ((p & 0xFF) as f32).min(255.0);
 
-                    // Composite over dark-gray background so transparent regions look clear
-                    let bg = 45.0f32;
-                    let out_r = (r + bg * (1.0 - a)).clamp(0.0, 255.0) as u8;
-                    let out_g = (g + bg * (1.0 - a)).clamp(0.0, 255.0) as u8;
-                    let out_b = (b + bg * (1.0 - a)).clamp(0.0, 255.0) as u8;
+                    // Composite over wallpaper background (slate dark atmosphere) so transparent glass is seen realistically
+                    let bg_r = 36.0 + (py as f32 / h as f32) * 14.0;
+                    let bg_g = 42.0 + (py as f32 / h as f32) * 16.0;
+                    let bg_b = 48.0 + (py as f32 / h as f32) * 20.0;
+                    let out_r = (r + bg_r * (1.0 - a)).clamp(0.0, 255.0) as u8;
+                    let out_g = (g + bg_g * (1.0 - a)).clamp(0.0, 255.0) as u8;
+                    let out_b = (b + bg_b * (1.0 - a)).clamp(0.0, 255.0) as u8;
 
                     row[px * 3] = out_b;
                     row[px * 3 + 1] = out_g;
@@ -3068,7 +3118,7 @@ mod tests {
 
         let mut lm = LayoutManager::new();
         let tr = TextRenderer::new();
-        let scratch_dir = r"C:\Users\localAccount\.gemini\antigravity\brain\bfa7860f-bfe6-4d7e-a360-648c1094a9b7\scratch";
+        let scratch_dir = r"C:\Users\localAccount\.gemini\antigravity\brain\f483ed7d-707b-4895-ac6e-27d84a8fd9f2\scratch";
 
         // 1. Closed Mode (Resting notch with inverted corners)
         {
@@ -3092,6 +3142,8 @@ mod tests {
         {
             let mut buf = PixelBuffer::new(820, 200);
             let mut state = IslandState::new();
+            state.glass_theme = GlassTheme::DarkObsidian;
+            state.theme_spring.snap_to(1.0);
             state.mode = IslandMode::Expanded(ExpandedPage::Music);
             state.media_info.title = "NMIXX - DASH".to_string();
             state.media_info.artist = "NMIXX".to_string();
@@ -3111,6 +3163,52 @@ mod tests {
             let lyrics = SyncedLyrics::default();
             lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
             save_bmp(&buf, &format!(r"{}\render_music.bmp", scratch_dir));
+        }
+
+        // 1c. Music Mode (Frosted Light Glass)
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.glass_theme = GlassTheme::FrostedLight;
+            state.theme_spring.snap_to(0.0);
+            state.mode = IslandMode::Expanded(ExpandedPage::Music);
+            state.media_info.title = "NMIXX - DASH".to_string();
+            state.media_info.artist = "NMIXX".to_string();
+            state.media_info.duration_secs = 180;
+            state.media_info.position_secs = 45;
+            state.media_info.is_playing = true;
+            state.media_info.has_media = true;
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            let lyrics = SyncedLyrics::default();
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            save_bmp(&buf, &format!(r"{}\render_music_frosted.bmp", scratch_dir));
+        }
+
+        // 1d. Closed Mode (Frosted Light Glass)
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.glass_theme = GlassTheme::FrostedLight;
+            state.theme_spring.snap_to(0.0);
+            state.mode = IslandMode::Closed;
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            let lyrics = SyncedLyrics::default();
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            save_bmp(&buf, &format!(r"{}\render_closed_frosted.bmp", scratch_dir));
         }
 
         // 2. Lyrics Mode (No divider line, seek buttons)
@@ -3143,6 +3241,40 @@ mod tests {
             springs.opacity.current = 1.0;
             lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
             save_bmp(&buf, &format!(r"{}\render_lyrics.bmp", scratch_dir));
+        }
+
+        // 2b. Lyrics Mode (Frosted Light)
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.glass_theme = GlassTheme::FrostedLight;
+            state.theme_spring.snap_to(0.0);
+            state.mode = IslandMode::Lyrics;
+            state.media_info.title = "NMIXX - DASH".to_string();
+            state.media_info.artist = "NMIXX".to_string();
+            state.media_info.duration_secs = 180;
+            state.media_info.position_secs = 45;
+            state.media_info.is_playing = true;
+            state.media_info.has_media = true;
+            let mut lyrics = SyncedLyrics::default();
+            lyrics.lines = vec![
+                (35.0, "Inside someone like you now".to_string()),
+                (45.0, "But had I known or I'd been shown back when how long It'd take me".to_string()),
+                (55.0, "To break the charms that brought me harm that all but would erase me".to_string()),
+                (65.0, "I never would no thought I could".to_string()),
+            ];
+            let layouts = LayoutManager::compute_lyric_layouts(&tr, &lyrics, 304.0, state.show_romaji);
+            state.lyrics_scroll_y = LayoutManager::get_lyric_target_y(&layouts, 1);
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            save_bmp(&buf, &format!(r"{}\render_lyrics_frosted.bmp", scratch_dir));
         }
 
         // 3. To-Do Mode with active input & long text
@@ -3454,6 +3586,37 @@ mod tests {
             // Verify next button is on the far right edge of the island
             let next_target = lm_todo.click_targets.iter().find(|(_, a)| *a == ClickAction::NextPage).unwrap();
             assert!(next_target.0.x >= tx + tw - 40.0);
+        }
+
+        // 15. Sun/Moon Glass Theme Toggle & No Outside Blur Bands
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.glass_theme = GlassTheme::DarkObsidian;
+            state.mode = IslandMode::Expanded(ExpandedPage::Music);
+            let (tx, _ty, tw, th, _tr_val) = lm.compute_target_geometry(820.0, &state);
+
+            let mut lm_music = LayoutManager::new();
+            lm_music.render_music(&mut buf, &tr, tx, tw, th, &state, 1.0, None);
+
+            // ToggleGlassTheme target must be registered at the top-left
+            let theme_target = lm_music
+                .click_targets
+                .iter()
+                .find(|(_, a)| *a == ClickAction::ToggleGlassTheme);
+            assert!(theme_target.is_some(), "Music mode must register ToggleGlassTheme");
+            let (rect, _) = theme_target.unwrap();
+            assert_eq!(rect.x, tx + 16.0);
+            assert_eq!(rect.y, 9.0);
+            assert_eq!(rect.w, 38.0);
+            assert_eq!(rect.h, 18.0);
+
+            // Verify toggling state works
+            let orig_theme = state.glass_theme;
+            state.toggle_glass_theme();
+            assert_ne!(state.glass_theme, orig_theme);
+            state.toggle_glass_theme();
+            assert_eq!(state.glass_theme, orig_theme);
         }
     }
 }

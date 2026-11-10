@@ -426,6 +426,10 @@ pub unsafe extern "system" fn window_proc(
                             app.island_state.show_romaji = !app.island_state.show_romaji;
                             wake_animation(hwnd, app);
                         }
+                        Some(ClickAction::ToggleGlassTheme) => {
+                            app.island_state.toggle_glass_theme();
+                            wake_animation(hwnd, app);
+                        }
                         Some(ClickAction::SeekRelative(delta)) => {
                             let cur_pos = app.island_state.media_info.position_secs;
                             let dur = app.island_state.media_info.duration_secs;
@@ -1400,6 +1404,7 @@ pub unsafe extern "system" fn window_proc(
 
                         // Advance spring simulation
                         let is_spring_moving = app.springs.update(dt);
+                        let is_theme_moving = app.island_state.theme_spring.update(dt);
 
                         // Get cursor position for hover states
                         let mut cursor_pt = POINT::default();
@@ -1456,6 +1461,7 @@ pub unsafe extern "system" fn window_proc(
 
                         // Is animation actively needed?
                         let is_busy = is_spring_moving
+                            || is_theme_moving
                             || app.island_state.is_hovered
                             || app.island_state.is_dragging_slider
                             || app.island_state.pending_shelf_drag.is_some()

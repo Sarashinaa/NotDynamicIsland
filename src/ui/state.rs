@@ -2,6 +2,7 @@
 //! Implements exact designs from follow_this_design (Resting, Closed, Music, Lyrics, Shelf, To-do, Notifications)
 
 use std::time::Instant;
+use crate::physics::Spring;
 use crate::system::calendar::CalendarManager;
 use crate::system::media::MediaTrackInfo;
 use crate::system::network::NetworkSpeed;
@@ -91,6 +92,12 @@ impl ActiveCallInfo {
     }
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum GlassTheme {
+    DarkObsidian, // Moon 🌙: Apple Dark Liquid Glass
+    FrostedLight, // Sun ☀️: Apple Light Frosted Glass
+}
+
 pub struct IslandState {
     pub mode: IslandMode,
     pub previous_mode: IslandMode,
@@ -126,6 +133,8 @@ pub struct IslandState {
     pub network_speed: NetworkSpeed,
     pub is_color_picker_active: bool,
     pub show_romaji: bool,
+    pub glass_theme: GlassTheme,
+    pub theme_spring: Spring,
     #[allow(dead_code)]
     pub recording_start_time: Option<Instant>,
 }
@@ -133,6 +142,12 @@ pub struct IslandState {
 impl IslandState {
     pub fn new() -> Self {
         let (bat, chg) = query_battery_status();
+        let saved_theme = Self::load_saved_glass_theme();
+        let initial_theme_val = match saved_theme {
+            GlassTheme::DarkObsidian => 1.0,
+            GlassTheme::FrostedLight => 0.0,
+        };
+        let theme_spring = Spring::new(initial_theme_val, 280.0, 24.0, 1.0);
         Self {
             mode: IslandMode::Resting,
             previous_mode: IslandMode::Resting,
@@ -167,9 +182,48 @@ impl IslandState {
             network_speed: NetworkSpeed::default(),
             is_color_picker_active: false,
             show_romaji: true,
+            glass_theme: saved_theme,
+            theme_spring,
             recording_start_time: None,
             active_call: ActiveCallInfo::default(),
         }
+    }
+
+    fn get_theme_path() -> std::path::PathBuf {
+        let app_data = std::env::var("APPDATA").unwrap_or_default();
+        if !app_data.is_empty() {
+            let p = std::path::PathBuf::from(app_data).join("NotDynamicIsland");
+            let _ = std::fs::create_dir_all(&p);
+            p.join("glass_theme.txt")
+        } else {
+            std::path::PathBuf::from("glass_theme.txt")
+        }
+    }
+
+    fn load_saved_glass_theme() -> GlassTheme {
+        if let Ok(content) = std::fs::read_to_string(Self::get_theme_path()) {
+            if content.trim().eq_ignore_ascii_case("frosted") {
+                return GlassTheme::FrostedLight;
+            }
+        }
+        GlassTheme::DarkObsidian
+    }
+
+    pub fn toggle_glass_theme(&mut self) {
+        self.glass_theme = match self.glass_theme {
+            GlassTheme::DarkObsidian => GlassTheme::FrostedLight,
+            GlassTheme::FrostedLight => GlassTheme::DarkObsidian,
+        };
+        let target = match self.glass_theme {
+            GlassTheme::DarkObsidian => 1.0,
+            GlassTheme::FrostedLight => 0.0,
+        };
+        self.theme_spring.set_target(target);
+        let val = match self.glass_theme {
+            GlassTheme::DarkObsidian => "dark",
+            GlassTheme::FrostedLight => "frosted",
+        };
+        let _ = std::fs::write(Self::get_theme_path(), val);
     }
 
     pub fn set_call_active(&mut self, active: bool, is_video: bool, app_name: String) {
