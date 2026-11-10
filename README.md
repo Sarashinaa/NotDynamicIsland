@@ -108,7 +108,7 @@ Designed from the ground up for power users who refuse to sacrifice system resou
 
 | Action | Interaction |
 | :--- | :--- |
-| **Expand / Collapse Island** | Left-click anywhere on the notch |
+| **Expand / Collapse Island** | Hover anywhere on the notch |
 | **Toggle Light / Dark Glass** | Click the kinetic Sun / Moon switch at the top-left of the Music player |
 | **Cycle Functional Pages** | Click `<` / `>` arrow buttons, bottom dots, or swipe / mouse-wheel horizontally |
 | **Open Synced Lyrics** | Click the speech bubble icon `💬` on the music card |
