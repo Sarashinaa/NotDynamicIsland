@@ -39,23 +39,9 @@ The result is a desktop companion that feels organic, responds instantaneously, 
 
 <div id="showcase" align="center">
 
-## ✦ Video Showcase
+## ✦ Preview & Showcase
 
-<!--
-  HOW TO ADD YOUR DEMO VIDEO:
-  1. Go to your repo on GitHub: https://github.com/Sarashinaa/NotDynamicIsland
-  2. Edit README.md (or open a GitHub Issue / Release comment box).
-  3. Drag and drop your .mp4 or .webm recording directly into the text editor.
-  4. GitHub will upload it and generate a URL like:
-     https://github.com/user-attachments/assets/xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
-  5. Replace the URL in the <video> tag below:
--->
-
-<video src="https://github.com/user-attachments/assets/YOUR_VIDEO_URL_HERE.mp4" width="100%" controls autoplay loop muted playsinline style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);">
-  <p>Your browser does not support HTML5 video. Please download the video directly from the Releases page.</p>
-</video>
-
-<sub>*Tip: Drag and drop your `.mp4` into GitHub's editor to generate an instant asset link and paste it above.*</sub>
+<img src="assets/showcase.gif" width="100%" alt="NotDynamicIsland Feature Showcase" style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);" />
 
 </div>
 
