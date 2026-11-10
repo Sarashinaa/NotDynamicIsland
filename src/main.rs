@@ -50,8 +50,8 @@ use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW,
     FindWindowW, GetCursorPos, GetMessageW, KillTimer, PostQuitMessage, SetForegroundWindow,
-    SetTimer, TrackPopupMenu, TranslateMessage, HTCLIENT, HTTRANSPARENT, MF_SEPARATOR, MF_STRING,
-    MSG, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CHAR, WM_DESTROY, WM_DROPFILES,
+    SetTimer, TrackPopupMenu, TranslateMessage, HTCLIENT, HTTRANSPARENT, MF_POPUP, MF_SEPARATOR, MF_STRING,
+    MSG, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CHAR, WM_DESTROY, WM_DROPFILES,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_POWERBROADCAST, WM_RBUTTONUP,
     WM_TIMER,
 };
@@ -111,6 +111,36 @@ fn wake_animation(hwnd: HWND, app: &mut App) {
         app.last_tick = Instant::now();
         unsafe {
             let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 16, None);
+        }
+    }
+}
+
+fn enable_dark_popup_menus(hwnd: HWND) {
+    unsafe {
+        use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+        use windows::core::{w, PCSTR};
+
+        if let Ok(h_uxtheme) = LoadLibraryW(w!("uxtheme.dll")) {
+            // Ordinal 135: SetPreferredAppMode (2 = ForceDark)
+            if let Some(set_fn) = GetProcAddress(h_uxtheme, PCSTR(135 as _)) {
+                type FnSetPreferredAppMode = unsafe extern "system" fn(i32) -> i32;
+                let set_mode: FnSetPreferredAppMode = std::mem::transmute(set_fn);
+                set_mode(2);
+            }
+
+            // Ordinal 133: AllowDarkModeForWindow(hwnd, true)
+            if let Some(allow_fn) = GetProcAddress(h_uxtheme, PCSTR(133 as _)) {
+                type FnAllowDarkMode = unsafe extern "system" fn(HWND, windows::Win32::Foundation::BOOL) -> windows::Win32::Foundation::BOOL;
+                let allow_mode: FnAllowDarkMode = std::mem::transmute(allow_fn);
+                let _ = allow_mode(hwnd, true.into());
+            }
+
+            // Ordinal 136: FlushMenuThemes
+            if let Some(flush_fn) = GetProcAddress(h_uxtheme, PCSTR(136 as _)) {
+                type FnFlush = unsafe extern "system" fn();
+                let flush: FnFlush = std::mem::transmute(flush_fn);
+                flush();
+            }
         }
     }
 }
@@ -640,41 +670,64 @@ pub unsafe extern "system" fn window_proc(
                 }
             }
 
-            // Right-click context menu: quick switch to any page, test notifications, and exit
+            // Right-click context menu (Modern Fluent Dark Mode)
             let mut pt = POINT::default();
             unsafe {
                 if GetCursorPos(&mut pt).is_ok() {
                     if let Ok(hmenu) = CreatePopupMenu() {
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1001, windows::core::w!("🎵  Music Controller"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1002, windows::core::w!("📁  File Shelf (Up to 5 files)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1003, windows::core::w!("✅  TodoList"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1028, windows::core::w!("📅  Calendar & Agenda"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1015, windows::core::w!("⏱️  Focus Timer & Stopwatch"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1022, windows::core::w!("🛠️  Tools & Control Center"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1004, windows::core::w!("💬  Toggle Synced Lyrics"));
+                        let is_expanded = if let Ok(lock) = APP.lock() {
+                            lock.as_ref()
+                                .map(|a| matches!(a.island_state.mode, IslandMode::Expanded(_) | IslandMode::Lyrics))
+                                .unwrap_or(false)
+                        } else {
+                            false
+                        };
+
+                        let expand_label = if is_expanded {
+                            windows::core::w!("🏝️  Collapse to Notch")
+                        } else {
+                            windows::core::w!("🏝️  Expand Dynamic Island")
+                        };
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1000, expand_label);
+
+                        // Submenu: Switch Page
+                        if let Ok(h_pages) = CreatePopupMenu() {
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1001, windows::core::w!("🎵  Music Player"));
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1002, windows::core::w!("📁  File Shelf"));
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1003, windows::core::w!("📋  To-Do List"));
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1028, windows::core::w!("📅  Calendar & Agenda"));
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1015, windows::core::w!("⏱️  Focus Timer"));
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1022, windows::core::w!("🛠️  Quick Tools"));
+                            let _ = AppendMenuW(h_pages, MF_SEPARATOR, 0, None);
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1004, windows::core::w!("💬  Toggle Synced Lyrics"));
+                            let _ = AppendMenuW(hmenu, MF_POPUP, h_pages.0 as usize, windows::core::w!("📄  Switch Page"));
+                        }
+
+                        // Submenu: Quick Utilities
+                        if let Ok(h_tools) = CreatePopupMenu() {
+                            let _ = AppendMenuW(h_tools, MF_STRING, 1017, windows::core::w!("✂️  Screen Snip (Snipping Tool)"));
+                            let _ = AppendMenuW(h_tools, MF_STRING, 1016, windows::core::w!("🎯  Pick Screen Color (Eyedropper)"));
+                            let _ = AppendMenuW(h_tools, MF_STRING, 1018, windows::core::w!("🎙️  Toggle Microphone Mute"));
+                            let _ = AppendMenuW(hmenu, MF_POPUP, h_tools.0 as usize, windows::core::w!("⚡  Quick Tools"));
+                        }
+
+                        // Theme Switcher
+                        let is_dark = if let Ok(lock) = APP.lock() {
+                            lock.as_ref()
+                                .map(|a| a.island_state.glass_theme == ui::GlassTheme::DarkObsidian)
+                                .unwrap_or(true)
+                        } else {
+                            true
+                        };
+                        let theme_label = if is_dark {
+                            windows::core::w!("☀️  Switch to Light Glass")
+                        } else {
+                            windows::core::w!("🌙  Switch to Dark Obsidian")
+                        };
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1030, theme_label);
+
                         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1016, windows::core::w!("🎯  Pick Screen Color (Eyedropper)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1017, windows::core::w!("✂️  Screen Snip (Snipping Tool)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1018, windows::core::w!("🎙️  Toggle Microphone Mute"));
-                        let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1019, windows::core::w!("🟢  Test Camera In-Use Privacy Alert"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1020, windows::core::w!("🟠  Test Microphone In-Use Privacy Alert"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1026, windows::core::w!("📞  Test Instagram Voice Call (Instagram - 02:22)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1027, windows::core::w!("📹  Test Instagram Video Call (Instagram - 01:15)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1023, windows::core::w!("📞  Test Active Voice Call (WhatsApp - 03:25)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1024, windows::core::w!("📹  Test Active Video Call (Discord - 01:45)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1025, windows::core::w!("⏹️  End Call HUD Simulation"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1021, windows::core::w!("🔔  Test Focus Session Completed"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1005, windows::core::w!("⚡  Test Charging Notification"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1009, windows::core::w!("🔌  Test Charger Disconnected"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1010, windows::core::w!("☀️  Test Brightness Notification"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1011, windows::core::w!("🔔  Test WhatsApp Banner"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1012, windows::core::w!("🔋  Toggle Energy Saver (#EAA300)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1006, windows::core::w!("🎧  Test Bluetooth Headphones Connected (AirBuds 85%)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1013, windows::core::w!("🎧  Test Wired Headset Connected (3.5mm Jack)"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1014, windows::core::w!("🔌  Test Headphones Disconnected"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1007, windows::core::w!("🔊  Test Volume Notification"));
-                        let _ = AppendMenuW(hmenu, MF_STRING, 1008, windows::core::w!("🔠  Test Caps Lock Notification"));
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1031, windows::core::w!("🌐  GitHub Repository"));
                         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
                         let _ = AppendMenuW(hmenu, MF_STRING, 1099, windows::core::w!("❌  Exit NotDynamicIsland"));
 
@@ -696,30 +749,20 @@ pub unsafe extern "system" fn window_proc(
                             if let Ok(mut lock) = APP.lock() {
                                 if let Some(app) = lock.as_mut() {
                                     match cmd.0 {
+                                        1000 => {
+                                            if matches!(app.island_state.mode, IslandMode::Expanded(_) | IslandMode::Lyrics) {
+                                                app.island_state.mode = IslandMode::Closed;
+                                            } else {
+                                                app.island_state.mode = IslandMode::Expanded(app.island_state.active_page);
+                                            }
+                                        }
                                         1001 => app.island_state.select_page(ExpandedPage::Music),
                                         1002 => app.island_state.select_page(ExpandedPage::Shelf),
                                         1003 => app.island_state.select_page(ExpandedPage::ToDo),
                                         1028 => app.island_state.select_page(ExpandedPage::Calendar),
-                                        1004 => app.island_state.toggle_lyrics(),
-                                        1005 => app.island_state.set_charging(true, 70),
-                                        1006 => app.island_state.set_headphones("AirBuds Pro".to_string(), 85, true),
-                                        1013 => app.island_state.set_headphones("Wired Headphones".to_string(), 0, true),
-                                        1014 => app.island_state.set_headphones("AirBuds Pro".to_string(), 0, false),
-                                        1007 => app.island_state.set_volume(75, false),
-                                        1008 => app.island_state.set_caps_lock(true),
-                                        1009 => app.island_state.set_charging(false, 68),
-                                        1010 => app.island_state.set_brightness(75),
-                                        1011 => app.island_state.show_banner(
-                                            "WhatsApp".to_string(),
-                                            "Budi Santoso".to_string(),
-                                            "Halo! File dokumen kemarin sudah saya kirim ya".to_string(),
-                                        ),
-                                        1012 => {
-                                            let current = app.island_state.is_energy_saver;
-                                            app.island_state.is_energy_saver = !current;
-                                        }
                                         1015 => app.island_state.select_page(ExpandedPage::Timer),
                                         1022 => app.island_state.select_page(ExpandedPage::Tools),
+                                        1004 => app.island_state.toggle_lyrics(),
                                         1016 => {
                                             app.island_state.is_color_picker_active = true;
                                             let _ = SetCapture(hwnd);
@@ -737,33 +780,18 @@ pub unsafe extern "system" fn window_proc(
                                                 app.island_state.privacy.mic_muted = muted;
                                             }
                                         }
-                                        1019 => {
-                                            app.island_state.show_privacy_alert(true, "Camera".to_string());
+                                        1030 => {
+                                            app.island_state.toggle_glass_theme();
                                         }
-                                        1020 => {
-                                            app.island_state.show_privacy_alert(false, "Microphone".to_string());
-                                        }
-                                        1021 => {
-                                            app.island_state.show_timer_completed("Focus session completed! Great job taking 25 minutes of deep focus.".to_string());
-                                        }
-                                        1023 => {
-                                            app.island_state.set_call_active(true, false, "WhatsApp".to_string());
-                                            app.island_state.active_call.duration_secs = 205;
-                                        }
-                                        1024 => {
-                                            app.island_state.set_call_active(true, true, "Discord".to_string());
-                                            app.island_state.active_call.duration_secs = 105;
-                                        }
-                                        1026 => {
-                                            app.island_state.set_call_active(true, false, "Instagram".to_string());
-                                            app.island_state.active_call.duration_secs = 142; // 02:22
-                                        }
-                                        1027 => {
-                                            app.island_state.set_call_active(true, true, "Instagram".to_string());
-                                            app.island_state.active_call.duration_secs = 75; // 01:15
-                                        }
-                                        1025 => {
-                                            app.island_state.set_call_active(false, false, String::new());
+                                        1031 => {
+                                            let _ = windows::Win32::UI::Shell::ShellExecuteW(
+                                                hwnd,
+                                                windows::core::w!("open"),
+                                                windows::core::w!("https://github.com/Sarashinaa/NotDynamicIsland"),
+                                                None,
+                                                None,
+                                                SW_SHOWNORMAL,
+                                            );
                                         }
                                         _ => {}
                                     }
@@ -1575,6 +1603,7 @@ fn main() {
     };
 
     let hwnd = window.hwnd;
+    enable_dark_popup_menus(hwnd);
 
     // Register clipboard listener to automatically capture copied files into File Shelf
     unsafe {

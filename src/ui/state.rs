@@ -371,6 +371,7 @@ impl IslandState {
         }
     }
 
+    #[allow(dead_code)]
     pub fn set_charging(&mut self, is_charging: bool, percent: u32) {
         self.set_power_status(is_charging, self.is_energy_saver, percent);
     }
@@ -399,10 +400,12 @@ impl IslandState {
         self.show_notification(NotificationKind::CapsLock { enabled }, 2000);
     }
 
+    #[allow(dead_code)]
     pub fn show_privacy_alert(&mut self, is_camera: bool, app_name: String) {
         self.show_notification(NotificationKind::PrivacyAlert { is_camera, app_name }, 3200);
     }
 
+    #[allow(dead_code)]
     pub fn show_timer_completed(&mut self, message: String) {
         self.show_notification(NotificationKind::TimerCompleted { message }, 5000);
     }
