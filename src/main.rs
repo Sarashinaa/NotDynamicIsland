@@ -745,6 +745,18 @@ pub unsafe extern "system" fn window_proc(
 
                         if cmd.0 == 1099 {
                             let _ = DestroyWindow(hwnd);
+                        } else if cmd.0 == 1031 {
+                            // Non-blocking browser launch detached from the UI thread and outside of APP lock
+                            std::thread::spawn(|| {
+                                let _ = windows::Win32::UI::Shell::ShellExecuteW(
+                                    windows::Win32::Foundation::HWND::default(),
+                                    windows::core::w!("open"),
+                                    windows::core::w!("https://github.com/Sarashinaa/NotDynamicIsland"),
+                                    None,
+                                    None,
+                                    SW_SHOWNORMAL,
+                                );
+                            });
                         } else if cmd.0 != 0 {
                             if let Ok(mut lock) = APP.lock() {
                                 if let Some(app) = lock.as_mut() {
@@ -782,16 +794,6 @@ pub unsafe extern "system" fn window_proc(
                                         }
                                         1030 => {
                                             app.island_state.toggle_glass_theme();
-                                        }
-                                        1031 => {
-                                            let _ = windows::Win32::UI::Shell::ShellExecuteW(
-                                                hwnd,
-                                                windows::core::w!("open"),
-                                                windows::core::w!("https://github.com/Sarashinaa/NotDynamicIsland"),
-                                                None,
-                                                None,
-                                                SW_SHOWNORMAL,
-                                            );
                                         }
                                         _ => {}
                                     }

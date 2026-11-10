@@ -1,0 +1,28 @@
+﻿==================================================
+    NotDynamicIsland (Project Nova) for Windows
+==================================================
+
+Cara Pakai:
+1. Tinggal double-click file 'not_dynamic_island.exe'.
+2. Notch Dynamic Island akan langsung muncul di bagian atas layar monitor.
+3. Fitur Utama (Total 6 Halaman Interaktif):
+   - Halaman 1: Media Controller & Synced Lyrics (Apple Music style)
+   - Halaman 2: File Shelf (Drag & drop file hingga 5 item)
+   - Halaman 3: To-Do List (Tambah tugas, checklist centang)
+   - Halaman 4: Calendar & Agenda (Kalender bulanan interaktif, agenda harian, sync Google Calendar)
+   - Halaman 5: Focus Timer & Stopwatch (Pomodoro 25m, break, stopwatch)
+   - Halaman 6: Tools & Control Center (Eyedropper, Screen Snip, Mic Mute)
+   - Indikator Ekstra: Live Battery & AC Charger, Speed Download Meter, Call HUD (WA/Discord/IG).
+
+4. Cara Menghubungkan Google Calendar:
+   - Buka Google Calendar di browser -> Settings -> Pilih Kalender Anda.
+   - Gulir ke bagian 'Integrasikan kalender' -> Salin link 'Alamat rahasia dalam format iCal'.
+   - Paste link tersebut ke file 'calendar_sync.txt' yang otomatis dibuat di samping exe / AppData.
+   - Dynamic Island akan otomatis sinkron setiap 20 menit atau klik tombol [↻] di kalender!
+
+5. Navigasi:
+   - Scroll mouse / swipe touchpad untuk berpindah halaman.
+   - Atau klik titik indikator halaman di bagian bawah notch.
+   - Klik kanan pada notch untuk membuka Menu, Quick Switch, atau Exit.
+
+Tidak butuh install apa pun, portable & hemat RAM (< 10 MB).
