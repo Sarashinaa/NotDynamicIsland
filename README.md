@@ -14,10 +14,10 @@
 <br />
 
 <p align="center">
-  <a href="#overview">Overview</a> •
+  <a href="#-overview">Overview</a> •
   <a href="#showcase">Showcase</a> •
   <a href="#-key-features">Key Features</a> •
-  <a href="#-performance">Performance</a> •
+  <a href="#-performance-benchmark">Performance</a> •
   <a href="#-getting-started">Getting Started</a> •
   <a href="#-shortcuts--controls">Controls</a> •
   <a href="#-building-from-source">Build</a>
