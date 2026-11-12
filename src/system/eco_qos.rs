@@ -1,34 +1,11 @@
-//! EcoQoS and Working Set Memory Trimming
-//! Forces execution on Efficiency Cores and reclaims page cache on idle.
+//! Power profile & Working Set Memory Trimming
+//! Maintains high timer resolution (1ms) and reclaims page cache on idle.
 
-use windows::Win32::System::Threading::{
-    GetCurrentProcess, SetProcessInformation, ProcessPowerThrottling,
-    PROCESS_POWER_THROTTLING_CURRENT_VERSION, PROCESS_POWER_THROTTLING_EXECUTION_SPEED,
-    PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION, PROCESS_POWER_THROTTLING_STATE,
-};
-
-/// Configures EcoQoS: Schedules threads on Efficiency Cores & allows deep sleep C-states
+/// Configures process power profile: maintains high timer resolution and performance when active
 pub fn enable_eco_qos() {
-    unsafe {
-        let mut state = PROCESS_POWER_THROTTLING_STATE {
-            Version: PROCESS_POWER_THROTTLING_CURRENT_VERSION,
-            ControlMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED
-                | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
-            StateMask: PROCESS_POWER_THROTTLING_EXECUTION_SPEED
-                | PROCESS_POWER_THROTTLING_IGNORE_TIMER_RESOLUTION,
-        };
-
-        let res = SetProcessInformation(
-            GetCurrentProcess(),
-            ProcessPowerThrottling,
-            &mut state as *mut _ as *const _,
-            std::mem::size_of::<PROCESS_POWER_THROTTLING_STATE>() as u32,
-        );
-
-        if res.is_ok() {
-            println!("[EcoQoS] Efficiency-core power throttling active.");
-        }
-    }
+    // Intentionally keep high timer resolution active (timeBeginPeriod = 1ms)
+    // without throttling execution speed so animations render at true 60-120+ FPS without micro-stutter.
+    // Deep sleep C-states and 0% CPU are natively achieved when idle in GetMessageW.
 }
 
 #[link(name = "psapi")]

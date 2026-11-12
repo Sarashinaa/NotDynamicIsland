@@ -116,7 +116,7 @@ fn wake_animation(hwnd: HWND, app: &mut App) {
         app.backdrop.capture(app.window.win_x, app.window.win_y);
         app.last_backdrop_capture = Instant::now();
         unsafe {
-            let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 16, None);
+            let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 8, None);
         }
     }
 }
@@ -342,6 +342,8 @@ pub unsafe extern "system" fn window_proc(
                         wake_animation(hwnd, app);
                     } else if !app.island_state.is_hovered {
                         app.island_state.on_mouse_enter();
+                        app.backdrop.capture(app.window.win_x, app.window.win_y);
+                        app.last_backdrop_capture = Instant::now();
                         wake_animation(hwnd, app);
 
                         let mut tme = TRACKMOUSEEVENT {
@@ -1491,12 +1493,15 @@ pub unsafe extern "system" fn window_proc(
 
                         // 2. High-precision refresh cadence:
                         // - Instant (0ms) on foreground window change
-                        // - 30 FPS (~33ms) while actively hovering or animating (spring/theme moving) for fluid realtime sync (<33ms delay, ~1.2% CPU)
-                        // - 2 FPS (500ms) for background media playback when notch is idle/resting
+                        // - While springs or themes are actively moving, NEVER capture mid-flight to maintain 100% CPU frame budget for 60-180 FPS fluidity
+                        // - Settled hover: 150ms for smooth background sync (video, scrolling behind notch)
+                        // - Idle/resting playback: 2 FPS (500ms)
                         let min_interval = if fg_changed {
                             std::time::Duration::from_millis(0)
-                        } else if app.island_state.is_hovered || is_spring_moving || is_theme_moving {
-                            std::time::Duration::from_millis(33)
+                        } else if is_spring_moving || is_theme_moving {
+                            std::time::Duration::from_secs(3600)
+                        } else if app.island_state.is_hovered {
+                            std::time::Duration::from_millis(150)
                         } else {
                             std::time::Duration::from_millis(500)
                         };
@@ -1723,7 +1728,7 @@ fn main() {
 
     // 8. Start initial animation tick to render the first frame
     unsafe {
-        let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 16, None);
+        let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 8, None);
     }
 
     trim_working_set();
