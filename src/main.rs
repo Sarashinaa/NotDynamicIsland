@@ -5,6 +5,7 @@
 #![windows_subsystem = "windows"]
 
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -49,7 +50,8 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW,
-    FindWindowW, GetCursorPos, GetMessageW, KillTimer, PostQuitMessage, SetForegroundWindow,
+    FindWindowW, GetCursorPos, GetMessageW, PostQuitMessage, RegisterShellHookWindow,
+    RegisterWindowMessageW, SetForegroundWindow,
     SetTimer, TrackPopupMenu, TranslateMessage, HTCLIENT, HTTRANSPARENT, MF_POPUP, MF_SEPARATOR, MF_STRING,
     MSG, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CHAR, WM_DESTROY, WM_DROPFILES,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_POWERBROADCAST, WM_RBUTTONUP,
@@ -106,6 +108,7 @@ struct App {
 unsafe impl Send for App {}
 
 static APP: Mutex<Option<App>> = Mutex::new(None);
+static SHELL_HOOK_MSG: AtomicU32 = AtomicU32::new(0);
 
 fn wake_animation(hwnd: HWND, app: &mut App) {
     if !app.is_animating {
@@ -157,6 +160,26 @@ pub unsafe extern "system" fn window_proc(
     wparam: WPARAM,
     lparam: LPARAM,
 ) -> LRESULT {
+    let shell_msg = SHELL_HOOK_MSG.load(Ordering::Relaxed);
+    if shell_msg != 0 && msg == shell_msg {
+        let code = wparam.0 as u32;
+        // HSHELL_WINDOWACTIVATED (4) | HSHELL_RUDEAPPACTIVATED (0x8004) | HSHELL_WINDOWCREATED (1) | HSHELL_WINDOWDESTROYED (2)
+        if code == 4 || code == 0x8004 || code == 1 || code == 2 {
+            if let Ok(mut lock) = APP.lock() {
+                if let Some(app) = lock.as_mut() {
+                    let cur_fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                    if cur_fg != app.last_foreground_hwnd {
+                        app.last_foreground_hwnd = cur_fg;
+                        app.backdrop.capture(app.window.win_x, app.window.win_y);
+                        app.last_backdrop_capture = Instant::now();
+                        wake_animation(hwnd, app);
+                    }
+                }
+            }
+        }
+        return LRESULT(0);
+    }
+
     match msg {
         WM_NCHITTEST => {
             // Hit-testing passthrough: return HTTRANSPARENT when outside the top notch bounds
@@ -1386,8 +1409,6 @@ pub unsafe extern "system" fn window_proc(
 
         WM_TIMER => {
             if wparam.0 == TIMER_ANIMATION_ID {
-                let mut should_kill_timer = false;
-
                 if let Ok(mut lock) = APP.lock() {
                     if let Some(app) = lock.as_mut() {
                         let now = Instant::now();
@@ -1553,23 +1574,19 @@ pub unsafe extern "system" fn window_proc(
                             if app.settled_since.is_none() {
                                 app.settled_since = Some(now);
                             } else if let Some(settled_time) = app.settled_since {
-                                if now - settled_time > std::time::Duration::from_millis(500) {
-                                    should_kill_timer = true;
+                                if now - settled_time > std::time::Duration::from_millis(500) && app.is_animating {
                                     app.is_animating = false;
+                                    // Switch from 8ms high-refresh timer to 500ms low-power heartbeat (0.0% CPU)
+                                    unsafe {
+                                        let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 500, None);
+                                    }
+                                    trim_working_set();
                                 }
                             }
                         } else {
                             app.settled_since = None;
                         }
                     }
-                }
-
-                if should_kill_timer {
-                    unsafe {
-                        let _ = KillTimer(hwnd, TIMER_ANIMATION_ID);
-                    }
-                    // Idle working set trimming flushes memory down to ~1-2 MB!
-                    trim_working_set();
                 }
             }
             LRESULT(0)
@@ -1725,7 +1742,14 @@ fn main() {
         });
     }
 
-    // 8. Start initial animation tick to render the first frame
+    // 8. Register Shell Hook for instant 0ms notification when active window changes (Alt-Tab, window focus)
+    unsafe {
+        let shell_msg = RegisterWindowMessageW(windows::core::w!("SHELLHOOK"));
+        SHELL_HOOK_MSG.store(shell_msg, Ordering::Relaxed);
+        let _ = RegisterShellHookWindow(hwnd);
+    }
+
+    // 9. Start initial animation tick to render the first frame
     unsafe {
         let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 8, None);
     }
