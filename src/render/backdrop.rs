@@ -4,9 +4,9 @@
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::Graphics::Gdi::{
-    BitBlt, CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
-    GetDC, GetDIBits, ReleaseDC, SelectObject, BITMAPINFO, BITMAPINFOHEADER,
-    BI_RGB, DIB_RGB_COLORS, HDC, SRCCOPY,
+    CreateCompatibleBitmap, CreateCompatibleDC, DeleteDC, DeleteObject,
+    GetDC, GetDIBits, ReleaseDC, SelectObject, SetStretchBltMode, StretchBlt,
+    BITMAPINFO, BITMAPINFOHEADER, BI_RGB, COLORONCOLOR, DIB_RGB_COLORS, HDC, SRCCOPY,
 };
 use std::mem::size_of;
 
@@ -16,6 +16,7 @@ pub struct BackdropBlur {
     pub temp_buffer: Vec<u32>,
     pub width: usize,
     pub height: usize,
+    pub scale: usize,
     hdc_mem: HDC,
     hbitmap: windows::Win32::Graphics::Gdi::HBITMAP,
 }
@@ -23,7 +24,11 @@ pub struct BackdropBlur {
 unsafe impl Send for BackdropBlur {}
 
 impl BackdropBlur {
-    pub fn new(width: usize, height: usize) -> Self {
+    pub fn new(full_width: usize, full_height: usize) -> Self {
+        let scale = 2;
+        let width = full_width / scale;
+        // The top notch never exceeds 160px height; cap capture height to 160px for maximum speed
+        let height = (full_height.min(160)) / scale;
         let size = width * height;
         unsafe {
             let hdc_screen = GetDC(HWND::default());
@@ -38,17 +43,19 @@ impl BackdropBlur {
                 temp_buffer: vec![0; size],
                 width,
                 height,
+                scale,
                 hdc_mem,
                 hbitmap,
             }
         }
     }
 
-    /// Captures the desktop region directly behind (x, y)
+    /// Captures the desktop region directly behind (x, y) with hardware-assisted 2x downsampling
     pub fn capture(&mut self, screen_x: i32, screen_y: i32) {
         unsafe {
             let hdc_screen = GetDC(HWND::default());
-            let _ = BitBlt(
+            let _ = SetStretchBltMode(self.hdc_mem, COLORONCOLOR);
+            let _ = StretchBlt(
                 self.hdc_mem,
                 0,
                 0,
@@ -57,6 +64,8 @@ impl BackdropBlur {
                 hdc_screen,
                 screen_x,
                 screen_y,
+                (self.width * self.scale) as i32,
+                (self.height * self.scale) as i32,
                 SRCCOPY,
             );
             ReleaseDC(HWND::default(), hdc_screen);
@@ -85,8 +94,8 @@ impl BackdropBlur {
             );
         }
 
-        // Apply 2-stage optical blur (subtle lens diffusion, gentle defocus)
-        self.apply_optical_blur(8);
+        // Apply 2-stage optical blur (radius 4 on 2x downscaled buffer equals radius 8 at full resolution)
+        self.apply_optical_blur(4);
     }
 
     /// Fast optical lens diffusion: 2-stage cascaded box blur approximating Gaussian filter (O(N) per pixel)
@@ -186,8 +195,10 @@ impl BackdropBlur {
 
     #[inline(always)]
     pub fn get_blurred_pixel(&self, x: usize, y: usize) -> (u8, u8, u8) {
-        if x < self.width && y < self.height {
-            let px = self.blurred_buffer[y * self.width + x];
+        let down_x = if self.scale > 1 { x / self.scale } else { x };
+        let down_y = if self.scale > 1 { y / self.scale } else { y };
+        if down_x < self.width && down_y < self.height {
+            let px = self.blurred_buffer[down_y * self.width + down_x];
             (
                 ((px >> 16) & 0xFF) as u8,
                 ((px >> 8) & 0xFF) as u8,
@@ -265,6 +276,7 @@ mod tests {
             temp_buffer: vec![0; w * h],
             width: w,
             height: h,
+            scale: 1,
             hdc_mem: windows::Win32::Graphics::Gdi::HDC::default(),
             hbitmap: windows::Win32::Graphics::Gdi::HBITMAP::default(),
         };
