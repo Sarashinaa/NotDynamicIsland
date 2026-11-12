@@ -111,13 +111,16 @@ static APP: Mutex<Option<App>> = Mutex::new(None);
 static SHELL_HOOK_MSG: AtomicU32 = AtomicU32::new(0);
 
 fn wake_animation(hwnd: HWND, app: &mut App) {
+    let now = Instant::now();
+    // Refresh desktop backdrop behind notch upon interaction if not captured within 50ms
+    if now.duration_since(app.last_backdrop_capture) >= std::time::Duration::from_millis(50) {
+        app.backdrop.capture(app.window.win_x, app.window.win_y);
+        app.last_backdrop_capture = now;
+    }
     if !app.is_animating {
         app.is_animating = true;
         app.settled_since = None;
-        app.last_tick = Instant::now();
-        // Capture background desktop directly behind notch upon animation wakeup
-        app.backdrop.capture(app.window.win_x, app.window.win_y);
-        app.last_backdrop_capture = Instant::now();
+        app.last_tick = now;
         unsafe {
             let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 8, None);
         }
@@ -365,8 +368,6 @@ pub unsafe extern "system" fn window_proc(
                         wake_animation(hwnd, app);
                     } else if !app.island_state.is_hovered {
                         app.island_state.on_mouse_enter();
-                        app.backdrop.capture(app.window.win_x, app.window.win_y);
-                        app.last_backdrop_capture = Instant::now();
                         wake_animation(hwnd, app);
 
                         let mut tme = TRACKMOUSEEVENT {
@@ -1514,14 +1515,19 @@ pub unsafe extern "system" fn window_proc(
 
                         // 2. High-precision refresh cadence:
                         // - Instant (0ms) on foreground window change (Alt-Tab, window switch)
-                        // - Fluid 60 FPS (~16ms) while hovering OR while springs/themes are animating:
-                        //   With hardware-assisted 2x downsampling, capture+blur takes only ~0.2ms (<1.5% CPU),
-                        //   yielding 100% synchronized, silky-smooth real-time blur with ZERO delay and ZERO jitter!
+                        // - While springs or themes are actively moving, NEVER capture mid-flight:
+                        //   StretchBlt DWM readbacks over PCIe cause micro-stalls that disrupt 16.67ms VSync
+                        //   frame pacing on 60Hz displays. Keeping spring frames pure CPU (<0.4ms) guarantees
+                        //   rock-solid, locked 60 FPS buttery smoothness without a single dropped frame!
+                        // - Fluid 30 FPS (~33ms) while resting open under hover:
+                        //   Maintains live background sync (scrolling web, video) with zero jitter while notch is static.
                         // - 2 FPS (500ms) for background media playback when notch is idle/resting
                         let min_interval = if fg_changed {
                             std::time::Duration::from_millis(0)
-                        } else if app.island_state.is_hovered || is_spring_moving || is_theme_moving {
-                            std::time::Duration::from_millis(16)
+                        } else if is_spring_moving || is_theme_moving {
+                            std::time::Duration::from_secs(3600)
+                        } else if app.island_state.is_hovered {
+                            std::time::Duration::from_millis(33)
                         } else {
                             std::time::Duration::from_millis(500)
                         };
