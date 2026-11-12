@@ -88,6 +88,7 @@ struct App {
     pixel_buffer: PixelBuffer,
     backdrop: BackdropBlur,
     last_backdrop_capture: Instant,
+    last_foreground_hwnd: HWND,
     media_ctrl: Option<MediaController>,
     _volume_listener: Option<VolumeListener>,
     _power_listener: Option<PowerListener>,
@@ -1480,8 +1481,27 @@ pub unsafe extern "system" fn window_proc(
                         let lyric_dist = (target_lyric_y - app.island_state.lyrics_scroll_y).abs();
                         app.island_state.lyrics_scroll_y += (target_lyric_y - app.island_state.lyrics_scroll_y) * (dt * 12.0).min(1.0);
 
-                        // Refresh backdrop blur during sustained animation at a low 2Hz cadence to keep CPU at near zero
-                        if now.duration_since(app.last_backdrop_capture) >= std::time::Duration::from_millis(500) {
+                        // Real-time backdrop synchronization:
+                        // 1. Instantaneous trigger if active foreground window changed (Alt-Tab, window switch)
+                        let cur_fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
+                        let fg_changed = cur_fg != app.last_foreground_hwnd;
+                        if fg_changed {
+                            app.last_foreground_hwnd = cur_fg;
+                        }
+
+                        // 2. High-precision refresh cadence:
+                        // - Instant (0ms) on foreground window change
+                        // - 30 FPS (~33ms) while actively hovering or animating (spring/theme moving) for fluid realtime sync (<33ms delay, ~1.2% CPU)
+                        // - 2 FPS (500ms) for background media playback when notch is idle/resting
+                        let min_interval = if fg_changed {
+                            std::time::Duration::from_millis(0)
+                        } else if app.island_state.is_hovered || is_spring_moving || is_theme_moving {
+                            std::time::Duration::from_millis(33)
+                        } else {
+                            std::time::Duration::from_millis(500)
+                        };
+
+                        if now.duration_since(app.last_backdrop_capture) >= min_interval {
                             app.backdrop.capture(app.window.win_x, app.window.win_y);
                             app.last_backdrop_capture = now;
                         }
@@ -1673,6 +1693,7 @@ fn main() {
     {
         let mut backdrop = BackdropBlur::new(CANVAS_W, CANVAS_H);
         backdrop.capture(window.win_x, window.win_y);
+        let cur_fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
 
         let mut lock = APP.lock().unwrap();
         *lock = Some(App {
@@ -1684,6 +1705,7 @@ fn main() {
             pixel_buffer,
             backdrop,
             last_backdrop_capture: Instant::now(),
+            last_foreground_hwnd: cur_fg,
             media_ctrl: Some(media_ctrl),
             _volume_listener: Some(volume_listener),
             _power_listener: Some(power_listener),

@@ -441,9 +441,9 @@ pub fn draw_top_notch_liquid_glass_with_backdrop(
 
                 // Optical glass transmittance:
                 // Light mode (t=0): Crystal-clear liquid glass (bening) with only 5% -> 2% subtle surface sheen (zero milky/butek haze)
-                // Dark mode (t=1): Deep smoked obsidian (45% transmission + 55% obsidian absorption)
+                // Dark mode (t=1): Crystal-clear dark liquid glass (bening obsidian) with only 18% -> 10% dark obsidian tint (zero smokey haze)
                 let light_tint = 0.05 - vert_t * 0.03;
-                let dark_tint = 0.55;
+                let dark_tint = 0.18 - vert_t * 0.08;
                 let tint = (light_tint + (dark_tint - light_tint) * t).clamp(0.0, 1.0);
 
                 let comp_r = ((bg_r as f32 * (1.0 - tint) + base_r * tint).min(255.0)).round() as u8;
