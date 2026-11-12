@@ -52,10 +52,11 @@ The result is a desktop companion that feels organic, responds instantaneously, 
 ## ✦ Key Features
 
 ### 💎 Liquid Glass & Kinetic Aesthetics
-- **Dual Optical Materials**: Toggle seamlessly between **Dark Obsidian** (deep translucent tint) and **Crystal-Clear Light** (high-clarity glass with natural desktop transmittance).
+- **Real-Time Optical Lens Diffusion**: In-house 60 FPS hardware-downsampled backdrop blur that softly diffuses windows and text behind the notch, preventing typography collision while preserving crystal-clear liquid glass transparency.
+- **Dual Optical Materials**: Toggle seamlessly between **Dark Obsidian** (deep translucent tint with high transmission) and **Crystal-Clear Light** (high-clarity liquid glass with pristine desktop transmittance).
 - **Dual-Stroke Optical Beveling**: 1.0px gradient outer contour with a 1.5px internal prism refraction layer that simulates genuine curved glass thickness.
 - **Wet-Look Specular Highlight**: 1.8px high-intensity top-edge light arc with smooth horizontal falloff.
-- **Apple-Grade Spring Mechanics**: Damped harmonic oscillator (`ζ ≈ 0.717`) drives notch morphing, drawer expansions, and the kinetic Sun/Moon toggle.
+- **High-Refresh 125 FPS Kinetics**: Damped harmonic oscillator (`ζ ≈ 0.717`) ticking at 8ms resolution delivers butter-smooth 60–180Hz motion without micro-stutter.
 - **Surgical Hit-Testing**: Native `HTTRANSPARENT` passthrough outside active curves allows clicking, selecting, and dragging windows directly beneath the transparent canvas.
 
 <br />
@@ -126,7 +127,7 @@ Designed from the ground up for power users who refuse to sacrifice system resou
 ### Ready-to-Run (No Installation Required)
 
 1. Head to the [Latest Releases](https://github.com/Sarashinaa/NotDynamicIsland/releases/latest) page.
-2. Download **`NotDynamicIsland-v1.1-windows-x64.zip`** (or standalone `not_dynamic_island.exe`).
+2. Download **`NotDynamicIsland-v2.0-windows-x64.zip`** (or standalone `not_dynamic_island.exe`).
 3. Extract and double-click `not_dynamic_island.exe`. The notch will immediately anchor to the top-center of your primary display.
 
 > [!TIP]
@@ -157,7 +158,7 @@ To synchronize your personal agenda:
 git clone https://github.com/Sarashinaa/NotDynamicIsland.git
 cd NotDynamicIsland
 
-# 2. Run the unit test suite (16 tests verifying math, shelf, and parsers)
+# 2. Run the unit test suite (17 tests verifying math, shelf, blur, and parsers)
 cargo test
 
 # 3. Build optimized release binary with LTO

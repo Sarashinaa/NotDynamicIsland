@@ -3132,7 +3132,7 @@ mod tests {
 
         let mut lm = LayoutManager::new();
         let tr = TextRenderer::new();
-        let scratch_dir = r"C:\Users\localAccount\.gemini\antigravity\brain\f483ed7d-707b-4895-ac6e-27d84a8fd9f2\scratch";
+        let scratch_dir = std::env::temp_dir().to_string_lossy().to_string();
 
         // 1. Closed Mode (Resting notch with inverted corners)
         {

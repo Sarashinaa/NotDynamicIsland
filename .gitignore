@@ -21,4 +21,6 @@ token.json
 *.tmp
 *.bak
 *.bmp
+run_log*.txt
+dist/
 

@@ -300,7 +300,8 @@ mod tests {
                 }
             }
         }
-        save_bmp("C:\\Users\\localAccount\\.gemini\\antigravity\\brain\\f483ed7d-707b-4895-ac6e-27d84a8fd9f2\\thumbs\\compare_light_NO_blur.bmp", &img_light_noblur);
+        let out_dir = std::env::temp_dir();
+        save_bmp(&out_dir.join("compare_light_NO_blur.bmp").to_string_lossy(), &img_light_noblur);
 
         // B) Experimental Light Mode (WITH Lens Diffusion Blur)
         let mut img_light_blur = bg.clone();
@@ -318,7 +319,7 @@ mod tests {
                 }
             }
         }
-        save_bmp("C:\\Users\\localAccount\\.gemini\\antigravity\\brain\\f483ed7d-707b-4895-ac6e-27d84a8fd9f2\\thumbs\\compare_light_WITH_blur.bmp", &img_light_blur);
+        save_bmp(&out_dir.join("compare_light_WITH_blur.bmp").to_string_lossy(), &img_light_blur);
 
         // C) Experimental Dark Mode (WITH Lens Diffusion Blur)
         let mut img_dark_blur = bg.clone();
@@ -336,7 +337,7 @@ mod tests {
                 }
             }
         }
-        save_bmp("C:\\Users\\localAccount\\.gemini\\antigravity\\brain\\f483ed7d-707b-4895-ac6e-27d84a8fd9f2\\thumbs\\compare_dark_WITH_blur.bmp", &img_dark_blur);
+        save_bmp(&out_dir.join("compare_dark_WITH_blur.bmp").to_string_lossy(), &img_dark_blur);
     }
 }
 
