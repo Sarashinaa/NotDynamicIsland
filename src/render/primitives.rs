@@ -440,13 +440,15 @@ pub fn draw_top_notch_liquid_glass_with_backdrop(
                 let (bg_r, bg_g, bg_b) = backdrop.get_blurred_pixel(px, py);
 
                 // Optical glass transmittance:
-                // Light mode (t=0): 75% transmission of blurred background + 25% luminous white body lift
-                // Dark mode (t=1): 38% transmission of blurred background + 62% deep obsidian absorption
-                let trans = (0.75 + (0.38 - 0.75) * t).clamp(0.0, 1.0);
+                // Light mode (t=0): Crystal-clear liquid glass (bening) with only 5% -> 2% subtle surface sheen (zero milky/butek haze)
+                // Dark mode (t=1): Deep smoked obsidian (45% transmission + 55% obsidian absorption)
+                let light_tint = 0.05 - vert_t * 0.03;
+                let dark_tint = 0.55;
+                let tint = (light_tint + (dark_tint - light_tint) * t).clamp(0.0, 1.0);
 
-                let comp_r = ((bg_r as f32 * trans + base_r * (1.0 - trans)).min(255.0)).round() as u8;
-                let comp_g = ((bg_g as f32 * trans + base_g * (1.0 - trans)).min(255.0)).round() as u8;
-                let comp_b = ((bg_b as f32 * trans + base_b * (1.0 - trans)).min(255.0)).round() as u8;
+                let comp_r = ((bg_r as f32 * (1.0 - tint) + base_r * tint).min(255.0)).round() as u8;
+                let comp_g = ((bg_g as f32 * (1.0 - tint) + base_g * tint).min(255.0)).round() as u8;
+                let comp_b = ((bg_b as f32 * (1.0 - tint) + base_b * tint).min(255.0)).round() as u8;
 
                 // Glass alpha is 1.0 * opacity so unblurred desktop does NOT leak through underneath;
                 // optical transmission is fully handled by blending the blurred backdrop with the glass tint above.

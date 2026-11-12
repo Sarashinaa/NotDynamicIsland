@@ -85,8 +85,8 @@ impl BackdropBlur {
             );
         }
 
-        // Apply 2-pass separable box blur (simulates smooth optical diffusion)
-        self.apply_optical_blur(14);
+        // Apply 2-stage optical blur (subtle lens diffusion, gentle defocus)
+        self.apply_optical_blur(8);
     }
 
     /// Fast optical lens diffusion: 2-stage cascaded box blur approximating Gaussian filter (O(N) per pixel)
@@ -268,7 +268,7 @@ mod tests {
             hdc_mem: windows::Win32::Graphics::Gdi::HDC::default(),
             hbitmap: windows::Win32::Graphics::Gdi::HBITMAP::default(),
         };
-        bd.apply_optical_blur(18);
+        bd.apply_optical_blur(8);
 
         // 3. Render 3 test images:
         // A) Current Light Mode (Without blur)
