@@ -4,6 +4,8 @@
 
 **A featherweight, native Dynamic Island companion for Windows 10 & 11, crafted in pure Rust.**
 
+[![XERJ Corpus Hub contributor](https://hub.xerj.org/contributors/Sarashinaa/badge.svg)](https://hub.xerj.org/contributors/Sarashinaa)
+
 [![Release](https://img.shields.io/github/v/release/Sarashinaa/NotDynamicIsland?color=0A84FF&label=Release&style=flat-square)](https://github.com/Sarashinaa/NotDynamicIsland/releases/latest)
 [![Rust](https://img.shields.io/badge/Rust-2024_Edition-DEA584?style=flat-square&logo=rust)](https://www.rust-lang.org/)
 [![Platform](https://img.shields.io/badge/Platform-Windows_10_%7C_11-0078D4?style=flat-square&logo=windows)](https://microsoft.com/windows)
