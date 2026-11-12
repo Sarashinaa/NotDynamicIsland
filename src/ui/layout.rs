@@ -12,8 +12,8 @@ use crate::render::{
     draw_rounded_rect, draw_rounded_rect_stroke,
     draw_seek_backward_button_ex, draw_seek_forward_button_ex,
     draw_snip_icon, draw_speaker_icon, draw_sun_icon, draw_theme_toggle_animated, draw_timer_icon,
-    draw_todo_checkbox, draw_top_notch_liquid_glass_interpolated,
-    Color, PixelBuffer, TextRenderer,
+    draw_todo_checkbox, draw_top_notch_liquid_glass_interpolated, draw_top_notch_liquid_glass_with_backdrop,
+    BackdropBlur, Color, PixelBuffer, TextRenderer,
 };
 use crate::system::lyrics::SyncedLyrics;
 use crate::ui::state::{ExpandedPage, GlassTheme, IslandMode, IslandState, NotificationKind};
@@ -230,6 +230,7 @@ impl LayoutManager {
         state: &IslandState,
         lyrics: &SyncedLyrics,
         cursor_pos: Option<(f32, f32)>,
+        backdrop: Option<&BackdropBlur>,
     ) {
         self.click_targets.clear();
 
@@ -244,15 +245,28 @@ impl LayoutManager {
         }
 
         let theme_progress = state.theme_spring.current.clamp(0.0, 1.0);
-        draw_top_notch_liquid_glass_interpolated(
-            buf,
-            cur_x,
-            cur_w,
-            cur_h,
-            cur_r,
-            opacity,
-            theme_progress,
-        );
+        if let Some(bd) = backdrop {
+            draw_top_notch_liquid_glass_with_backdrop(
+                buf,
+                cur_x,
+                cur_w,
+                cur_h,
+                cur_r,
+                opacity,
+                theme_progress,
+                bd,
+            );
+        } else {
+            draw_top_notch_liquid_glass_interpolated(
+                buf,
+                cur_x,
+                cur_w,
+                cur_h,
+                cur_r,
+                opacity,
+                theme_progress,
+            );
+        }
 
         // 4. Render component contents based on state
         match &state.mode {
@@ -3134,7 +3148,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_closed.bmp", scratch_dir));
         }
 
@@ -3161,7 +3175,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_music.bmp", scratch_dir));
         }
 
@@ -3187,7 +3201,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_music_frosted.bmp", scratch_dir));
         }
 
@@ -3207,7 +3221,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_closed_frosted.bmp", scratch_dir));
         }
 
@@ -3239,7 +3253,7 @@ mod tests {
             springs.height.current = th;
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_lyrics.bmp", scratch_dir));
         }
 
@@ -3273,7 +3287,7 @@ mod tests {
             springs.height.current = th;
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_lyrics_frosted.bmp", scratch_dir));
         }
 
@@ -3294,7 +3308,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_todo.bmp", scratch_dir));
         }
 
@@ -3312,7 +3326,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_brightness.bmp", scratch_dir));
         }
 
@@ -3330,7 +3344,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_volume.bmp", scratch_dir));
         }
 
@@ -3350,7 +3364,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_timer.bmp", scratch_dir));
         }
 
@@ -3371,7 +3385,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_resting_privacy.bmp", scratch_dir));
         }
 
@@ -3392,7 +3406,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_color_picked.bmp", scratch_dir));
         }
 
@@ -3411,7 +3425,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_tools.bmp", scratch_dir));
 
             // Verify click targets registered for all 3 cards
@@ -3463,7 +3477,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_calendar.bmp", scratch_dir));
 
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarPrevMonth));
@@ -3491,7 +3505,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_call_voice.bmp", scratch_dir));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleMicMute));
         }
@@ -3514,7 +3528,7 @@ mod tests {
             springs.corner_radius.current = tr_val;
             springs.opacity.current = 1.0;
             let lyrics = SyncedLyrics::default();
-            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None);
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_call_video.bmp", scratch_dir));
         }
 

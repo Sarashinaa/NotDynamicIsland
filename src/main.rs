@@ -20,7 +20,7 @@ mod ui;
 mod window;
 
 use physics::SpringRect;
-use render::{PixelBuffer, TextRenderer};
+use render::{BackdropBlur, PixelBuffer, TextRenderer};
 use system::{
     enable_eco_qos, trim_working_set, BrightnessListener, KeyboardHook, MediaController,
     NetworkListener, NotificationListener, PowerListener, PrivacyListener, ToastNotificationPayload, VolumeListener,
@@ -86,6 +86,8 @@ struct App {
     layout: LayoutManager,
     text_renderer: TextRenderer,
     pixel_buffer: PixelBuffer,
+    backdrop: BackdropBlur,
+    last_backdrop_capture: Instant,
     media_ctrl: Option<MediaController>,
     _volume_listener: Option<VolumeListener>,
     _power_listener: Option<PowerListener>,
@@ -109,6 +111,9 @@ fn wake_animation(hwnd: HWND, app: &mut App) {
         app.is_animating = true;
         app.settled_since = None;
         app.last_tick = Instant::now();
+        // Capture background desktop directly behind notch upon animation wakeup
+        app.backdrop.capture(app.window.win_x, app.window.win_y);
+        app.last_backdrop_capture = Instant::now();
         unsafe {
             let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 16, None);
         }
@@ -1475,6 +1480,12 @@ pub unsafe extern "system" fn window_proc(
                         let lyric_dist = (target_lyric_y - app.island_state.lyrics_scroll_y).abs();
                         app.island_state.lyrics_scroll_y += (target_lyric_y - app.island_state.lyrics_scroll_y) * (dt * 12.0).min(1.0);
 
+                        // Refresh backdrop blur during sustained animation at a low 2Hz cadence to keep CPU at near zero
+                        if now.duration_since(app.last_backdrop_capture) >= std::time::Duration::from_millis(500) {
+                            app.backdrop.capture(app.window.win_x, app.window.win_y);
+                            app.last_backdrop_capture = now;
+                        }
+
                         // Render frame into pixel buffer
                         app.pixel_buffer.clear();
                         app.layout.render(
@@ -1484,6 +1495,7 @@ pub unsafe extern "system" fn window_proc(
                             &app.island_state,
                             &lyrics,
                             cursor_pos,
+                            Some(&app.backdrop),
                         );
 
                         // Blit to layered window DWM surface
@@ -1659,6 +1671,9 @@ fn main() {
 
     // 7. Store app state in global container
     {
+        let mut backdrop = BackdropBlur::new(CANVAS_W, CANVAS_H);
+        backdrop.capture(window.win_x, window.win_y);
+
         let mut lock = APP.lock().unwrap();
         *lock = Some(App {
             window,
@@ -1667,6 +1682,8 @@ fn main() {
             layout,
             text_renderer,
             pixel_buffer,
+            backdrop,
+            last_backdrop_capture: Instant::now(),
             media_ctrl: Some(media_ctrl),
             _volume_listener: Some(volume_listener),
             _power_listener: Some(power_listener),

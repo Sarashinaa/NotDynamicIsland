@@ -396,6 +396,91 @@ pub fn draw_top_notch_liquid_glass_interpolated(
     draw_top_notch_liquid_glass_core(buf, x, w, h, bottom_radius, opacity, theme_progress);
 }
 
+/// Renders Liquid Glass with active Lens Diffusion Backdrop (Optical blur of desktop behind notch)
+pub fn draw_top_notch_liquid_glass_with_backdrop(
+    buf: &mut PixelBuffer,
+    x: f32,
+    w: f32,
+    h: f32,
+    bottom_radius: f32,
+    opacity: f32,
+    theme_progress: f32,
+    backdrop: &super::backdrop::BackdropBlur,
+) {
+    if opacity <= 0.001 || w <= 0.0 || h <= 0.0 {
+        return;
+    }
+
+    let r_bottom = bottom_radius.min(w * 0.5).min(h * 0.5);
+    let r_top = r_bottom;
+
+    let min_x = (x - r_top - 1.0).floor().max(0.0) as usize;
+    let max_x = (x + w + r_top + 1.0).ceil().min(buf.width as f32) as usize;
+    let min_y = 0usize;
+    let max_y = (h + 1.0).ceil().min(buf.height as f32) as usize;
+
+    let half_w = w * 0.5;
+    let cx = x + half_w;
+    let t = theme_progress.clamp(0.0, 1.0);
+
+    for py in min_y..max_y {
+        let p_yf = py as f32 + 0.5;
+        let vert_t = (p_yf / h).clamp(0.0, 1.0);
+
+        let base_r = (255.0 + (10.0 - 255.0) * t).round();
+        let base_g = (255.0 + (12.0 - 255.0) * t).round();
+        let base_b = (255.0 + (16.0 - 255.0) * t).round();
+
+        for px in min_x..max_x {
+            let p_xf = px as f32 + 0.5;
+            let dist = top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top);
+            let coverage = (0.5 - dist).clamp(0.0, 1.0);
+            if coverage > 0.0 {
+                // 1. Sample optically blurred background
+                let (bg_r, bg_g, bg_b) = backdrop.get_blurred_pixel(px, py);
+
+                // Optical glass transmittance:
+                // Light mode (t=0): 75% transmission of blurred background + 25% luminous white body lift
+                // Dark mode (t=1): 38% transmission of blurred background + 62% deep obsidian absorption
+                let trans = (0.75 + (0.38 - 0.75) * t).clamp(0.0, 1.0);
+
+                let comp_r = ((bg_r as f32 * trans + base_r * (1.0 - trans)).min(255.0)).round() as u8;
+                let comp_g = ((bg_g as f32 * trans + base_g * (1.0 - trans)).min(255.0)).round() as u8;
+                let comp_b = ((bg_b as f32 * trans + base_b * (1.0 - trans)).min(255.0)).round() as u8;
+
+                // Glass alpha is 1.0 * opacity so unblurred desktop does NOT leak through underneath;
+                // optical transmission is fully handled by blending the blurred backdrop with the glass tint above.
+                let glass_alpha = opacity;
+                buf.blend_pixel(px, py, comp_r, comp_g, comp_b, coverage * glass_alpha);
+
+                // 2. Dual-Stroke Optical Thickness:
+                // a) Outer Stroke (1px): Vertical linear gradient from top (38%) to bottom (5%)
+                if dist > -1.0 && dist <= 0.0 {
+                    let outer_alpha = (0.38 - vert_t * 0.33) * opacity;
+                    buf.blend_pixel(px, py, 255, 255, 255, coverage * outer_alpha);
+                }
+
+                // b) Inner Stroke (1.5px at 1px padding): subtle internal refraction
+                if dist > -2.5 && dist <= -1.0 {
+                    let inner_t = 1.0 - (dist + 1.75).abs() / 0.75;
+                    let inner_alpha = inner_t * (0.08 + (1.0 - t) * 0.03) * opacity;
+                    buf.blend_pixel(px, py, 185, 192, 205, coverage * inner_alpha);
+                }
+
+                // 3. Specular Wet-Look Highlight:
+                // 1.8px arc along top lip (75% pure white, smooth fade towards shoulders)
+                if p_yf <= 2.2 && dist <= 0.0 {
+                    let norm_x = (p_xf - cx).abs() / half_w;
+                    let fade_x = (1.0 - ((norm_x - 0.38) / 0.45).clamp(0.0, 1.0)).powf(1.5);
+                    let vert_sheen = (1.0 - (p_yf / 2.2)).clamp(0.0, 1.0);
+                    let wet_specular = fade_x * vert_sheen * 0.75 * opacity;
+                    buf.blend_pixel(px, py, 255, 255, 255, coverage * wet_specular);
+                }
+            }
+        }
+    }
+}
+
 /// Backwards compatibility wrapper for dark liquid glass
 pub fn draw_top_notch_liquid_glass(
     buf: &mut PixelBuffer,

@@ -118,6 +118,10 @@ impl Win32LayeredWindow {
             SelectObject(hdc_mem, hbitmap);
 
             // Position and show window
+            let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowDisplayAffinity(
+                hwnd,
+                windows::Win32::UI::WindowsAndMessaging::WDA_EXCLUDEFROMCAPTURE,
+            );
             let _ = SetWindowPos(
                 hwnd,
                 HWND_TOPMOST,
