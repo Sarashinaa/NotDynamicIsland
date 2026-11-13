@@ -16,6 +16,7 @@ pub mod shelf;
 pub mod snip;
 pub mod timer;
 pub mod todo;
+pub mod weather;
 
 #[allow(unused_imports)]
 pub use artwork::ArtworkManager;
@@ -38,4 +39,6 @@ pub use privacy::{PrivacyListener, PrivacyStatus, WM_APP_PRIVACY_CHANGED};
 pub use shelf::{FileShelf, ShelfFile};
 #[allow(unused_imports)]
 pub use todo::{TodoItem, TodoList, WM_APP_TODO_UPDATED};
+#[allow(unused_imports)]
+pub use weather::{WeatherCondition, WeatherInfo, WeatherManager, WM_APP_WEATHER_UPDATED};
 

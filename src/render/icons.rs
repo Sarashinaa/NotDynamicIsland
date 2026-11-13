@@ -1206,3 +1206,134 @@ pub fn draw_clipboard_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, c
     draw_rounded_rect(buf, x0 + 3.0, y0 + 7.0, inner_w, 1.2, 0.5, color);
     draw_rounded_rect(buf, x0 + 3.0, y0 + 10.5, inner_w * 0.7, 1.2, 0.5, color);
 }
+
+/// Renders a delicate Vector Location Pin (Apple style)
+pub fn draw_location_pin(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, color: Color) {
+    let r = size * 0.42;
+    let pin_top_cy = cy - size * 0.18;
+    // Upper circular head
+    draw_circle(buf, cx, pin_top_cy, r, color);
+    // Lower pointy teardrop
+    let bottom_y = cy + size * 0.45;
+    for i in 0..5 {
+        let t = i as f32 / 4.0;
+        let py = pin_top_cy + (bottom_y - pin_top_cy) * t;
+        let w = r * (1.0 - t * 0.85);
+        draw_circle(buf, cx, py, w, color);
+    }
+    // Inner cutout dot (hollow center)
+    draw_circle(buf, cx, pin_top_cy, r * 0.38, Color::rgba(0, 0, 0, color.a * 0.7));
+}
+
+/// Renders a delicate Apple-style Cloud icon (1.6:1 wide aspect ratio)
+pub fn draw_cloud_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, color: Color) {
+    let base_w = size * 1.15;
+    let base_h = size * 0.32;
+    let base_y = cy + size * 0.10;
+    // Flat/rounded horizontal base
+    draw_rounded_rect(buf, cx - base_w * 0.5, base_y, base_w, base_h, base_h * 0.5, color);
+
+    // Left puff
+    draw_circle(buf, cx - size * 0.30, cy + size * 0.06, size * 0.25, color);
+    // Center-left main dome (highest peak)
+    draw_circle(buf, cx - size * 0.04, cy - size * 0.10, size * 0.35, color);
+    // Center-right secondary dome
+    draw_circle(buf, cx + size * 0.22, cy - size * 0.02, size * 0.28, color);
+    // Far-right puff
+    draw_circle(buf, cx + size * 0.40, cy + size * 0.09, size * 0.21, color);
+}
+
+/// Renders a minimalist Rain icon (cloud + angled raindrops)
+pub fn draw_rain_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, color: Color) {
+    // Cloud slightly lifted
+    draw_cloud_icon(buf, cx, cy - size * 0.15, size * 0.90, color);
+
+    // 3 raindrops
+    let drop_len = size * 0.22;
+    let drop_r = 0.9;
+    let rain_drops = [-size * 0.24, 0.0, size * 0.24];
+    for &dx in &rain_drops {
+        let x1 = cx + dx;
+        let y1 = cy + size * 0.18;
+        let x2 = x1 - size * 0.08;
+        let y2 = y1 + drop_len;
+        for i in 0..5 {
+            let t = i as f32 / 4.0;
+            let px = x1 + (x2 - x1) * t;
+            let py = y1 + (y2 - y1) * t;
+            draw_circle(buf, px, py, drop_r, color);
+        }
+    }
+}
+
+/// Renders a Thunderstorm icon (cloud + mini lightning bolt)
+pub fn draw_thunder_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, color: Color) {
+    draw_cloud_icon(buf, cx, cy - size * 0.15, size * 0.90, color);
+    draw_lightning_bolt(buf, cx, cy + size * 0.25, size * 0.5, color);
+}
+
+/// Renders a Drizzle / Fog icon
+pub fn draw_fog_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, color: Color) {
+    let line_w = size * 0.8;
+    let line_h = 1.4;
+    draw_rounded_rect(buf, cx - line_w * 0.5, cy - size * 0.22, line_w, line_h, 0.7, color);
+    draw_rounded_rect(buf, cx - line_w * 0.4, cy, line_w * 0.8, line_h, 0.7, color);
+    draw_rounded_rect(buf, cx - line_w * 0.3, cy + size * 0.22, line_w * 0.6, line_h, 0.7, color);
+}
+
+/// Renders a Partly Cloudy icon (Sun/Moon peeking behind wide cloud)
+pub fn draw_partly_cloudy_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, is_day: bool, color: Color) {
+    // Sun or Moon in background (positioned at top-left)
+    if is_day {
+        draw_sun_icon(buf, cx - size * 0.22, cy - size * 0.20, size * 0.34, color);
+    } else {
+        draw_moon_icon(buf, cx - size * 0.22, cy - size * 0.20, size * 0.32, color);
+    }
+    // Wide Cloud in foreground
+    draw_cloud_icon(buf, cx + size * 0.06, cy + size * 0.10, size * 0.85, color);
+}
+
+/// Main entry point for drawing any weather condition vector icon
+pub fn draw_weather_icon(
+    buf: &mut PixelBuffer,
+    cx: f32,
+    cy: f32,
+    size: f32,
+    condition: crate::system::WeatherCondition,
+    is_day: bool,
+    color: Color,
+) {
+    match condition {
+        crate::system::WeatherCondition::Clear => {
+            if is_day {
+                draw_sun_icon(buf, cx, cy, size * 0.48, color);
+            } else {
+                draw_moon_icon(buf, cx, cy, size * 0.45, color);
+            }
+        }
+        crate::system::WeatherCondition::PartlyCloudy => {
+            draw_partly_cloudy_icon(buf, cx, cy, size, is_day, color);
+        }
+        crate::system::WeatherCondition::Cloudy => {
+            draw_cloud_icon(buf, cx, cy, size * 0.95, color);
+        }
+        crate::system::WeatherCondition::Rain => {
+            draw_rain_icon(buf, cx, cy, size, color);
+        }
+        crate::system::WeatherCondition::Drizzle => {
+            draw_rain_icon(buf, cx, cy, size * 0.9, color);
+        }
+        crate::system::WeatherCondition::Thunderstorm => {
+            draw_thunder_icon(buf, cx, cy, size, color);
+        }
+        crate::system::WeatherCondition::Fog => {
+            draw_fog_icon(buf, cx, cy, size, color);
+        }
+        crate::system::WeatherCondition::Snow => {
+            draw_cloud_icon(buf, cx, cy - size * 0.15, size * 0.88, color);
+            draw_circle(buf, cx - size * 0.2, cy + size * 0.25, 1.2, color);
+            draw_circle(buf, cx, cy + size * 0.32, 1.4, color);
+            draw_circle(buf, cx + size * 0.2, cy + size * 0.25, 1.2, color);
+        }
+    }
+}

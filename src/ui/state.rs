@@ -10,39 +10,43 @@ use crate::system::privacy::PrivacyStatus;
 use crate::system::shelf::FileShelf;
 use crate::system::timer::FocusTimer;
 use crate::system::todo::TodoList;
+use crate::system::weather::WeatherInfo;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub enum ExpandedPage {
     Music = 0,
-    Shelf = 1,
-    ToDo = 2,
+    Weather = 1,
+    Shelf = 2,
     Calendar = 3,
-    Timer = 4,
+    ToDo = 4,
     Tools = 5,
+    Timer = 6,
 }
 
 impl ExpandedPage {
     #[allow(dead_code)]
     pub fn next(&self) -> Self {
         match self {
-            Self::Music => Self::Shelf,
-            Self::Shelf => Self::ToDo,
-            Self::ToDo => Self::Calendar,
-            Self::Calendar => Self::Timer,
-            Self::Timer => Self::Tools,
-            Self::Tools => Self::Music,
+            Self::Music => Self::Weather,
+            Self::Weather => Self::Shelf,
+            Self::Shelf => Self::Calendar,
+            Self::Calendar => Self::ToDo,
+            Self::ToDo => Self::Tools,
+            Self::Tools => Self::Timer,
+            Self::Timer => Self::Music,
         }
     }
 
     #[allow(dead_code)]
     pub fn prev(&self) -> Self {
         match self {
-            Self::Music => Self::Tools,
-            Self::Shelf => Self::Music,
-            Self::ToDo => Self::Shelf,
-            Self::Calendar => Self::ToDo,
-            Self::Timer => Self::Calendar,
-            Self::Tools => Self::Timer,
+            Self::Music => Self::Timer,
+            Self::Weather => Self::Music,
+            Self::Shelf => Self::Weather,
+            Self::Calendar => Self::Shelf,
+            Self::ToDo => Self::Calendar,
+            Self::Tools => Self::ToDo,
+            Self::Timer => Self::Tools,
         }
     }
 
@@ -132,6 +136,7 @@ pub struct IslandState {
     pub focus_timer: FocusTimer,
     pub calendar: CalendarManager,
     pub network_speed: NetworkSpeed,
+    pub weather: WeatherInfo,
     pub is_color_picker_active: bool,
     pub show_romaji: bool,
     pub glass_theme: GlassTheme,
@@ -181,6 +186,7 @@ impl IslandState {
             focus_timer: FocusTimer::new(),
             calendar: CalendarManager::new(),
             network_speed: NetworkSpeed::default(),
+            weather: WeatherInfo::default(),
             is_color_picker_active: false,
             show_romaji: true,
             glass_theme: saved_theme,
@@ -293,6 +299,13 @@ impl IslandState {
         let target = match self.active_page {
             ExpandedPage::Music => {
                 if forward {
+                    ExpandedPage::Weather
+                } else {
+                    ExpandedPage::Music
+                }
+            }
+            ExpandedPage::Weather => {
+                if forward {
                     ExpandedPage::Shelf
                 } else {
                     ExpandedPage::Music
@@ -300,26 +313,19 @@ impl IslandState {
             }
             ExpandedPage::Shelf => {
                 if forward {
-                    ExpandedPage::ToDo
-                } else {
-                    ExpandedPage::Music
-                }
-            }
-            ExpandedPage::ToDo => {
-                if forward {
                     ExpandedPage::Calendar
                 } else {
-                    ExpandedPage::Shelf
+                    ExpandedPage::Weather
                 }
             }
             ExpandedPage::Calendar => {
                 if forward {
-                    ExpandedPage::Timer
-                } else {
                     ExpandedPage::ToDo
+                } else {
+                    ExpandedPage::Shelf
                 }
             }
-            ExpandedPage::Timer => {
+            ExpandedPage::ToDo => {
                 if forward {
                     ExpandedPage::Tools
                 } else {
@@ -328,9 +334,16 @@ impl IslandState {
             }
             ExpandedPage::Tools => {
                 if forward {
-                    ExpandedPage::Tools
-                } else {
                     ExpandedPage::Timer
+                } else {
+                    ExpandedPage::ToDo
+                }
+            }
+            ExpandedPage::Timer => {
+                if forward {
+                    ExpandedPage::Timer
+                } else {
+                    ExpandedPage::Tools
                 }
             }
         };

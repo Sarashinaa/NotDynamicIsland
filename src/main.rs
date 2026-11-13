@@ -25,9 +25,10 @@ use render::{BackdropBlur, PixelBuffer, TextRenderer};
 use system::{
     enable_eco_qos, trim_working_set, BrightnessListener, KeyboardHook, MediaController,
     NetworkListener, NotificationListener, PowerListener, PrivacyListener, ToastNotificationPayload, VolumeListener,
+    WeatherManager,
     WM_APP_BRIGHTNESS_CHANGED, WM_APP_CALENDAR_UPDATED, WM_APP_CAPSLOCK_CHANGED, WM_APP_MEDIA_CHANGED,
     WM_APP_NETWORK_CHANGED, WM_APP_NOTIFICATION_ARRIVED, WM_APP_POWER_CHANGED, WM_APP_PRIVACY_CHANGED,
-    WM_APP_TIME_TICK, WM_APP_TODO_UPDATED, WM_APP_VOLUME_CHANGED,
+    WM_APP_TIME_TICK, WM_APP_TODO_UPDATED, WM_APP_VOLUME_CHANGED, WM_APP_WEATHER_UPDATED,
 };
 use ui::{ClickAction, ExpandedPage, IslandMode, IslandState, LayoutManager, Rect};
 use window::{Win32LayeredWindow, CANVAS_H, CANVAS_W, TIMER_ANIMATION_ID};
@@ -100,6 +101,7 @@ struct App {
     _keyboard_hook: Option<KeyboardHook>,
     _privacy_listener: Option<system::privacy::PrivacyListener>,
     _network_listener: Option<system::network::NetworkListener>,
+    weather_manager: Option<WeatherManager>,
     is_animating: bool,
     last_tick: Instant,
     settled_since: Option<Instant>,
@@ -782,11 +784,12 @@ pub unsafe extern "system" fn window_proc(
                         // Submenu: Switch Page
                         if let Ok(h_pages) = CreatePopupMenu() {
                             let _ = AppendMenuW(h_pages, MF_STRING, 1001, windows::core::w!("🎵  Music Player"));
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1029, windows::core::w!("🌤️  Live Weather"));
                             let _ = AppendMenuW(h_pages, MF_STRING, 1002, windows::core::w!("📁  File Shelf"));
-                            let _ = AppendMenuW(h_pages, MF_STRING, 1003, windows::core::w!("📋  To-Do List"));
                             let _ = AppendMenuW(h_pages, MF_STRING, 1028, windows::core::w!("📅  Calendar & Agenda"));
-                            let _ = AppendMenuW(h_pages, MF_STRING, 1015, windows::core::w!("⏱️  Focus Timer"));
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1003, windows::core::w!("📋  To-Do List"));
                             let _ = AppendMenuW(h_pages, MF_STRING, 1022, windows::core::w!("🛠️  Quick Tools"));
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1015, windows::core::w!("⏱️  Focus Timer"));
                             let _ = AppendMenuW(h_pages, MF_SEPARATOR, 0, None);
                             let _ = AppendMenuW(h_pages, MF_STRING, 1004, windows::core::w!("💬  Toggle Synced Lyrics"));
                             let _ = AppendMenuW(hmenu, MF_POPUP, h_pages.0 as usize, windows::core::w!("📄  Switch Page"));
@@ -860,11 +863,12 @@ pub unsafe extern "system" fn window_proc(
                                             }
                                         }
                                         1001 => app.island_state.select_page(ExpandedPage::Music),
+                                        1029 => app.island_state.select_page(ExpandedPage::Weather),
                                         1002 => app.island_state.select_page(ExpandedPage::Shelf),
-                                        1003 => app.island_state.select_page(ExpandedPage::ToDo),
                                         1028 => app.island_state.select_page(ExpandedPage::Calendar),
-                                        1015 => app.island_state.select_page(ExpandedPage::Timer),
+                                        1003 => app.island_state.select_page(ExpandedPage::ToDo),
                                         1022 => app.island_state.select_page(ExpandedPage::Tools),
+                                        1015 => app.island_state.select_page(ExpandedPage::Timer),
                                         1004 => app.island_state.toggle_lyrics(),
                                         1016 => {
                                             app.island_state.is_color_picker_active = true;
@@ -1445,6 +1449,11 @@ pub unsafe extern "system" fn window_proc(
                         app.island_state.network_speed = nl.get_speed();
                         wake_animation(hwnd, app);
                     }
+                    if let Some(wm) = &app.weather_manager {
+                        if app.island_state.weather.is_offline {
+                            wm.trigger_refresh();
+                        }
+                    }
                 }
             }
             LRESULT(0)
@@ -1471,6 +1480,20 @@ pub unsafe extern "system" fn window_proc(
                 if let Some(app) = lock.as_mut() {
                     app.island_state.calendar.on_sync_completed();
                     wake_animation(hwnd, app);
+                }
+            }
+            LRESULT(0)
+        }
+
+        WM_APP_WEATHER_UPDATED => {
+            if let Ok(mut lock) = APP.lock() {
+                if let Some(app) = lock.as_mut() {
+                    if let Some(mgr) = app.weather_manager.as_ref() {
+                        if let Some(w) = mgr.get_weather() {
+                            app.island_state.weather = w;
+                            wake_animation(hwnd, app);
+                        }
+                    }
                 }
             }
             LRESULT(0)
@@ -1784,6 +1807,8 @@ fn main() {
     let mut network_listener = NetworkListener::new();
     network_listener.start(hwnd);
 
+    let weather_manager = WeatherManager::new(hwnd);
+
     // 7. Store app state in global container
     {
         let mut backdrop = BackdropBlur::new(CANVAS_W, CANVAS_H);
@@ -1809,6 +1834,7 @@ fn main() {
             _keyboard_hook: Some(keyboard_hook),
             _privacy_listener: Some(privacy_listener),
             _network_listener: Some(network_listener),
+            weather_manager: Some(weather_manager),
             is_animating: true,
             last_tick: Instant::now(),
             settled_since: None,

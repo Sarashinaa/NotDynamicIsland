@@ -4,7 +4,7 @@
 use crate::physics::SpringRect;
 use crate::render::{
     draw_battery_circle_ring, draw_bell_icon, draw_camera_icon, draw_circle, draw_clipboard_icon, draw_close_button,
-    draw_eyedropper_icon, draw_file_icon, draw_headphones_badge, draw_lyrics_button_ex,
+    draw_eyedropper_icon, draw_file_icon, draw_headphones_badge, draw_location_pin, draw_lyrics_button_ex,
     draw_microphone_icon, draw_monochrome_sound_wave,
     draw_nav_arrow_button, draw_nav_arrow_button_ex, draw_next_icon, draw_page_indicators,
     draw_pause_icon, draw_play_icon, draw_prev_icon,
@@ -13,6 +13,7 @@ use crate::render::{
     draw_seek_backward_button_ex, draw_seek_forward_button_ex,
     draw_snip_icon, draw_speaker_icon, draw_sun_icon, draw_theme_toggle_animated, draw_timer_icon,
     draw_todo_checkbox, draw_top_notch_liquid_glass_interpolated, draw_top_notch_liquid_glass_with_backdrop,
+    draw_weather_icon,
     BackdropBlur, Color, PixelBuffer, TextRenderer,
 };
 use crate::system::lyrics::SyncedLyrics;
@@ -161,23 +162,25 @@ impl LayoutManager {
                     let extra_w = if state.active_call.is_video { 16.0 } else { 0.0 };
                     (288.0 + extra_w, 34.0, 17.0)
                 } else {
-                    (236.0, 32.0, 16.0)
+                    (256.0, 32.0, 16.0)
                 }
             }
             // Closed: Battery ring + centered date & time + sound wave
-            IslandMode::Closed => (236.0, 32.0, 16.0),
+            IslandMode::Closed => (256.0, 32.0, 16.0),
             // Music: Increased height to 150px to provide generous breathing room above bottom dots
             IslandMode::Expanded(ExpandedPage::Music) => (392.0, 150.0, 24.0),
+            // Weather: Clean Apple Weather layout (420x150)
+            IslandMode::Expanded(ExpandedPage::Weather) => (420.0, 150.0, 24.0),
             // Shelf:
             IslandMode::Expanded(ExpandedPage::Shelf) => (426.0, 146.0, 24.0),
-            // To-do: Increased width to 480px for navigation arrows and breathing room
-            IslandMode::Expanded(ExpandedPage::ToDo) => (480.0, 148.0, 24.0),
             // Calendar & Agenda: Dual-pane month grid + daily agenda (456x152)
             IslandMode::Expanded(ExpandedPage::Calendar) => (456.0, 152.0, 24.0),
-            // Timer & Focus: Spacious 400x150, matches design aesthetic
-            IslandMode::Expanded(ExpandedPage::Timer) => (400.0, 150.0, 24.0),
+            // To-do: Increased width to 480px for navigation arrows and breathing room
+            IslandMode::Expanded(ExpandedPage::ToDo) => (480.0, 148.0, 24.0),
             // Tools & Control Center: 3 Apple-style utility cards (420x148)
             IslandMode::Expanded(ExpandedPage::Tools) => (420.0, 148.0, 24.0),
+            // Timer & Focus: Spacious 400x150, matches design aesthetic
+            IslandMode::Expanded(ExpandedPage::Timer) => (400.0, 150.0, 24.0),
             // Lyrics: Generous width for synchronized scrolling lyrics
             IslandMode::Lyrics => (600.0, 150.0, 24.0),
             // Notifications:
@@ -279,6 +282,9 @@ impl LayoutManager {
             }
             IslandMode::Expanded(ExpandedPage::Music) => {
                 self.render_music(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+            }
+            IslandMode::Expanded(ExpandedPage::Weather) => {
+                self.render_weather(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
             }
             IslandMode::Expanded(ExpandedPage::Shelf) => {
                 self.render_shelf(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
@@ -442,17 +448,69 @@ impl LayoutManager {
                 true,
             );
 
-            // Center: Day, Date, Year (or Network Speed if active transfer reaches >= 25 Mbps / ~3.125 MB/s)
+            // Center: Weather Micro-Badge (Icon + Temp) • Day, Date, Year (or Network Speed)
             let display_str = if state.network_speed.download_bytes_sec >= 3_125_000 {
                 format!("↓ {}", state.network_speed.format_download())
             } else {
                 date_str
             };
 
+            let temp_str = state.weather.format_temp_compact();
+            let (temp_w, _) = text_renderer.measure_text(&temp_str, 10.5, true);
+            let icon_sz = 12.0;
+            let sep_str = " • ";
+            let (sep_w, _) = text_renderer.measure_text(sep_str, 10.5, false);
             let (disp_w, _) = text_renderer.measure_text(&display_str, 10.5, false);
+
+            let total_center_w = icon_sz + 4.0 + temp_w + sep_w + disp_w;
             let left_bound = bat_cx + 12.0;
             let right_bound = time_x - 6.0;
-            let date_x = left_bound + (right_bound - left_bound - disp_w) * 0.5;
+            let start_center_x = left_bound + (right_bound - left_bound - total_center_w) * 0.5;
+
+            // Weather Icon & Temperature
+            let weather_icon_x = start_center_x + icon_sz * 0.5;
+            draw_weather_icon(
+                buf,
+                weather_icon_x,
+                cy,
+                icon_sz,
+                state.weather.condition(),
+                state.weather.is_day,
+                Color::rgba(255, 255, 255, 0.95 * opacity),
+            );
+
+            let temp_x = start_center_x + icon_sz + 4.0;
+            text_renderer.draw_text(
+                buf,
+                &temp_str,
+                temp_x,
+                cy + 4.0,
+                10.5,
+                Color::rgba(255, 255, 255, 0.96 * opacity),
+                true,
+            );
+
+            // Click target to open Weather directly
+            let weather_rect = Rect {
+                x: start_center_x - 4.0,
+                y: 0.0,
+                w: icon_sz + 4.0 + temp_w + 8.0,
+                h,
+            };
+            self.click_targets.push((weather_rect, ClickAction::SelectPage(ExpandedPage::Weather)));
+
+            let sep_x = temp_x + temp_w;
+            text_renderer.draw_text(
+                buf,
+                sep_str,
+                sep_x,
+                cy + 4.0,
+                10.5,
+                Color::rgba(148, 163, 184, 0.70 * opacity),
+                false,
+            );
+
+            let date_x = sep_x + sep_w;
             text_renderer.draw_text(
                 buf,
                 &display_str,
@@ -531,19 +589,69 @@ impl LayoutManager {
             opacity,
         );
 
-        // Center: Day, Date, Year & Time centered between battery & sound wave
+        // Center: Weather Micro-Badge • Day, Date, Year & Time centered between battery & sound wave
         let (date_str, time_str) = get_formatted_date_parts();
         let full_date_time = format!("{} {}", date_str, time_str);
-        let (text_w, _) = text_renderer.measure_text(&full_date_time, 10.5, false);
+        let temp_str = state.weather.format_temp_compact();
+        let (temp_w, _) = text_renderer.measure_text(&temp_str, 10.5, true);
+        let icon_sz = 12.0;
+        let sep_str = " • ";
+        let (sep_w, _) = text_renderer.measure_text(sep_str, 10.5, false);
+        let (date_w, _) = text_renderer.measure_text(&full_date_time, 10.5, false);
 
+        let total_center_w = icon_sz + 4.0 + temp_w + sep_w + date_w;
         let left_bound = bat_cx + 12.0;
         let right_bound = wave_x - 8.0;
-        let text_x = left_bound + (right_bound - left_bound - text_w) * 0.5;
+        let start_center_x = left_bound + (right_bound - left_bound - total_center_w) * 0.5;
 
+        // Weather Icon & Temperature
+        let weather_icon_x = start_center_x + icon_sz * 0.5;
+        draw_weather_icon(
+            buf,
+            weather_icon_x,
+            cy,
+            icon_sz,
+            state.weather.condition(),
+            state.weather.is_day,
+            Color::rgba(255, 255, 255, 0.95 * opacity),
+        );
+
+        let temp_x = start_center_x + icon_sz + 4.0;
+        text_renderer.draw_text(
+            buf,
+            &temp_str,
+            temp_x,
+            cy + 4.0,
+            10.5,
+            Color::rgba(255, 255, 255, 0.96 * opacity),
+            true,
+        );
+
+        // Click target for Weather badge
+        let weather_rect = Rect {
+            x: start_center_x - 4.0,
+            y: 0.0,
+            w: icon_sz + 4.0 + temp_w + 8.0,
+            h,
+        };
+        self.click_targets.push((weather_rect, ClickAction::SelectPage(ExpandedPage::Weather)));
+
+        let sep_x = temp_x + temp_w;
+        text_renderer.draw_text(
+            buf,
+            sep_str,
+            sep_x,
+            cy + 4.0,
+            10.5,
+            Color::rgba(148, 163, 184, 0.70 * opacity),
+            false,
+        );
+
+        let date_x = sep_x + sep_w;
         text_renderer.draw_text(
             buf,
             &full_date_time,
-            text_x,
+            date_x,
             cy + 4.0,
             10.5,
             Color::rgba(255, 255, 255, 0.96 * opacity),
@@ -849,10 +957,10 @@ impl LayoutManager {
         draw_seek_forward_button_ex(buf, text_renderer, x + w - 28.0, ctrl_y, 18.0, seek_fwd_hover, opacity, is_light);
         self.click_targets.push((seek_fwd_rect, ClickAction::SeekRelative(5)));
 
-        // Bottom Page Indicator Dots (— • • • • •) positioned safely at cy = 138.0 with plenty of breathing room!
+        // Bottom Page Indicator Dots (— • • • • • •) positioned safely at cy = 138.0 with plenty of breathing room!
         let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 0, 6, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 6);
+        draw_page_indicators(buf, center_x, indicator_y, 0, 7, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 7);
     }
 
 /// Intelligently wraps a single lyric line into up to two sub-lines if it exceeds max_width.
@@ -1302,6 +1410,188 @@ fn wrap_lyric_line<'a>(
         }
     }
 
+    /// Mode: Weather - Clean Apple Weather widget with live conditions, temperatures, and metrics
+    fn render_weather(
+        &mut self,
+        buf: &mut PixelBuffer,
+        text_renderer: &TextRenderer,
+        x: f32,
+        w: f32,
+        h: f32,
+        state: &IslandState,
+        opacity: f32,
+        cursor_pos: Option<(f32, f32)>,
+    ) {
+        let _ = h;
+        // Top Header: Battery Ring + Date & Time + Soundwave
+        self.render_header_bar(buf, text_renderer, x, w, state, opacity);
+
+        // Sun / Moon Theme Toggle in top-left
+        let theme_rect = Rect {
+            x: x + 16.0,
+            y: 9.0,
+            w: 38.0,
+            h: 18.0,
+        };
+        let theme_hover = cursor_pos
+            .map(|(px, py)| theme_rect.contains(px, py))
+            .unwrap_or(false);
+        draw_theme_toggle_animated(
+            buf,
+            theme_rect.x,
+            theme_rect.y,
+            theme_rect.w,
+            theme_rect.h,
+            state.theme_spring.current,
+            theme_hover,
+            opacity,
+        );
+        self.click_targets
+            .push((theme_rect, ClickAction::ToggleGlassTheme));
+
+        // Navigation Arrows:
+        // Left Nav Arrow (<) back to Music
+        let prev_btn_rect = Rect { x: x + 10.0, y: 56.0, w: 22.0, h: 24.0 };
+        let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
+        draw_nav_arrow_button(buf, x + 21.0, 68.0, 10.5, false, prev_hover, opacity);
+        self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
+
+        // Right Nav Arrow (>) forward to File Shelf
+        let next_btn_rect = Rect { x: x + w - 32.0, y: 56.0, w: 22.0, h: 24.0 };
+        let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
+        draw_nav_arrow_button(buf, x + w - 21.0, 68.0, 10.5, true, next_hover, opacity);
+        self.click_targets.push((next_btn_rect, ClickAction::NextPage));
+
+        // Left Side: Hero Weather Section (Icon + Big Temp + Condition + City)
+        let hero_cx = x + 60.0;
+        let hero_cy = 56.0;
+        draw_weather_icon(
+            buf,
+            hero_cx,
+            hero_cy,
+            36.0,
+            state.weather.condition(),
+            state.weather.is_day,
+            Color::rgba(255, 255, 255, 0.95 * opacity),
+        );
+
+        let temp_str = state.weather.format_temp_compact();
+        let temp_x = x + 92.0;
+        text_renderer.draw_text(
+            buf,
+            &temp_str,
+            temp_x,
+            hero_cy + 10.0,
+            28.0,
+            Color::rgba(255, 255, 255, 0.98 * opacity),
+            true,
+        );
+
+        // Weather Condition Text (e.g. "Partly Cloudy", "Overcast")
+        let cond_text = state.weather.condition_text();
+        let cond_x = x + 38.0;
+        text_renderer.draw_text(
+            buf,
+            cond_text,
+            cond_x,
+            hero_cy + 30.0,
+            11.5,
+            Color::rgba(226, 232, 240, 0.94 * opacity),
+            true,
+        );
+
+        // Location / City (e.g. "Ciruas" or "Ciruas (Offline)")
+        let city_text = if !state.weather.is_loaded {
+            "No Connection".to_string()
+        } else if state.weather.is_offline {
+            format!("{} (Offline)", state.weather.city)
+        } else {
+            state.weather.city.clone()
+        };
+
+        let pin_x = cond_x + 4.0;
+        let pin_y = hero_cy + 45.0;
+        draw_location_pin(buf, pin_x, pin_y, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity));
+        text_renderer.draw_text(
+            buf,
+            &city_text,
+            pin_x + 8.0,
+            hero_cy + 48.0,
+            10.5,
+            Color::rgba(148, 163, 184, 0.85 * opacity),
+            false,
+        );
+
+        // Right Side: 4 Frosted Glass Metric Pills (2x2 Grid)
+        let grid_x = x + 158.0;
+        let col_w = 110.0;
+        let col_gap = 8.0;
+        let row_h = 35.0;
+        let row1_y = 42.0;
+        let row2_y = 83.0;
+
+        let glass_card_bg = Color::rgba(255, 255, 255, 0.08 * opacity);
+        let glass_card_border = Color::rgba(255, 255, 255, 0.12 * opacity);
+
+        // Pill 1: High / Low
+        let p1_x = grid_x;
+        let p1_y = row1_y;
+        draw_rounded_rect(buf, p1_x, p1_y, col_w, row_h, 8.0, glass_card_bg);
+        draw_rounded_rect_stroke(buf, p1_x, p1_y, col_w, row_h, 8.0, 1.0, glass_card_border);
+        text_renderer.draw_text(buf, "RANGE", p1_x + 10.0, p1_y + 12.0, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity), true);
+        let hl_str = if !state.weather.is_loaded {
+            "-- / --".to_string()
+        } else {
+            format!("{:.0}° / {:.0}°", state.weather.temp_max.round(), state.weather.temp_min.round())
+        };
+        text_renderer.draw_text(buf, &hl_str, p1_x + 10.0, p1_y + 26.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+
+        // Pill 2: Feels Like
+        let p2_x = grid_x + col_w + col_gap;
+        let p2_y = row1_y;
+        draw_rounded_rect(buf, p2_x, p2_y, col_w, row_h, 8.0, glass_card_bg);
+        draw_rounded_rect_stroke(buf, p2_x, p2_y, col_w, row_h, 8.0, 1.0, glass_card_border);
+        text_renderer.draw_text(buf, "FEELS LIKE", p2_x + 10.0, p2_y + 12.0, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity), true);
+        let feels_str = if !state.weather.is_loaded {
+            "--".to_string()
+        } else {
+            format!("{:.0}°C", state.weather.apparent_temperature.round())
+        };
+        text_renderer.draw_text(buf, &feels_str, p2_x + 10.0, p2_y + 26.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+
+        // Pill 3: Humidity
+        let p3_x = grid_x;
+        let p3_y = row2_y;
+        draw_rounded_rect(buf, p3_x, p3_y, col_w, row_h, 8.0, glass_card_bg);
+        draw_rounded_rect_stroke(buf, p3_x, p3_y, col_w, row_h, 8.0, 1.0, glass_card_border);
+        text_renderer.draw_text(buf, "HUMIDITY", p3_x + 10.0, p3_y + 12.0, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity), true);
+        let hum_str = if !state.weather.is_loaded {
+            "--%".to_string()
+        } else {
+            format!("{}%", state.weather.relative_humidity)
+        };
+        text_renderer.draw_text(buf, &hum_str, p3_x + 10.0, p3_y + 26.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+
+        // Pill 4: Wind Speed
+        let p4_x = grid_x + col_w + col_gap;
+        let p4_y = row2_y;
+        draw_rounded_rect(buf, p4_x, p4_y, col_w, row_h, 8.0, glass_card_bg);
+        draw_rounded_rect_stroke(buf, p4_x, p4_y, col_w, row_h, 8.0, 1.0, glass_card_border);
+        text_renderer.draw_text(buf, "WIND", p4_x + 10.0, p4_y + 12.0, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity), true);
+        let wind_str = if !state.weather.is_loaded {
+            "--".to_string()
+        } else {
+            format!("{:.1} km/h", state.weather.wind_speed)
+        };
+        text_renderer.draw_text(buf, &wind_str, p4_x + 10.0, p4_y + 26.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+
+        // Bottom Page Indicator Dots (• — • • • • •) (active index 1 of 7)
+        let indicator_y = 138.0;
+        let center_x = x + w * 0.5;
+        draw_page_indicators(buf, center_x, indicator_y, 1, 7, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 7);
+    }
+
     /// Mode 5: Shelf - Drag-and-drop file shelf, copy to clipboard, launch file
     fn render_shelf(
         &mut self,
@@ -1424,10 +1714,10 @@ fn wrap_lyric_line<'a>(
             }
         }
 
-        // Bottom Page Indicator Dots (• — • • • •)
+        // Bottom Page Indicator Dots (• • — • • • •) (active index 2 of 7)
         let indicator_y = 134.0;
-        draw_page_indicators(buf, x + w * 0.5, indicator_y, 1, 6, opacity);
-        self.register_page_dot_targets(x + w * 0.5, indicator_y, 6);
+        draw_page_indicators(buf, x + w * 0.5, indicator_y, 2, 7, opacity);
+        self.register_page_dot_targets(x + w * 0.5, indicator_y, 7);
     }
 
     /// Mode 6: To-do - Clean typography spacing, task statistics, scrollable task items
@@ -1646,10 +1936,10 @@ fn wrap_lyric_line<'a>(
             draw_rounded_rect(buf, sb_x, thumb_y, 3.0, thumb_h, 1.5, Color::rgba(255, 255, 255, 0.35 * opacity));
         }
 
-        // Bottom Page Indicator Dots (• • — • • •)
+        // Bottom Page Indicator Dots (• • • • — • •) (active index 4 of 7)
         let indicator_y = 136.0;
-        draw_page_indicators(buf, x + w * 0.5, indicator_y, 2, 6, opacity);
-        self.register_page_dot_targets(x + w * 0.5, indicator_y, 6);
+        draw_page_indicators(buf, x + w * 0.5, indicator_y, 4, 7, opacity);
+        self.register_page_dot_targets(x + w * 0.5, indicator_y, 7);
     }
 
     /// Mode: Calendar & Agenda (Page 3 / 4th Page) - Interactive Month Grid & Google Calendar Sync
@@ -1957,10 +2247,10 @@ fn wrap_lyric_line<'a>(
         };
         text_renderer.draw_text(buf, status_text, right_x + 11.0, 131.0, 8.5, Color::rgba(148, 163, 184, 0.80 * opacity), false);
 
-        // Bottom Page Indicator Dots (• • • — • •) positioned at cy = 138.0
+        // Bottom Page Indicator Dots (• • • — • • •) (active index 3 of 7)
         let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 3, 6, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 6);
+        draw_page_indicators(buf, center_x, indicator_y, 3, 7, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 7);
     }
 
     /// Mode 7: Focus Timer & Stopwatch (Page 3)
@@ -1991,16 +2281,11 @@ fn wrap_lyric_line<'a>(
             draw_monochrome_sound_wave(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity);
         }
 
-        // Nav Arrows: < to ToDo, > to Tools
+        // Nav Arrow: < back to Tools
         let prev_btn_rect = Rect { x: x + 10.0, y: 56.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
         draw_nav_arrow_button(buf, x + 20.0, 68.0, 10.5, false, prev_hover, opacity);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
-
-        let next_btn_rect = Rect { x: x + w - 32.0, y: 56.0, w: 22.0, h: 24.0 };
-        let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + w - 21.0, 68.0, 10.5, true, next_hover, opacity);
-        self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // Mode Selectors Pills (y: 38.0)
         let modes = [
@@ -2143,10 +2428,10 @@ fn wrap_lyric_line<'a>(
         text_renderer.draw_text(buf, "Reset", rst_x + 12.0, ctrl_y + 4.0, 11.0, Color::rgba(203, 213, 225, 0.90 * opacity), false);
         self.click_targets.push((rst_rect, ClickAction::ResetTimer));
 
-        // Bottom Page Indicator Dots (• • • • — •)
+        // Bottom Page Indicator Dots (• • • • • • —) (active index 6 of 7)
         let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 4, 6, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 6);
+        draw_page_indicators(buf, center_x, indicator_y, 6, 7, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 7);
     }
 
     /// Mode 8: Tools & Utilities (Page 4 / 5th Page) - Apple Control Center cards for Eyedropper, Screen Snip, and Mic Mute
@@ -2211,11 +2496,17 @@ fn wrap_lyric_line<'a>(
             );
         }
 
-        // Nav Arrow (<) back to Focus Timer
+        // Nav Arrow (<) back to ToDo
         let prev_btn_rect = Rect { x: x + 10.0, y: 56.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
         draw_nav_arrow_button(buf, x + 21.0, 68.0, 10.5, false, prev_hover, opacity);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
+
+        // Nav Arrow (>) forward to Focus Timer
+        let next_btn_rect = Rect { x: x + w - 32.0, y: 56.0, w: 22.0, h: 24.0 };
+        let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
+        draw_nav_arrow_button(buf, x + w - 21.0, 68.0, 10.5, true, next_hover, opacity);
+        self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // 3 Apple Control Center Utility Cards
         // Layout: 3 cards centered horizontally
@@ -2390,10 +2681,10 @@ fn wrap_lyric_line<'a>(
             self.click_targets.push((c_rect, ClickAction::ToggleMicMute));
         }
 
-        // Bottom Page Indicator Dots (• • • • • —)
+        // Bottom Page Indicator Dots (• • • • • — •) (active index 5 of 7)
         let indicator_y = 134.0;
-        draw_page_indicators(buf, center_x, indicator_y, 5, 6, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 6);
+        draw_page_indicators(buf, center_x, indicator_y, 5, 7, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 7);
     }
     fn render_charging(
         &self,
@@ -2909,11 +3200,12 @@ fn wrap_lyric_line<'a>(
             let rect = Rect { x: px - 8.0, y: cy - 8.0, w: 16.0, h: 16.0 };
             let page = match i {
                 0 => ExpandedPage::Music,
-                1 => ExpandedPage::Shelf,
-                2 => ExpandedPage::ToDo,
+                1 => ExpandedPage::Weather,
+                2 => ExpandedPage::Shelf,
                 3 => ExpandedPage::Calendar,
-                4 => ExpandedPage::Timer,
-                _ => ExpandedPage::Tools,
+                4 => ExpandedPage::ToDo,
+                5 => ExpandedPage::Tools,
+                _ => ExpandedPage::Timer,
             };
             self.click_targets.push((rect, ClickAction::SelectPage(page)));
         }
@@ -3506,7 +3798,8 @@ mod tests {
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::TriggerSnip));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleMicMute));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
-            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 6);
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage));
+            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 7);
         }
 
         // 9b. Calendar & Agenda Page
@@ -3558,7 +3851,39 @@ mod tests {
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarJumpToToday));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarPromptAddEvent));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarSyncGoogle));
-            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 6);
+            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 7);
+        }
+
+        // 9c. Live Weather Page
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Expanded(ExpandedPage::Weather);
+            state.weather.temperature = 26.0;
+            state.weather.apparent_temperature = 33.0;
+            state.weather.city = "Ciruas".to_string();
+            state.weather.weather_code = 3; // Overcast
+            state.weather.is_day = false;
+            state.weather.temp_max = 29.0;
+            state.weather.temp_min = 23.0;
+            state.weather.relative_humidity = 96;
+            state.weather.wind_speed = 1.7;
+
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            let lyrics = SyncedLyrics::default();
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
+            save_bmp(&buf, &format!(r"{}\render_weather.bmp", scratch_dir));
+
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage));
+            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 7);
         }
 
         // 10. Voice Call HUD in Resting Mode
