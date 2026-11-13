@@ -5,7 +5,7 @@
 #![windows_subsystem = "windows"]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -50,12 +50,13 @@ use windows::Win32::UI::Input::KeyboardAndMouse::{
 use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, CreatePopupMenu, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW,
-    FindWindowW, GetCursorPos, GetMessageW, PostQuitMessage, RegisterShellHookWindow,
-    RegisterWindowMessageW, SetForegroundWindow,
-    SetTimer, TrackPopupMenu, TranslateMessage, HTCLIENT, HTTRANSPARENT, MF_POPUP, MF_SEPARATOR, MF_STRING,
-    MSG, SW_SHOWNORMAL, TPM_RETURNCMD, TPM_RIGHTBUTTON, WM_CHAR, WM_DESTROY, WM_DROPFILES,
+    FindWindowW, GetCursorPos, GetMessageW, IsIconic, PostQuitMessage, RegisterShellHookWindow,
+    RegisterWindowMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
+    SetTimer, TrackPopupMenu, TranslateMessage, HTCLIENT, HTTRANSPARENT, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, MF_POPUP, MF_SEPARATOR, MF_STRING,
+    MSG, SC_MINIMIZE, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNORMAL, SW_SHOWNOACTIVATE,
+    TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOWPOS, WM_CHAR, WM_DESTROY, WM_DROPFILES,
     WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_POWERBROADCAST, WM_RBUTTONUP,
-    WM_TIMER,
+    WM_SYSCOMMAND, WM_TIMER, WM_WINDOWPOSCHANGING,
 };
 
 const WM_MOUSEWHEEL: u32 = 0x020A;
@@ -109,9 +110,27 @@ unsafe impl Send for App {}
 
 static APP: Mutex<Option<App>> = Mutex::new(None);
 static SHELL_HOOK_MSG: AtomicU32 = AtomicU32::new(0);
+static IS_MENU_ACTIVE: AtomicBool = AtomicBool::new(false);
 
 fn wake_animation(hwnd: HWND, app: &mut App) {
     let now = Instant::now();
+    // Self-healing: if the shell ever attempted to minimize or demote the notch, restore and re-pin to topmost (unless context menu is active)
+    if !IS_MENU_ACTIVE.load(Ordering::Relaxed) {
+        unsafe {
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+            }
+            let _ = SetWindowPos(
+                hwnd,
+                HWND_TOPMOST,
+                0,
+                0,
+                0,
+                0,
+                SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+            );
+        }
+    }
     // Refresh desktop backdrop behind notch upon interaction if not captured within 50ms
     if now.duration_since(app.last_backdrop_capture) >= std::time::Duration::from_millis(50) {
         app.backdrop.capture(app.window.win_x, app.window.win_y);
@@ -168,6 +187,23 @@ pub unsafe extern "system" fn window_proc(
         let code = wparam.0 as u32;
         // HSHELL_WINDOWACTIVATED (4) | HSHELL_RUDEAPPACTIVATED (0x8004) | HSHELL_WINDOWCREATED (1) | HSHELL_WINDOWDESTROYED (2)
         if code == 4 || code == 0x8004 || code == 1 || code == 2 {
+            // Re-assert topmost Z-order so Dynamic Island is never pushed behind newly active windows (unless context menu is active)
+            if !IS_MENU_ACTIVE.load(Ordering::Relaxed) {
+                unsafe {
+                    if IsIconic(hwnd).as_bool() {
+                        let _ = ShowWindow(hwnd, SW_SHOWNOACTIVATE);
+                    }
+                    let _ = SetWindowPos(
+                        hwnd,
+                        HWND_TOPMOST,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOACTIVATE,
+                    );
+                }
+            }
             if let Ok(mut lock) = APP.lock() {
                 if let Some(app) = lock.as_mut() {
                     let cur_fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
@@ -184,6 +220,27 @@ pub unsafe extern "system" fn window_proc(
     }
 
     match msg {
+        // 1. Defend against "Show Desktop" (Win+D, 3-finger swipe down) minimization
+        WM_SYSCOMMAND => {
+            if (wparam.0 & 0xFFF0) == SC_MINIMIZE as usize {
+                // Top notch is a permanent hardware HUD, refuse shell minimize commands
+                return LRESULT(0);
+            }
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
+        }
+
+        // 2. Defend against Z-order demotion & shell forced hiding
+        WM_WINDOWPOSCHANGING => {
+            let wp = unsafe { &mut *(lparam.0 as *mut WINDOWPOS) };
+            // Clear SWP_HIDEWINDOW so Windows Explorer cannot force the notch to disappear
+            wp.flags &= !SWP_HIDEWINDOW;
+            // Only defend if the shell is attempting to demote the notch to the bottom of the Z-stack.
+            // Never re-route if a popup menu or other topmost window is legitimately positioned above it!
+            if wp.hwndInsertAfter == HWND_BOTTOM || wp.hwndInsertAfter == HWND_NOTOPMOST {
+                wp.hwndInsertAfter = HWND_TOPMOST;
+            }
+            LRESULT(0)
+        }
         WM_NCHITTEST => {
             // Hit-testing passthrough: return HTTRANSPARENT when outside the top notch bounds
             let screen_x = (lparam.0 & 0xFFFF) as i16 as i32;
@@ -764,6 +821,7 @@ pub unsafe extern "system" fn window_proc(
                         let _ = AppendMenuW(hmenu, MF_STRING, 1099, windows::core::w!("❌  Exit NotDynamicIsland"));
 
                         let _ = SetForegroundWindow(hwnd);
+                        IS_MENU_ACTIVE.store(true, Ordering::Relaxed);
                         let cmd = TrackPopupMenu(
                             hmenu,
                             TPM_RETURNCMD | TPM_RIGHTBUTTON,
@@ -773,6 +831,7 @@ pub unsafe extern "system" fn window_proc(
                             hwnd,
                             None,
                         );
+                        IS_MENU_ACTIVE.store(false, Ordering::Relaxed);
                         let _ = DestroyMenu(hmenu);
 
                         if cmd.0 == 1099 {
