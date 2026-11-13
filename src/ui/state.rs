@@ -64,6 +64,7 @@ pub enum NotificationKind {
     ColorPicked { hex: String, rgb: String },
     PrivacyAlert { is_camera: bool, app_name: String },
     TimerCompleted { message: String },
+    ClipboardCopied { preview: String, item_count: usize, is_file: bool },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -413,6 +414,17 @@ impl IslandState {
     #[allow(dead_code)]
     pub fn show_color_picked(&mut self, hex: String, rgb: String) {
         self.show_notification(NotificationKind::ColorPicked { hex, rgb }, 3500);
+    }
+
+    pub fn show_clipboard_pulse(&mut self, preview: String, item_count: usize, is_file: bool) {
+        self.show_notification(
+            NotificationKind::ClipboardCopied {
+                preview,
+                item_count,
+                is_file,
+            },
+            1600,
+        );
     }
 
     pub fn show_notification(&mut self, notif: NotificationKind, duration_ms: u64) {

@@ -3,8 +3,8 @@
 
 use crate::physics::SpringRect;
 use crate::render::{
-    draw_battery_circle_ring, draw_bell_icon, draw_camera_icon, draw_circle, draw_close_button,
-    draw_eyedropper_icon, draw_headphones_badge, draw_lyrics_button_ex,
+    draw_battery_circle_ring, draw_bell_icon, draw_camera_icon, draw_circle, draw_clipboard_icon, draw_close_button,
+    draw_eyedropper_icon, draw_file_icon, draw_headphones_badge, draw_lyrics_button_ex,
     draw_microphone_icon, draw_monochrome_sound_wave,
     draw_nav_arrow_button, draw_nav_arrow_button_ex, draw_next_icon, draw_page_indicators,
     draw_pause_icon, draw_play_icon, draw_prev_icon,
@@ -191,6 +191,7 @@ impl LayoutManager {
             IslandMode::Notification(NotificationKind::ColorPicked { .. }) => (320.0, 44.0, 21.0),
             IslandMode::Notification(NotificationKind::PrivacyAlert { .. }) => (340.0, 48.0, 22.0),
             IslandMode::Notification(NotificationKind::TimerCompleted { .. }) => (340.0, 48.0, 22.0),
+            IslandMode::Notification(NotificationKind::ClipboardCopied { .. }) => (340.0, 48.0, 22.0),
         };
 
         let x = (canvas_w - w) * 0.5;
@@ -326,6 +327,9 @@ impl LayoutManager {
             }
             IslandMode::Notification(NotificationKind::TimerCompleted { message }) => {
                 self.render_timer_completed(buf, text_renderer, cur_x, cur_w, cur_h, message, opacity);
+            }
+            IslandMode::Notification(NotificationKind::ClipboardCopied { preview, item_count, is_file }) => {
+                self.render_clipboard_copied(buf, text_renderer, cur_x, cur_w, cur_h, preview, *item_count, *is_file, opacity);
             }
         }
     }
@@ -2796,6 +2800,75 @@ fn wrap_lyric_line<'a>(
         draw_timer_icon(buf, x + 24.0, cy, 18.0, Color::rgba(251, 191, 36, 0.98 * opacity));
         text_renderer.draw_text(buf, "Focus Session Complete", x + 44.0, cy - 1.0, 12.5, Color::rgba(255, 255, 255, 0.98 * opacity), true);
         text_renderer.draw_text(buf, message, x + 44.0, cy + 13.0, 10.5, Color::rgba(148, 163, 184, 0.90 * opacity), false);
+    }
+
+    /// Notification: Smart Clipboard Pulse Toast
+    fn render_clipboard_copied(
+        &self,
+        buf: &mut PixelBuffer,
+        text_renderer: &TextRenderer,
+        x: f32,
+        _w: f32,
+        h: f32,
+        preview: &str,
+        item_count: usize,
+        is_file: bool,
+        opacity: f32,
+    ) {
+        let cy = h * 0.5;
+
+        // Left Icon badge in sleek frosted glass container
+        let badge_bg = Color::rgba(255, 255, 255, 0.10 * opacity);
+        draw_rounded_rect(buf, x + 14.0, cy - 13.0, 26.0, 26.0, 7.0, badge_bg);
+        draw_rounded_rect_stroke(buf, x + 14.0, cy - 13.0, 26.0, 26.0, 7.0, 0.75, Color::rgba(255, 255, 255, 0.15 * opacity));
+
+        let icon_color = Color::rgba(255, 255, 255, 0.95 * opacity);
+
+        if is_file {
+            draw_file_icon(buf, x + 19.5, cy - 8.0, 16.0, icon_color);
+        } else {
+            draw_clipboard_icon(buf, x + 27.0, cy, 15.0, icon_color);
+        }
+
+        // Header: "Copied to Clipboard" / "Copied 3 files"
+        let title = if is_file {
+            if item_count > 1 {
+                format!("Copied {} files", item_count)
+            } else {
+                "File Copied".to_string()
+            }
+        } else {
+            "Copied to Clipboard".to_string()
+        };
+
+        text_renderer.draw_text(
+            buf,
+            &title,
+            x + 48.0,
+            cy - 1.0,
+            12.0,
+            Color::rgba(255, 255, 255, 0.98 * opacity),
+            true,
+        );
+
+        // Subtitle: Preview of text or filename (clean truncated single-line)
+        let display_preview = if preview.chars().count() > 36 {
+            let mut s = preview.chars().take(34).collect::<String>();
+            s.push_str("...");
+            s
+        } else {
+            preview.to_string()
+        };
+
+        text_renderer.draw_text(
+            buf,
+            &display_preview,
+            x + 48.0,
+            cy + 13.0,
+            10.5,
+            Color::rgba(200, 205, 215, 0.75 * opacity),
+            false,
+        );
     }
 
     fn render_header_bar(

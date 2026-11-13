@@ -1186,3 +1186,23 @@ pub fn draw_theme_toggle(
     let t = if is_dark { 1.0 } else { 0.0 };
     draw_theme_toggle_animated(buf, x, y, w, h, t, is_hovered, opacity);
 }
+
+/// Renders a Clean Vector Clipboard Icon
+pub fn draw_clipboard_icon(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, color: Color) {
+    let w = size * 0.75;
+    let h = size;
+    let x0 = cx - w * 0.5;
+    let y0 = cy - h * 0.5;
+
+    // Board body outline
+    draw_rounded_rect_stroke(buf, x0, y0 + 2.0, w, h - 2.0, 3.0, 1.2, color);
+
+    // Top metal clip
+    let clip_w = w * 0.55;
+    draw_rounded_rect(buf, cx - clip_w * 0.5, y0, clip_w, 4.0, 1.5, color);
+
+    // Document inner lines
+    let inner_w = w - 6.0;
+    draw_rounded_rect(buf, x0 + 3.0, y0 + 7.0, inner_w, 1.2, 0.5, color);
+    draw_rounded_rect(buf, x0 + 3.0, y0 + 10.5, inner_w * 0.7, 1.2, 0.5, color);
+}

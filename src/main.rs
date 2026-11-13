@@ -1182,6 +1182,12 @@ pub unsafe extern "system" fn window_proc(
                 if let Ok(mut lock) = APP.lock() {
                     if let Some(app) = lock.as_mut() {
                         let mut added = false;
+                        let first_name = new_files
+                            .first()
+                            .and_then(|p| p.file_name())
+                            .map(|s| s.to_string_lossy().to_string())
+                            .unwrap_or_else(|| "File".to_string());
+                        let count = new_files.len();
                         for path in new_files {
                             if let Some(file) = system::shelf::ShelfItem::from_path(path) {
                                 app.island_state.shelf.add(file);
@@ -1189,6 +1195,7 @@ pub unsafe extern "system" fn window_proc(
                             }
                         }
                         if added {
+                            app.island_state.show_clipboard_pulse(first_name, count, true);
                             wake_animation(hwnd, app);
                         }
                     }
@@ -1196,8 +1203,10 @@ pub unsafe extern "system" fn window_proc(
             } else if let Some(text) = new_text {
                 if let Ok(mut lock) = APP.lock() {
                     if let Some(app) = lock.as_mut() {
+                        let clean_preview = text.replace('\n', " ").replace('\r', " ").trim().to_string();
                         let item = system::shelf::ShelfItem::from_text(text);
                         app.island_state.shelf.add(item);
+                        app.island_state.show_clipboard_pulse(clean_preview, 1, false);
                         wake_animation(hwnd, app);
                     }
                 }
