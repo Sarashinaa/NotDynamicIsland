@@ -14,6 +14,7 @@ pub mod privacy;
 pub mod romaji;
 pub mod shelf;
 pub mod snip;
+pub mod screenshot;
 pub mod timer;
 pub mod todo;
 pub mod weather;

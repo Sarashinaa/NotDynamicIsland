@@ -1523,8 +1523,8 @@ fn wrap_lyric_line<'a>(
         );
 
         // Right Side: 4 Frosted Glass Metric Pills (2x2 Grid)
-        let grid_x = x + 158.0;
-        let col_w = 110.0;
+        let grid_x = x + 148.0;
+        let col_w = 106.0;
         let col_gap = 8.0;
         let row_h = 35.0;
         let row1_y = 42.0;
@@ -2509,11 +2509,11 @@ fn wrap_lyric_line<'a>(
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // 3 Apple Control Center Utility Cards
-        // Layout: 3 cards centered horizontally
-        let card_w = 110.0;
+        // Layout: 3 cards centered horizontally with exact symmetric margins to both nav arrows
+        let card_w = 106.0;
         let card_h = 74.0;
-        let gap = 10.0;
-        let start_x = x + 38.0;
+        let gap = 8.0;
+        let start_x = x + 43.0;
         let card_y = 38.0;
 
         // Card 1: Eyedropper (Color Picker)

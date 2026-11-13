@@ -817,6 +817,7 @@ pub unsafe extern "system" fn window_proc(
                             windows::core::w!("🌙  Switch to Dark Obsidian")
                         };
                         let _ = AppendMenuW(hmenu, MF_STRING, 1030, theme_label);
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1032, windows::core::w!("📸  Save Screenshot (PNG)"));
 
                         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
                         let _ = AppendMenuW(hmenu, MF_STRING, 1031, windows::core::w!("🌐  GitHub Repository"));
@@ -889,6 +890,19 @@ pub unsafe extern "system" fn window_proc(
                                         }
                                         1030 => {
                                             app.island_state.toggle_glass_theme();
+                                        }
+                                        1032 => {
+                                            let pixels = app.pixel_buffer.data.clone();
+                                            let w = app.pixel_buffer.width;
+                                            let h = app.pixel_buffer.height;
+                                            std::thread::spawn(move || {
+                                                system::screenshot::save_island_screenshot(&pixels, w, h);
+                                            });
+                                            app.island_state.show_banner(
+                                                "Screenshot".to_string(),
+                                                "Snapshot Saved".to_string(),
+                                                "Saved to Pictures\\NotDynamicIsland".to_string(),
+                                            );
                                         }
                                         _ => {}
                                     }
