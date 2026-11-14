@@ -529,13 +529,28 @@ pub unsafe extern "system" fn window_proc(
                     match action {
                         Some(ClickAction::PrevPage) => {
                             app.island_state.cycle_page(false);
+                            if app.island_state.active_page == ExpandedPage::Weather && app.island_state.weather.is_stale() {
+                                if let Some(wm) = &app.weather_manager {
+                                    wm.trigger_refresh();
+                                }
+                            }
                             wake_animation(hwnd, app);
                         }
                         Some(ClickAction::NextPage) => {
                             app.island_state.cycle_page(true);
+                            if app.island_state.active_page == ExpandedPage::Weather && app.island_state.weather.is_stale() {
+                                if let Some(wm) = &app.weather_manager {
+                                    wm.trigger_refresh();
+                                }
+                            }
                             wake_animation(hwnd, app);
                         }
                         Some(ClickAction::SelectPage(page)) => {
+                            if page == ExpandedPage::Weather && app.island_state.weather.is_stale() {
+                                if let Some(wm) = &app.weather_manager {
+                                    wm.trigger_refresh();
+                                }
+                            }
                             app.island_state.select_page(page);
                             wake_animation(hwnd, app);
                         }
@@ -730,6 +745,17 @@ pub unsafe extern "system" fn window_proc(
                             );
                             wake_animation(hwnd, app);
                         }
+                        Some(ClickAction::RefreshWeather) => {
+                            if let Some(wm) = &app.weather_manager {
+                                wm.trigger_refresh();
+                                app.island_state.show_banner(
+                                    "Weather".to_string(),
+                                    "Refreshing Weather".to_string(),
+                                    "Fetching live forecast for current location...".to_string(),
+                                );
+                                wake_animation(hwnd, app);
+                            }
+                        }
                         None => {
                             // If user clicks anywhere on Resting or Closed notch, expand to active page!
                             match app.island_state.mode {
@@ -818,6 +844,7 @@ pub unsafe extern "system" fn window_proc(
                         };
                         let _ = AppendMenuW(hmenu, MF_STRING, 1030, theme_label);
                         let _ = AppendMenuW(hmenu, MF_STRING, 1032, windows::core::w!("📸  Save Screenshot (PNG)"));
+                        let _ = AppendMenuW(hmenu, MF_STRING, 1033, windows::core::w!("🌤️  Refresh Weather Data"));
 
                         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
                         let _ = AppendMenuW(hmenu, MF_STRING, 1031, windows::core::w!("🌐  GitHub Repository"));
@@ -864,7 +891,14 @@ pub unsafe extern "system" fn window_proc(
                                             }
                                         }
                                         1001 => app.island_state.select_page(ExpandedPage::Music),
-                                        1029 => app.island_state.select_page(ExpandedPage::Weather),
+                                        1029 => {
+                                            if app.island_state.weather.is_stale() {
+                                                if let Some(wm) = &app.weather_manager {
+                                                    wm.trigger_refresh();
+                                                }
+                                            }
+                                            app.island_state.select_page(ExpandedPage::Weather);
+                                        }
                                         1002 => app.island_state.select_page(ExpandedPage::Shelf),
                                         1028 => app.island_state.select_page(ExpandedPage::Calendar),
                                         1003 => app.island_state.select_page(ExpandedPage::ToDo),
@@ -903,6 +937,16 @@ pub unsafe extern "system" fn window_proc(
                                                 "Snapshot Saved".to_string(),
                                                 "Saved to Pictures\\NotDynamicIsland".to_string(),
                                             );
+                                        }
+                                        1033 => {
+                                            if let Some(wm) = &app.weather_manager {
+                                                wm.trigger_refresh();
+                                                app.island_state.show_banner(
+                                                    "Weather".to_string(),
+                                                    "Refreshing Weather".to_string(),
+                                                    "Fetching live forecast for current location...".to_string(),
+                                                );
+                                            }
                                         }
                                         _ => {}
                                     }
@@ -1065,6 +1109,11 @@ pub unsafe extern "system" fn window_proc(
                             }
                             // Clamped navigation: stops at ends ("mentok")
                             app.island_state.navigate_page_clamped(forward);
+                            if app.island_state.active_page == ExpandedPage::Weather && app.island_state.weather.is_stale() {
+                                if let Some(wm) = &app.weather_manager {
+                                    wm.trigger_refresh();
+                                }
+                            }
                             wake_animation(hwnd, app);
                         }
                     }
@@ -1088,6 +1137,11 @@ pub unsafe extern "system" fn window_proc(
                         }
                         // Natural touchpad swipe: positive delta cycles left/prev, clamped
                         app.island_state.navigate_page_clamped(false);
+                        if app.island_state.active_page == ExpandedPage::Weather && app.island_state.weather.is_stale() {
+                            if let Some(wm) = &app.weather_manager {
+                                wm.trigger_refresh();
+                            }
+                        }
                         wake_animation(hwnd, app);
                     } else if app.island_state.wheel_accum <= -80 {
                         app.island_state.wheel_accum = 0;
@@ -1098,6 +1152,11 @@ pub unsafe extern "system" fn window_proc(
                         }
                         // Negative delta cycles right/next, clamped
                         app.island_state.navigate_page_clamped(true);
+                        if app.island_state.active_page == ExpandedPage::Weather && app.island_state.weather.is_stale() {
+                            if let Some(wm) = &app.weather_manager {
+                                wm.trigger_refresh();
+                            }
+                        }
                         wake_animation(hwnd, app);
                     }
                 }
@@ -1316,6 +1375,15 @@ pub unsafe extern "system" fn window_proc(
                                 status.battery_percent,
                             );
                             wake_animation(hwnd, app);
+                        }
+
+                        // System resume from Sleep / Hibernate:
+                        // PBT_APMRESUMEAUTOMATIC (0x0012) or PBT_APMRESUMESUSPEND (0x0007)
+                        if wparam.0 == 0x0012 || wparam.0 == 0x0007 {
+                            if let Some(wm) = &app.weather_manager {
+                                wm.trigger_refresh();
+                            }
+                            app.island_state.calendar.trigger_sync(hwnd);
                         }
                     }
                 }

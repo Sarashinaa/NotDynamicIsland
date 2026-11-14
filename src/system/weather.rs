@@ -4,7 +4,7 @@ use std::sync::{
     Arc, RwLock,
 };
 use std::thread::{self, JoinHandle};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
@@ -103,6 +103,10 @@ impl WeatherInfo {
             format!("H: {:.0}°  L: {:.0}°", self.temp_max.round(), self.temp_min.round())
         }
     }
+
+    pub fn is_stale(&self) -> bool {
+        self.last_updated.elapsed() > Duration::from_secs(1800)
+    }
 }
 
 impl Default for WeatherInfo {
@@ -127,6 +131,7 @@ impl Default for WeatherInfo {
 pub struct WeatherManager {
     info: Arc<RwLock<WeatherInfo>>,
     running: Arc<AtomicBool>,
+    refresh_requested: Arc<AtomicBool>,
     worker_handle: Option<JoinHandle<()>>,
     worker_thread: Arc<RwLock<Option<thread::Thread>>>,
 }
@@ -143,10 +148,12 @@ impl WeatherManager {
 
         let info = Arc::new(RwLock::new(initial_info));
         let running = Arc::new(AtomicBool::new(true));
+        let refresh_requested = Arc::new(AtomicBool::new(false));
         let worker_thread = Arc::new(RwLock::new(None));
 
         let info_clone = Arc::clone(&info);
         let running_clone = Arc::clone(&running);
+        let refresh_requested_clone = Arc::clone(&refresh_requested);
         let worker_thread_clone = Arc::clone(&worker_thread);
         let hwnd_val = hwnd.0 as usize;
 
@@ -232,6 +239,9 @@ impl WeatherManager {
                             if !running_clone.load(Ordering::Relaxed) {
                                 return;
                             }
+                            if refresh_requested_clone.swap(false, Ordering::SeqCst) {
+                                break;
+                            }
                             thread::park_timeout(Duration::from_secs(1));
                         }
                     } else {
@@ -239,6 +249,9 @@ impl WeatherManager {
                         for _ in 0..180 {
                             if !running_clone.load(Ordering::Relaxed) {
                                 return;
+                            }
+                            if refresh_requested_clone.swap(false, Ordering::SeqCst) {
+                                break;
                             }
                             thread::park_timeout(Duration::from_secs(10));
                         }
@@ -250,6 +263,7 @@ impl WeatherManager {
         Self {
             info,
             running,
+            refresh_requested,
             worker_handle,
             worker_thread,
         }
@@ -260,6 +274,7 @@ impl WeatherManager {
     }
 
     pub fn trigger_refresh(&self) {
+        self.refresh_requested.store(true, Ordering::SeqCst);
         if let Ok(guard) = self.worker_thread.read() {
             if let Some(t) = guard.as_ref() {
                 t.unpark();
@@ -313,7 +328,7 @@ fn save_cache_to_disk(lat: f32, lon: f32, city: &str, info: &WeatherInfo) {
 
 fn load_cache_from_disk() -> Option<(f32, f32, String, WeatherInfo)> {
     let path = get_cache_file_path()?;
-    let content = std::fs::read_to_string(path).ok()?;
+    let content = std::fs::read_to_string(&path).ok()?;
     let mut city = "Current Location".to_string();
     let mut lat = -6.2;
     let mut lon = 106.8;
@@ -346,6 +361,20 @@ fn load_cache_from_disk() -> Option<(f32, f32, String, WeatherInfo)> {
         }
     }
 
+    let modified_time = std::fs::metadata(&path)
+        .and_then(|m| m.modified())
+        .ok();
+    let is_stale = modified_time
+        .and_then(|t| SystemTime::now().duration_since(t).ok())
+        .map(|d| d > Duration::from_secs(1800))
+        .unwrap_or(true);
+
+    let last_updated = if is_stale {
+        Instant::now().checked_sub(Duration::from_secs(1801)).unwrap_or_else(Instant::now)
+    } else {
+        Instant::now()
+    };
+
     let info = WeatherInfo {
         temperature,
         apparent_temperature,
@@ -358,7 +387,7 @@ fn load_cache_from_disk() -> Option<(f32, f32, String, WeatherInfo)> {
         city: city.clone(),
         is_offline: true,
         is_loaded: true,
-        last_updated: Instant::now(),
+        last_updated,
     };
 
     Some((lat, lon, city, info))
@@ -511,5 +540,17 @@ mod tests {
         assert_eq!(cached.weather_code, 3);
         assert_eq!(cached.is_loaded, true);
         assert_eq!(cached.is_offline, true);
+        assert_eq!(cached.is_stale(), false);
+    }
+
+    #[test]
+    fn test_weather_stale_detection() {
+        let mut info = WeatherInfo::default();
+        assert_eq!(info.is_stale(), false);
+
+        info.last_updated = Instant::now()
+            .checked_sub(Duration::from_secs(1801))
+            .unwrap_or_else(Instant::now);
+        assert_eq!(info.is_stale(), true);
     }
 }

@@ -56,6 +56,7 @@ pub enum ClickAction {
     CalendarCancelAddEvent,
     CalendarDeleteEvent(u32),
     CalendarSyncGoogle,
+    RefreshWeather,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -1463,6 +1464,36 @@ fn wrap_lyric_line<'a>(
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // Left Side: Hero Weather Section (Icon + Big Temp + Condition + City)
+        let hero_card_rect = Rect {
+            x: x + 35.0,
+            y: 35.0,
+            w: 105.0,
+            h: 84.0,
+        };
+        let hero_hover = cursor_pos.map(|(px, py)| hero_card_rect.contains(px, py)).unwrap_or(false);
+        if hero_hover {
+            draw_rounded_rect(
+                buf,
+                hero_card_rect.x,
+                hero_card_rect.y,
+                hero_card_rect.w,
+                hero_card_rect.h,
+                10.0,
+                Color::rgba(255, 255, 255, 0.06 * opacity),
+            );
+            draw_rounded_rect_stroke(
+                buf,
+                hero_card_rect.x,
+                hero_card_rect.y,
+                hero_card_rect.w,
+                hero_card_rect.h,
+                10.0,
+                1.0,
+                Color::rgba(255, 255, 255, 0.12 * opacity),
+            );
+        }
+        self.click_targets.push((hero_card_rect, ClickAction::RefreshWeather));
+
         let hero_cx = x + 60.0;
         let hero_cy = 56.0;
         draw_weather_icon(
@@ -3883,6 +3914,7 @@ mod tests {
 
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::RefreshWeather));
             assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 7);
         }
 
