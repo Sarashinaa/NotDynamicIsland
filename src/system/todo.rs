@@ -18,7 +18,7 @@ pub struct TodoList {
     pub next_id: u32,
     pub scroll_offset: usize,
     pub is_input_active: bool,
-    pub input_buffer: String,
+    pub input: crate::ui::TextInput,
     file_path: PathBuf,
 }
 
@@ -49,7 +49,7 @@ impl TodoList {
             next_id: 1,
             scroll_offset: 0,
             is_input_active: false,
-            input_buffer: String::new(),
+            input: crate::ui::TextInput::new(50),
             file_path,
         };
         list.load();
@@ -58,31 +58,31 @@ impl TodoList {
 
     pub fn start_input(&mut self) {
         self.is_input_active = true;
-        self.input_buffer.clear();
+        self.input.clear();
     }
 
     pub fn cancel_input(&mut self) {
         self.is_input_active = false;
-        self.input_buffer.clear();
+        self.input.clear();
     }
 
     pub fn commit_input(&mut self) {
-        let clean = self.input_buffer.trim().to_string();
+        let clean = self.input.text.trim().to_string();
         if !clean.is_empty() {
             self.add(clean);
         }
         self.is_input_active = false;
-        self.input_buffer.clear();
+        self.input.clear();
     }
 
+    #[allow(dead_code)]
     pub fn input_char(&mut self, c: char) {
-        if self.input_buffer.chars().count() < 35 {
-            self.input_buffer.push(c);
-        }
+        self.input.insert_char(c);
     }
 
+    #[allow(dead_code)]
     pub fn input_backspace(&mut self) {
-        self.input_buffer.pop();
+        self.input.backspace();
     }
 
     pub fn load(&mut self) {
@@ -234,7 +234,7 @@ mod tests {
             next_id: 1,
             scroll_offset: 0,
             is_input_active: false,
-            input_buffer: String::new(),
+            input: crate::ui::TextInput::new(50),
             file_path: test_path.clone(),
         };
 
@@ -259,7 +259,7 @@ mod tests {
             next_id: 1,
             scroll_offset: 0,
             is_input_active: false,
-            input_buffer: String::new(),
+            input: crate::ui::TextInput::new(50),
             file_path: test_path.clone(),
         };
         reloaded.load();
@@ -279,7 +279,7 @@ mod tests {
             next_id: 1,
             scroll_offset: 0,
             is_input_active: false,
-            input_buffer: String::new(),
+            input: crate::ui::TextInput::new(50),
             file_path: test_path.clone(),
         };
         reloaded_after_clear.load();

@@ -1,3 +1,4 @@
+pub mod assistant;
 pub mod artwork;
 pub mod audio;
 pub mod brightness;
@@ -19,6 +20,8 @@ pub mod timer;
 pub mod todo;
 pub mod weather;
 
+#[allow(unused_imports)]
+pub use assistant::{AssistantManager, AssistantState, WM_APP_ASSISTANT_REPLY};
 #[allow(unused_imports)]
 pub use artwork::ArtworkManager;
 pub use audio::{VolumeListener, WM_APP_VOLUME_CHANGED};

@@ -23,10 +23,10 @@ mod window;
 use physics::SpringRect;
 use render::{BackdropBlur, PixelBuffer, TextRenderer};
 use system::{
-    enable_eco_qos, trim_working_set, BrightnessListener, KeyboardHook, MediaController,
+    enable_eco_qos, trim_working_set, AssistantManager, BrightnessListener, KeyboardHook, MediaController,
     NetworkListener, NotificationListener, PowerListener, PrivacyListener, ToastNotificationPayload, VolumeListener,
     WeatherManager,
-    WM_APP_BRIGHTNESS_CHANGED, WM_APP_CALENDAR_UPDATED, WM_APP_CAPSLOCK_CHANGED, WM_APP_MEDIA_CHANGED,
+    WM_APP_ASSISTANT_REPLY, WM_APP_BRIGHTNESS_CHANGED, WM_APP_CALENDAR_UPDATED, WM_APP_CAPSLOCK_CHANGED, WM_APP_MEDIA_CHANGED,
     WM_APP_NETWORK_CHANGED, WM_APP_NOTIFICATION_ARRIVED, WM_APP_POWER_CHANGED, WM_APP_PRIVACY_CHANGED,
     WM_APP_TIME_TICK, WM_APP_TODO_UPDATED, WM_APP_VOLUME_CHANGED, WM_APP_WEATHER_UPDATED,
 };
@@ -56,7 +56,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     SetTimer, TrackPopupMenu, TranslateMessage, HTCLIENT, HTTRANSPARENT, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, MF_POPUP, MF_SEPARATOR, MF_STRING,
     MSG, SC_MINIMIZE, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNORMAL, SW_SHOWNOACTIVATE,
     TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOWPOS, WM_CHAR, WM_DESTROY, WM_DROPFILES,
-    WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_POWERBROADCAST, WM_RBUTTONUP,
+    WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_POWERBROADCAST, WM_RBUTTONUP,
     WM_SYSCOMMAND, WM_TIMER, WM_WINDOWPOSCHANGING,
 };
 
@@ -102,6 +102,7 @@ struct App {
     _privacy_listener: Option<system::privacy::PrivacyListener>,
     _network_listener: Option<system::network::NetworkListener>,
     weather_manager: Option<WeatherManager>,
+    assistant_manager: AssistantManager,
     is_animating: bool,
     last_tick: Instant,
     settled_since: Option<Instant>,
@@ -138,9 +139,9 @@ fn wake_animation(hwnd: HWND, app: &mut App) {
         app.backdrop.capture(app.window.win_x, app.window.win_y);
         app.last_backdrop_capture = now;
     }
+    app.settled_since = None;
     if !app.is_animating {
         app.is_animating = true;
-        app.settled_since = None;
         app.last_tick = now;
         unsafe {
             let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 8, None);
@@ -174,6 +175,276 @@ fn enable_dark_popup_menus(hwnd: HWND) {
                 let flush: FnFlush = std::mem::transmute(flush_fn);
                 flush();
             }
+        }
+    }
+}
+
+fn extract_todo_intent(lower: &str, original: &str) -> Option<String> {
+    let mut cleaned_lower = lower.trim();
+    for polite in ["tolong ", "bisa ", "coba ", "minta tolong "] {
+        if cleaned_lower.starts_with(polite) {
+            cleaned_lower = &cleaned_lower[polite.len()..];
+        }
+    }
+
+    let prefixes = [
+        "tambahin to-do list ",
+        "tambah to-do list ",
+        "tambahin todo list ",
+        "tambah todo list ",
+        "tambahin to-do ",
+        "tambah to-do ",
+        "tambahin todo ",
+        "tambah todo ",
+        "tambahin tugas ",
+        "tambah tugas ",
+        "catat to-do ",
+        "catat todo ",
+        "catat tugas ",
+        "catat: ",
+        "ingetin saya untuk ",
+        "ingetin saya ",
+        "ingatkan saya untuk ",
+        "ingatkan saya ",
+        "ingetin ",
+        "ingatkan ",
+        "add todo ",
+        "add task ",
+        "todo: ",
+        "todo ",
+        "to-do ",
+    ];
+
+    for prefix in prefixes {
+        if cleaned_lower.starts_with(prefix) {
+            let offset = lower.len() - cleaned_lower.len() + prefix.len();
+            if offset <= original.len() {
+                let mut task = original[offset..].trim().to_string();
+                for suffix in [" dong", " ya", " yaa", " pls", " please"] {
+                    if task.to_lowercase().ends_with(suffix) {
+                        task.truncate(task.len() - suffix.len());
+                        task = task.trim().to_string();
+                    }
+                }
+                if !task.is_empty() {
+                    let mut chars = task.chars();
+                    let capitalized = match chars.next() {
+                        None => String::new(),
+                        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+                    };
+                    return Some(capitalized);
+                }
+            }
+        }
+    }
+    None
+}
+
+fn extract_timer_intent(lower: &str) -> Option<u32> {
+    if !lower.contains("timer") && !lower.contains("fokus") && !lower.contains("pomodoro") {
+        return None;
+    }
+    let is_command = lower.starts_with("timer")
+        || lower.contains("pasang")
+        || lower.contains("setel")
+        || lower.contains("set ")
+        || lower.contains("bikin")
+        || lower.contains("buat")
+        || lower.contains("mulai")
+        || lower.contains("nyalakan");
+
+    if !is_command {
+        return None;
+    }
+
+    let words: Vec<&str> = lower.split_whitespace().collect();
+    for w in words {
+        let clean: String = w.chars().filter(|c| c.is_ascii_digit()).collect();
+        if let Ok(num) = clean.parse::<u32>() {
+            if num >= 1 && num <= 180 {
+                return Some(num);
+            }
+        }
+    }
+    None
+}
+
+fn handle_assistant_local_command(prompt: &str, _hwnd: HWND, app: &mut App) -> bool {
+    let lower = prompt.trim().to_lowercase();
+    if lower == "clear" || lower == "bersihkan" || lower == "hapus chat" {
+        app.island_state.assistant.clear();
+        return true;
+    }
+
+    // Screenshot / Snip
+    if lower == "snip"
+        || lower == "screenshot"
+        || lower.contains("screenshot")
+        || lower.contains("tangkapan layar")
+        || lower.starts_with("ambil ss")
+        || lower.starts_with("buka snip")
+    {
+        system::snip::trigger_screen_snip();
+        app.island_state.assistant.last_response = "📸 Snipping Tool berhasil dibuka!".to_string();
+        app.island_state.assistant.is_thinking = false;
+        return true;
+    }
+
+    // Microphone / Mute
+    if lower == "mute"
+        || lower == "mic"
+        || lower == "unmute"
+        || lower.contains("matiin mic")
+        || lower.contains("matikan mic")
+        || lower.contains("matikan mikrofon")
+        || lower.contains("buka mic")
+        || lower.contains("nyalakan mic")
+        || lower.contains("mute mikrofon")
+    {
+        if let Some(muted) = system::privacy::toggle_default_mic_mute() {
+            app.island_state.privacy.mic_muted = muted;
+            let status = if muted { "Dimatikan (Muted)" } else { "Dinyalakan (Unmuted)" };
+            app.island_state.assistant.last_response = format!("🎙️ Mikrofon {}", status);
+            app.island_state.assistant.is_thinking = false;
+            return true;
+        }
+    }
+
+    // Natural To-Do Intent
+    if let Some(task) = extract_todo_intent(&lower, prompt) {
+        if !task.is_empty() {
+            app.island_state.todo.add(task.clone());
+            app.island_state.assistant.last_response = format!("📋 Tugas dicatat ke To-Do List:\n\"{}\"", task);
+            app.island_state.assistant.is_thinking = false;
+            return true;
+        }
+    }
+
+    // Natural Timer Intent
+    if let Some(mins) = extract_timer_intent(&lower) {
+        let clamped = mins.clamp(1, 180);
+        app.island_state.focus_timer.set_duration_mins(clamped);
+        if !app.island_state.focus_timer.is_running {
+            app.island_state.focus_timer.toggle();
+        }
+        app.island_state.assistant.last_response = format!("⏱️ Focus Timer dinyalakan selama {} menit!", clamped);
+        app.island_state.assistant.is_thinking = false;
+        return true;
+    }
+
+    // Weather
+    if lower == "weather"
+        || lower == "cuaca"
+        || lower.contains("cek cuaca")
+        || lower.contains("cuaca hari ini")
+        || lower.contains("suhu hari ini")
+        || lower.starts_with("info cuaca")
+    {
+        if let Some(wm) = &app.weather_manager {
+            wm.trigger_refresh();
+        }
+        let temp = app.island_state.weather.temperature.round() as i32;
+        let cond = app.island_state.weather.condition_text();
+        let city = &app.island_state.weather.city;
+        app.island_state.assistant.last_response = format!("🌤️ Cuaca saat ini {}°C, {} di {}.", temp, cond, city);
+        app.island_state.assistant.is_thinking = false;
+        return true;
+    }
+
+    false
+}
+
+fn process_assistant_actions(response: &str, app: &mut App) -> String {
+    let mut clean_text = response.to_string();
+
+    // 1. [ACTION:TODO:...]
+    if let Some(start) = clean_text.find("[ACTION:TODO:") {
+        if let Some(end) = clean_text[start..].find(']') {
+            let task = clean_text[start + 13..start + end].trim().to_string();
+            if !task.is_empty() {
+                app.island_state.todo.add(task.clone());
+                app.island_state.show_banner(
+                    "To-Do List".to_string(),
+                    "Tugas Dicatat ke List".to_string(),
+                    task,
+                );
+            }
+            clean_text.replace_range(start..start + end + 1, "");
+        }
+    }
+
+    // 2. [ACTION:TIMER:...]
+    if let Some(start) = clean_text.find("[ACTION:TIMER:") {
+        if let Some(end) = clean_text[start..].find(']') {
+            let mins_str = clean_text[start + 14..start + end].trim();
+            if let Ok(mins) = mins_str.parse::<u32>() {
+                let clamped = mins.clamp(1, 180);
+                app.island_state.focus_timer.set_duration_mins(clamped);
+                if !app.island_state.focus_timer.is_running {
+                    app.island_state.focus_timer.toggle();
+                }
+                app.island_state.show_banner(
+                    "Focus Timer".to_string(),
+                    "Timer Dinyalakan".to_string(),
+                    format!("{} Menit", clamped),
+                );
+            }
+            clean_text.replace_range(start..start + end + 1, "");
+        }
+    }
+
+    // 3. [ACTION:SNIP]
+    if let Some(start) = clean_text.find("[ACTION:SNIP]") {
+        system::snip::trigger_screen_snip();
+        clean_text.replace_range(start..start + 13, "");
+    }
+
+    // 4. [ACTION:MUTE]
+    if let Some(start) = clean_text.find("[ACTION:MUTE]") {
+        if let Some(muted) = system::privacy::toggle_default_mic_mute() {
+            app.island_state.privacy.mic_muted = muted;
+        }
+        clean_text.replace_range(start..start + 13, "");
+    }
+
+    // 5. [ACTION:WEATHER]
+    if let Some(start) = clean_text.find("[ACTION:WEATHER]") {
+        if let Some(wm) = &app.weather_manager {
+            wm.trigger_refresh();
+        }
+        clean_text.replace_range(start..start + 16, "");
+    }
+
+    clean_text.trim().to_string()
+}
+
+fn read_clipboard_unicode_text(hwnd: HWND) -> Option<String> {
+    unsafe {
+        if OpenClipboard(hwnd).is_ok() {
+            let mut result = None;
+            if let Ok(hdata) = GetClipboardData(13) {
+                let ptr = windows::Win32::System::Memory::GlobalLock(
+                    windows::Win32::Foundation::HGLOBAL(hdata.0),
+                ) as *const u16;
+                if !ptr.is_null() {
+                    let mut len = 0;
+                    while *ptr.add(len) != 0 {
+                        len += 1;
+                    }
+                    let slice = std::slice::from_raw_parts(ptr, len);
+                    let text = String::from_utf16_lossy(slice).trim().to_string();
+                    let _ = windows::Win32::System::Memory::GlobalUnlock(
+                        windows::Win32::Foundation::HGLOBAL(hdata.0),
+                    );
+                    if !text.is_empty() {
+                        result = Some(text);
+                    }
+                }
+            }
+            let _ = CloseClipboard();
+            result
+        } else {
+            None
         }
     }
 }
@@ -448,6 +719,7 @@ pub unsafe extern "system" fn window_proc(
             if let Ok(mut lock) = APP.lock() {
                 if let Some(app) = lock.as_mut() {
                     if !app.island_state.is_dragging_slider && !app.island_state.todo.is_input_active {
+                        app.island_state.assistant.is_input_active = false;
                         app.island_state.on_mouse_leave();
                         wake_animation(hwnd, app);
                     }
@@ -525,6 +797,14 @@ pub unsafe extern "system" fn window_proc(
                     }
 
                     let action = app.layout.handle_click(cx, cy);
+
+                    // If assistant input is active and click is not focusing or submitting it, unfocus input
+                    if app.island_state.assistant.is_input_active
+                        && !matches!(action, Some(ClickAction::AssistantFocusInput | ClickAction::AssistantSubmitPrompt))
+                    {
+                        app.island_state.assistant.is_input_active = false;
+                        wake_animation(hwnd, app);
+                    }
 
                     match action {
                         Some(ClickAction::PrevPage) => {
@@ -756,6 +1036,90 @@ pub unsafe extern "system" fn window_proc(
                                 wake_animation(hwnd, app);
                             }
                         }
+                        Some(ClickAction::AssistantFocusInput) => {
+                            app.island_state.assistant.start_input();
+                            let is_shift = unsafe { (windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x10) as i16) < 0 };
+                            let cur_x = app.springs.x.current;
+                            let text_start_x = LayoutManager::assistant_input_text_start_x(cur_x);
+                            app.island_state.assistant.input.set_cursor_from_x(
+                                cx,
+                                text_start_x,
+                                &app.text_renderer,
+                                10.5,
+                                false,
+                                is_shift,
+                            );
+                            let cur_w = app.springs.width.current;
+                            let visible_w = LayoutManager::assistant_input_visible_w(cur_w);
+                            app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                            unsafe {
+                                let _ = SetFocus(hwnd);
+                            }
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::TodoFocusInput) => {
+                            let is_shift = unsafe { (windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x10) as i16) < 0 };
+                            let cur_x = app.springs.x.current;
+                            let text_start_x = LayoutManager::todo_input_text_start_x(cur_x);
+                            app.island_state.todo.input.set_cursor_from_x(
+                                cx,
+                                text_start_x,
+                                &app.text_renderer,
+                                10.0,
+                                false,
+                                is_shift,
+                            );
+                            let visible_w = LayoutManager::todo_input_visible_w();
+                            app.island_state.todo.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
+                            unsafe {
+                                let _ = SetFocus(hwnd);
+                            }
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::CalendarFocusInput) => {
+                            let is_shift = unsafe { (windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x10) as i16) < 0 };
+                            let cur_x = app.springs.x.current;
+                            let text_start_x = LayoutManager::calendar_input_text_start_x(cur_x);
+                            app.island_state.calendar.input.set_cursor_from_x(
+                                cx,
+                                text_start_x,
+                                &app.text_renderer,
+                                10.0,
+                                false,
+                                is_shift,
+                            );
+                            let cur_w = app.springs.width.current;
+                            let visible_w = LayoutManager::calendar_input_visible_w(cur_w);
+                            app.island_state.calendar.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
+                            unsafe {
+                                let _ = SetFocus(hwnd);
+                            }
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::AssistantSubmitPrompt) => {
+                            if let Some(prompt) = app.island_state.assistant.commit_prompt() {
+                                if !handle_assistant_local_command(&prompt, hwnd, app) {
+                                    app.assistant_manager.submit_prompt(prompt, hwnd);
+                                }
+                            }
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::AssistantClear) => {
+                            app.island_state.assistant.clear();
+                            wake_animation(hwnd, app);
+                        }
+                        Some(ClickAction::AssistantCopyResponse) => {
+                            let text = app.island_state.assistant.last_response.clone();
+                            if !text.is_empty() {
+                                system::shelf::copy_text_to_clipboard(&text);
+                                app.island_state.show_banner(
+                                    "Gemini Assistant".to_string(),
+                                    "Response Copied".to_string(),
+                                    "AI response copied to clipboard".to_string(),
+                                );
+                                wake_animation(hwnd, app);
+                            }
+                        }
                         None => {
                             // If user clicks anywhere on Resting or Closed notch, expand to active page!
                             match app.island_state.mode {
@@ -816,6 +1180,7 @@ pub unsafe extern "system" fn window_proc(
                             let _ = AppendMenuW(h_pages, MF_STRING, 1003, windows::core::w!("📋  To-Do List"));
                             let _ = AppendMenuW(h_pages, MF_STRING, 1022, windows::core::w!("🛠️  Quick Tools"));
                             let _ = AppendMenuW(h_pages, MF_STRING, 1015, windows::core::w!("⏱️  Focus Timer"));
+                            let _ = AppendMenuW(h_pages, MF_STRING, 1034, windows::core::w!("✦  Gemini AI Assistant"));
                             let _ = AppendMenuW(h_pages, MF_SEPARATOR, 0, None);
                             let _ = AppendMenuW(h_pages, MF_STRING, 1004, windows::core::w!("💬  Toggle Synced Lyrics"));
                             let _ = AppendMenuW(hmenu, MF_POPUP, h_pages.0 as usize, windows::core::w!("📄  Switch Page"));
@@ -904,6 +1269,7 @@ pub unsafe extern "system" fn window_proc(
                                         1003 => app.island_state.select_page(ExpandedPage::ToDo),
                                         1022 => app.island_state.select_page(ExpandedPage::Tools),
                                         1015 => app.island_state.select_page(ExpandedPage::Timer),
+                                        1034 => app.island_state.select_page(ExpandedPage::Assistant),
                                         1004 => app.island_state.toggle_lyrics(),
                                         1016 => {
                                             app.island_state.is_color_picker_active = true;
@@ -1001,24 +1367,57 @@ pub unsafe extern "system" fn window_proc(
                 if let Some(app) = lock.as_mut() {
                     if app.island_state.todo.is_input_active {
                         if code == 13 {
-                            // Enter: commit typed task
+                            // Enter: commit task
                             app.island_state.todo.commit_input();
                             wake_animation(hwnd, app);
                         } else if code == 27 {
                             // Esc: cancel input
                             app.island_state.todo.cancel_input();
                             wake_animation(hwnd, app);
+                        } else if code == 1 {
+                            // Ctrl+A: Select All
+                            app.island_state.todo.input.select_all();
+                            wake_animation(hwnd, app);
+                        } else if code == 3 {
+                            // Ctrl+C: Copy selected
+                            if let Some(clip) = app.island_state.todo.input.selected_text() {
+                                system::shelf::copy_text_to_clipboard(&clip);
+                            }
+                            wake_animation(hwnd, app);
+                        } else if code == 24 {
+                            // Ctrl+X: Cut selected
+                            if let Some(clip) = app.island_state.todo.input.selected_text() {
+                                system::shelf::copy_text_to_clipboard(&clip);
+                                app.island_state.todo.input.delete_selection();
+                                let visible_w = LayoutManager::todo_input_visible_w();
+                                app.island_state.todo.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
+                                wake_animation(hwnd, app);
+                            }
+                        } else if code == 22 {
+                            // Ctrl+V: Paste from clipboard
+                            if let Some(clip) = read_clipboard_unicode_text(hwnd) {
+                                app.island_state.todo.input.insert_text(&clip);
+                                let visible_w = LayoutManager::todo_input_visible_w();
+                                app.island_state.todo.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
+                                wake_animation(hwnd, app);
+                            }
                         } else if code == 8 {
                             // Backspace
-                            app.island_state.todo.input_backspace();
+                            app.island_state.todo.input.backspace();
+                            let visible_w = LayoutManager::todo_input_visible_w();
+                            app.island_state.todo.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
                             wake_animation(hwnd, app);
                         } else if let Some(ch) = char::from_u32(code as u32) {
                             if !ch.is_control() {
-                                app.island_state.todo.input_char(ch);
+                                app.island_state.todo.input.insert_char(ch);
+                                let visible_w = LayoutManager::todo_input_visible_w();
+                                app.island_state.todo.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
                                 wake_animation(hwnd, app);
                             }
                         }
                     } else if app.island_state.calendar.is_input_active {
+                        let cur_w = app.springs.width.current;
+                        let visible_w = LayoutManager::calendar_input_visible_w(cur_w);
                         if code == 13 {
                             // Enter: commit calendar event
                             app.island_state.calendar.commit_input();
@@ -1027,15 +1426,160 @@ pub unsafe extern "system" fn window_proc(
                             // Esc: cancel calendar input
                             app.island_state.calendar.cancel_input();
                             wake_animation(hwnd, app);
+                        } else if code == 1 {
+                            // Ctrl+A: Select All
+                            app.island_state.calendar.input.select_all();
+                            wake_animation(hwnd, app);
+                        } else if code == 3 {
+                            // Ctrl+C: Copy selected
+                            if let Some(clip) = app.island_state.calendar.input.selected_text() {
+                                system::shelf::copy_text_to_clipboard(&clip);
+                            }
+                            wake_animation(hwnd, app);
+                        } else if code == 24 {
+                            // Ctrl+X: Cut selected
+                            if let Some(clip) = app.island_state.calendar.input.selected_text() {
+                                system::shelf::copy_text_to_clipboard(&clip);
+                                app.island_state.calendar.input.delete_selection();
+                                app.island_state.calendar.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
+                                wake_animation(hwnd, app);
+                            }
+                        } else if code == 22 {
+                            // Ctrl+V: Paste from clipboard
+                            if let Some(clip) = read_clipboard_unicode_text(hwnd) {
+                                app.island_state.calendar.input.insert_text(&clip);
+                                app.island_state.calendar.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
+                                wake_animation(hwnd, app);
+                            }
                         } else if code == 8 {
                             // Backspace
-                            app.island_state.calendar.input_backspace();
+                            app.island_state.calendar.input.backspace();
+                            app.island_state.calendar.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
                             wake_animation(hwnd, app);
                         } else if let Some(ch) = char::from_u32(code as u32) {
                             if !ch.is_control() {
-                                app.island_state.calendar.input_char(ch);
+                                app.island_state.calendar.input.insert_char(ch);
+                                app.island_state.calendar.input.update_scroll(&app.text_renderer, 10.0, false, visible_w, 12.0);
                                 wake_animation(hwnd, app);
                             }
+                        }
+                    } else if app.island_state.assistant.is_input_active {
+                        let cur_w = app.springs.width.current;
+                        let visible_w = LayoutManager::assistant_input_visible_w(cur_w);
+                        if code == 13 {
+                            // Enter: commit prompt
+                            if let Some(prompt) = app.island_state.assistant.commit_prompt() {
+                                if !handle_assistant_local_command(&prompt, hwnd, app) {
+                                    app.assistant_manager.submit_prompt(prompt, hwnd);
+                                }
+                            }
+                            wake_animation(hwnd, app);
+                        } else if code == 27 {
+                            // Esc: cancel / unfocus input
+                            app.island_state.assistant.is_input_active = false;
+                            wake_animation(hwnd, app);
+                        } else if code == 1 {
+                            // Ctrl+A: Select All
+                            app.island_state.assistant.input.select_all();
+                            wake_animation(hwnd, app);
+                        } else if code == 3 {
+                            // Ctrl+C: Copy selected
+                            if let Some(clip) = app.island_state.assistant.input.selected_text() {
+                                system::shelf::copy_text_to_clipboard(&clip);
+                            }
+                            wake_animation(hwnd, app);
+                        } else if code == 24 {
+                            // Ctrl+X: Cut selected
+                            if let Some(clip) = app.island_state.assistant.input.selected_text() {
+                                system::shelf::copy_text_to_clipboard(&clip);
+                                app.island_state.assistant.input.delete_selection();
+                                app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                                wake_animation(hwnd, app);
+                            }
+                        } else if code == 22 {
+                            // Ctrl+V: Paste from clipboard
+                            if let Some(clip) = read_clipboard_unicode_text(hwnd) {
+                                app.island_state.assistant.input.insert_text(&clip);
+                                app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                                wake_animation(hwnd, app);
+                            }
+                        } else if code == 8 {
+                            // Backspace
+                            app.island_state.assistant.input.backspace();
+                            app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                            wake_animation(hwnd, app);
+                        } else if let Some(ch) = char::from_u32(code as u32) {
+                            if !ch.is_control() {
+                                app.island_state.assistant.input.insert_char(ch);
+                                app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                                wake_animation(hwnd, app);
+                            }
+                        }
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+
+        WM_KEYDOWN => {
+            let vk = (wparam.0 & 0xFFFF) as u32;
+            let is_shift = unsafe { (windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x10) as i16) < 0 };
+            let is_ctrl = unsafe { (windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x11) as i16) < 0 };
+
+            if let Ok(mut lock) = APP.lock() {
+                if let Some(app) = lock.as_mut() {
+                    let cur_w = app.springs.width.current;
+                    let (active_input, font_size, visible_w, scroll_margin) = if app.island_state.todo.is_input_active {
+                        (Some(&mut app.island_state.todo.input), 10.0f32, LayoutManager::todo_input_visible_w(), 12.0f32)
+                    } else if app.island_state.calendar.is_input_active {
+                        (Some(&mut app.island_state.calendar.input), 10.0f32, LayoutManager::calendar_input_visible_w(cur_w), 12.0f32)
+                    } else if app.island_state.assistant.is_input_active {
+                        (Some(&mut app.island_state.assistant.input), 10.5f32, LayoutManager::assistant_input_visible_w(cur_w), 16.0f32)
+                    } else {
+                        (None, 10.0f32, 100.0f32, 12.0f32)
+                    };
+
+                    if let Some(input) = active_input {
+                        match vk {
+                            0x25 => {
+                                // VK_LEFT
+                                if is_ctrl {
+                                    input.move_word_left(is_shift);
+                                } else {
+                                    input.move_left(is_shift);
+                                }
+                                input.update_scroll(&app.text_renderer, font_size, false, visible_w, scroll_margin);
+                                wake_animation(hwnd, app);
+                            }
+                            0x27 => {
+                                // VK_RIGHT
+                                if is_ctrl {
+                                    input.move_word_right(is_shift);
+                                } else {
+                                    input.move_right(is_shift);
+                                }
+                                input.update_scroll(&app.text_renderer, font_size, false, visible_w, scroll_margin);
+                                wake_animation(hwnd, app);
+                            }
+                            0x24 => {
+                                // VK_HOME
+                                input.move_home(is_shift);
+                                input.update_scroll(&app.text_renderer, font_size, false, visible_w, scroll_margin);
+                                wake_animation(hwnd, app);
+                            }
+                            0x23 => {
+                                // VK_END
+                                input.move_end(is_shift);
+                                input.update_scroll(&app.text_renderer, font_size, false, visible_w, scroll_margin);
+                                wake_animation(hwnd, app);
+                            }
+                            0x2E => {
+                                // VK_DELETE
+                                input.delete();
+                                input.update_scroll(&app.text_renderer, font_size, false, visible_w, scroll_margin);
+                                wake_animation(hwnd, app);
+                            }
+                            _ => {}
                         }
                     }
                 }
@@ -1079,6 +1623,43 @@ pub unsafe extern "system" fn window_proc(
                             }
                             app.island_state.vwheel_accum = 0;
                             wake_animation(hwnd, app);
+                        }
+                    } else if let IslandMode::Expanded(ExpandedPage::Assistant) = app.island_state.mode {
+                        let cur_w = app.springs.width.current;
+                        let card_x = cur_x + 44.0;
+                        let card_w = cur_w - 88.0;
+                        let input_rect = Rect { x: card_x, y: 132.0, w: card_w, h: 28.0 };
+
+                        if input_rect.contains(pt.x as f32, pt.y as f32) {
+                            // Over input field: scroll typed text horizontally so user can review long prompts!
+                            if delta > 0 {
+                                app.island_state.assistant.scroll_input_left();
+                            } else {
+                                app.island_state.assistant.scroll_input_right();
+                            }
+                            wake_animation(hwnd, app);
+                        } else {
+                            // Over response card: scroll response lines smoothly without cutting off
+                            app.island_state.vwheel_accum += delta as i32;
+                            if app.island_state.vwheel_accum.abs() >= 45 {
+                                let max_text_w = card_w - 24.0;
+                                let lines = LayoutManager::wrap_text_lines(
+                                    &app.island_state.assistant.last_response,
+                                    max_text_w,
+                                    &app.text_renderer,
+                                    10.0,
+                                    120,
+                                );
+                                let max_s = lines.len().saturating_sub(4);
+                                app.island_state.assistant.max_scroll = max_s;
+                                if app.island_state.vwheel_accum > 0 {
+                                    app.island_state.assistant.scroll_up();
+                                } else {
+                                    app.island_state.assistant.scroll_down();
+                                }
+                                app.island_state.vwheel_accum = 0;
+                                wake_animation(hwnd, app);
+                            }
                         }
                     } else if let IslandMode::Lyrics = app.island_state.mode {
                         // In Lyrics view: if cursor is on the right side (lyrics pane), scroll lyrics!
@@ -1172,6 +1753,8 @@ pub unsafe extern "system" fn window_proc(
                         app.island_state.todo.commit_input();
                         app.island_state.todo.is_input_active = false;
                     }
+                    app.island_state.assistant.is_input_active = false;
+                    app.island_state.calendar.is_input_active = false;
                     let mut pt = POINT::default();
                     if unsafe { GetCursorPos(&mut pt) }.is_ok() {
                         unsafe {
@@ -1581,6 +2164,19 @@ pub unsafe extern "system" fn window_proc(
             LRESULT(0)
         }
 
+        WM_APP_ASSISTANT_REPLY => {
+            if let Ok(mut lock) = APP.lock() {
+                if let Some(app) = lock.as_mut() {
+                    if let Some((resp, err)) = app.assistant_manager.take_reply() {
+                        let clean_resp = process_assistant_actions(&resp, app);
+                        app.island_state.assistant.on_reply(clean_resp, err);
+                        wake_animation(hwnd, app);
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+
         WM_TIMER => {
             if wparam.0 == TIMER_ANIMATION_ID {
                 if let Ok(mut lock) = APP.lock() {
@@ -1733,6 +2329,8 @@ pub unsafe extern "system" fn window_proc(
                             || app.island_state.pending_shelf_drag.is_some()
                             || app.island_state.todo.is_input_active
                             || app.island_state.calendar.is_input_active
+                            || app.island_state.assistant.is_input_active
+                            || app.island_state.assistant.is_thinking
                             || app.island_state.focus_timer.is_running
                             || app.island_state.active_call.is_active
                             || app.island_state.is_color_picker_active
@@ -1890,6 +2488,7 @@ fn main() {
     network_listener.start(hwnd);
 
     let weather_manager = WeatherManager::new(hwnd);
+    let assistant_manager = AssistantManager::new();
 
     // 7. Store app state in global container
     {
@@ -1917,6 +2516,7 @@ fn main() {
             _privacy_listener: Some(privacy_listener),
             _network_listener: Some(network_listener),
             weather_manager: Some(weather_manager),
+            assistant_manager,
             is_animating: true,
             last_tick: Instant::now(),
             settled_since: None,
@@ -1952,5 +2552,54 @@ fn main() {
         println!("[Main] Message loop exited. res: {}, msg: 0x{:04X}, wparam: 0x{:X}", res.0, msg.message, msg.wParam.0);
         windows::Win32::System::Ole::OleUninitialize();
         let _ = timeEndPeriod(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_natural_language_todo_extraction() {
+        assert_eq!(
+            extract_todo_intent("tambahin to-do list beli telur dan susu", "tambahin to-do list beli telur dan susu"),
+            Some("Beli telur dan susu".to_string())
+        );
+
+        assert_eq!(
+            extract_todo_intent("tambah tugas belajar rust", "tambah tugas belajar rust"),
+            Some("Belajar rust".to_string())
+        );
+
+        assert_eq!(
+            extract_todo_intent("tolong ingatkan saya besok pagi ada meeting ya", "tolong ingatkan saya besok pagi ada meeting ya"),
+            Some("Besok pagi ada meeting".to_string())
+        );
+
+        assert_eq!(
+            extract_todo_intent("catat tugas belanja bulanan dong", "catat tugas belanja bulanan dong"),
+            Some("Belanja bulanan".to_string())
+        );
+
+        assert_eq!(
+            extract_todo_intent("todo Beli kopi", "todo Beli kopi"),
+            Some("Beli kopi".to_string())
+        );
+
+        // General chat should not be matched
+        assert_eq!(
+            extract_todo_intent("siapa presiden pertama indonesia", "siapa presiden pertama indonesia"),
+            None
+        );
+    }
+
+    #[test]
+    fn test_natural_language_timer_extraction() {
+        assert_eq!(extract_timer_intent("timer 25"), Some(25));
+        assert_eq!(extract_timer_intent("pasang timer 15 menit"), Some(15));
+        assert_eq!(extract_timer_intent("tolong setel timer 20 menit dong"), Some(20));
+        assert_eq!(extract_timer_intent("bikin timer 5 menit"), Some(5));
+        assert_eq!(extract_timer_intent("mulai pomodoro 25 menit"), Some(25));
+        assert_eq!(extract_timer_intent("berapa lama membuat kopi?"), None);
     }
 }

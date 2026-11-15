@@ -173,4 +173,74 @@ impl TextRenderer {
 
         self.draw_text(buf, &truncated, start_x, baseline_y, size, color, is_bold)
     }
+
+    /// Renders text with sub-pixel horizontal clipping bounds [min_clip_x, max_clip_x]
+    pub fn draw_text_clipped(
+        &self,
+        buf: &mut PixelBuffer,
+        text: &str,
+        start_x: f32,
+        baseline_y: f32,
+        size: f32,
+        color: Color,
+        is_bold: bool,
+        min_clip_x: f32,
+        max_clip_x: f32,
+    ) -> f32 {
+        let mut current_x = start_x;
+
+        for ch in text.chars() {
+            let Some(font) = self.find_font_for_char(ch, is_bold) else {
+                current_x += size * 0.55;
+                continue;
+            };
+
+            let (metrics, bitmap) = font.rasterize(ch, size);
+            let char_x = current_x + metrics.xmin as f32;
+            let char_y = baseline_y - metrics.ymin as f32 - metrics.height as f32;
+
+            if char_x > max_clip_x {
+                current_x += metrics.advance_width;
+                continue;
+            }
+            if char_x + (metrics.width as f32) < min_clip_x {
+                current_x += metrics.advance_width;
+                continue;
+            }
+
+            for r in 0..metrics.height {
+                let py = (char_y + r as f32).round() as i32;
+                if py < 0 || py >= buf.height as i32 {
+                    continue;
+                }
+
+                for c in 0..metrics.width {
+                    let px_f = char_x + c as f32;
+                    if px_f < min_clip_x || px_f > max_clip_x {
+                        continue;
+                    }
+                    let px = px_f.round() as i32;
+                    if px < 0 || px >= buf.width as i32 {
+                        continue;
+                    }
+
+                    let coverage = bitmap[r * metrics.width + c] as f32 / 255.0;
+                    if coverage > 0.0 {
+                        buf.blend_pixel(
+                            px as usize,
+                            py as usize,
+                            color.r,
+                            color.g,
+                            color.b,
+                            coverage * color.a,
+                        );
+                    }
+                }
+            }
+
+            current_x += metrics.advance_width;
+        }
+
+        current_x
+    }
 }

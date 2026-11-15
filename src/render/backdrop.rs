@@ -27,8 +27,8 @@ impl BackdropBlur {
     pub fn new(full_width: usize, full_height: usize) -> Self {
         let scale = 2;
         let width = full_width / scale;
-        // The top notch never exceeds 160px height; cap capture height to 160px for maximum speed
-        let height = (full_height.min(160)) / scale;
+        // Support full expansion height (up to 240px) with genuine desktop blur
+        let height = (full_height.min(240)) / scale;
         let size = width * height;
         unsafe {
             let hdc_screen = GetDC(HWND::default());
@@ -195,18 +195,17 @@ impl BackdropBlur {
 
     #[inline(always)]
     pub fn get_blurred_pixel(&self, x: usize, y: usize) -> (u8, u8, u8) {
-        let down_x = if self.scale > 1 { x / self.scale } else { x };
-        let down_y = if self.scale > 1 { y / self.scale } else { y };
-        if down_x < self.width && down_y < self.height {
-            let px = self.blurred_buffer[down_y * self.width + down_x];
-            (
-                ((px >> 16) & 0xFF) as u8,
-                ((px >> 8) & 0xFF) as u8,
-                (px & 0xFF) as u8,
-            )
-        } else {
-            (0, 0, 0)
+        if self.width == 0 || self.height == 0 {
+            return (0, 0, 0);
         }
+        let down_x = (if self.scale > 1 { x / self.scale } else { x }).min(self.width - 1);
+        let down_y = (if self.scale > 1 { y / self.scale } else { y }).min(self.height - 1);
+        let px = self.blurred_buffer[down_y * self.width + down_x];
+        (
+            ((px >> 16) & 0xFF) as u8,
+            ((px >> 8) & 0xFF) as u8,
+            (px & 0xFF) as u8,
+        )
     }
 }
 

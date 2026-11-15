@@ -21,6 +21,7 @@ pub enum ExpandedPage {
     ToDo = 4,
     Tools = 5,
     Timer = 6,
+    Assistant = 7,
 }
 
 impl ExpandedPage {
@@ -33,20 +34,22 @@ impl ExpandedPage {
             Self::Calendar => Self::ToDo,
             Self::ToDo => Self::Tools,
             Self::Tools => Self::Timer,
-            Self::Timer => Self::Music,
+            Self::Timer => Self::Assistant,
+            Self::Assistant => Self::Music,
         }
     }
 
     #[allow(dead_code)]
     pub fn prev(&self) -> Self {
         match self {
-            Self::Music => Self::Timer,
+            Self::Music => Self::Assistant,
             Self::Weather => Self::Music,
             Self::Shelf => Self::Weather,
             Self::Calendar => Self::Shelf,
             Self::ToDo => Self::Calendar,
             Self::Tools => Self::ToDo,
             Self::Timer => Self::Tools,
+            Self::Assistant => Self::Timer,
         }
     }
 
@@ -137,6 +140,7 @@ pub struct IslandState {
     pub calendar: CalendarManager,
     pub network_speed: NetworkSpeed,
     pub weather: WeatherInfo,
+    pub assistant: crate::system::assistant::AssistantState,
     pub is_color_picker_active: bool,
     pub show_romaji: bool,
     pub glass_theme: GlassTheme,
@@ -187,6 +191,7 @@ impl IslandState {
             calendar: CalendarManager::new(),
             network_speed: NetworkSpeed::default(),
             weather: WeatherInfo::default(),
+            assistant: crate::system::assistant::AssistantState::default(),
             is_color_picker_active: false,
             show_romaji: true,
             glass_theme: saved_theme,
@@ -341,9 +346,16 @@ impl IslandState {
             }
             ExpandedPage::Timer => {
                 if forward {
-                    ExpandedPage::Timer
+                    ExpandedPage::Assistant
                 } else {
                     ExpandedPage::Tools
+                }
+            }
+            ExpandedPage::Assistant => {
+                if forward {
+                    ExpandedPage::Assistant // mentok kanan
+                } else {
+                    ExpandedPage::Timer
                 }
             }
         };

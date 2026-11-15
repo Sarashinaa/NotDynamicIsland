@@ -7,7 +7,12 @@
 calendar_sync.txt
 calendar.json
 todo.json
+tasks.json
+weather_cache.txt
+*cache*
 glass_theme.txt
+groq_key.txt
+*groq*
 *.ics
 *.env
 *.key

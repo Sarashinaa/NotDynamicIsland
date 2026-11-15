@@ -39,7 +39,7 @@ pub struct CalendarManager {
     pub is_syncing: bool,
     pub sync_status: String,
     pub is_input_active: bool,
-    pub input_buffer: String,
+    pub input: crate::ui::TextInput,
     pub scroll_offset: usize,
     file_path: PathBuf,
     sync_url_path: PathBuf,
@@ -167,7 +167,7 @@ impl CalendarManager {
             is_syncing: false,
             sync_status: "Offline".to_string(),
             is_input_active: false,
-            input_buffer: String::new(),
+            input: crate::ui::TextInput::new(40),
             scroll_offset: 0,
             file_path,
             sync_url_path,
@@ -277,16 +277,16 @@ impl CalendarManager {
 
     pub fn start_input(&mut self) {
         self.is_input_active = true;
-        self.input_buffer.clear();
+        self.input.clear();
     }
 
     pub fn cancel_input(&mut self) {
         self.is_input_active = false;
-        self.input_buffer.clear();
+        self.input.clear();
     }
 
     pub fn commit_input(&mut self) {
-        let clean = self.input_buffer.trim().to_string();
+        let clean = self.input.text.trim().to_string();
         if !clean.is_empty() {
             // Check if user specified a time prefix, e.g. "14:00 Team Review"
             let (time_str, title) = parse_user_event_input(&clean);
@@ -294,17 +294,17 @@ impl CalendarManager {
             self.add_event(title, time_str, color);
         }
         self.is_input_active = false;
-        self.input_buffer.clear();
+        self.input.clear();
     }
 
+    #[allow(dead_code)]
     pub fn input_char(&mut self, c: char) {
-        if self.input_buffer.chars().count() < 40 {
-            self.input_buffer.push(c);
-        }
+        self.input.insert_char(c);
     }
 
+    #[allow(dead_code)]
     pub fn input_backspace(&mut self) {
-        self.input_buffer.pop();
+        self.input.backspace();
     }
 
     pub fn load_sync_url(&mut self) {

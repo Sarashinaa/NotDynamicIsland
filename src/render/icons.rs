@@ -1337,3 +1337,58 @@ pub fn draw_weather_icon(
         }
     }
 }
+
+/// Renders a beautiful 4-pointed Gemini AI sparkle / star icon
+pub fn draw_gemini_sparkle(buf: &mut PixelBuffer, cx: f32, cy: f32, r: f32, color: Color) {
+    let min_x = (cx - r).floor().max(0.0) as usize;
+    let max_x = (cx + r).ceil().min(buf.width as f32 - 1.0) as usize;
+    let min_y = (cy - r).floor().max(0.0) as usize;
+    let max_y = (cy + r).ceil().min(buf.height as f32 - 1.0) as usize;
+
+    for py in min_y..=max_y {
+        let dy = ((py as f32 + 0.5 - cy) / r).abs();
+        for px in min_x..=max_x {
+            let dx = ((px as f32 + 0.5 - cx) / r).abs();
+            // Astroid curve: dx^0.55 + dy^0.55 <= 1.0
+            if dx <= 1.0 && dy <= 1.0 {
+                let dist = dx.powf(0.55) + dy.powf(0.55);
+                if dist <= 1.0 {
+                    let alpha = ((1.0 - dist) * 2.5).clamp(0.0, 1.0) * color.a;
+                    buf.blend_pixel(px, py, color.r, color.g, color.b, alpha);
+                }
+            }
+        }
+    }
+}
+
+/// Renders a sleek right-pointing send / paper airplane icon
+pub fn draw_send_arrow(buf: &mut PixelBuffer, cx: f32, cy: f32, size: f32, color: Color) {
+    let p_tip = (cx + size * 0.52, cy);
+    let p_top = (cx - size * 0.44, cy - size * 0.44);
+    let p_bot = (cx - size * 0.44, cy + size * 0.44);
+    let p_indent = (cx - size * 0.12, cy);
+
+    let steps = 7;
+    for i in 0..=steps {
+        let t = i as f32 / steps as f32;
+        // Upper wing
+        let ux = p_top.0 + t * (p_tip.0 - p_top.0);
+        let uy = p_top.1 + t * (p_tip.1 - p_top.1);
+        draw_circle(buf, ux, uy, 0.85, color);
+
+        // Lower wing
+        let bx = p_bot.0 + t * (p_tip.0 - p_bot.0);
+        let by = p_bot.1 + t * (p_tip.1 - p_bot.1);
+        draw_circle(buf, bx, by, 0.85, color);
+
+        // Inner upper edge
+        let ix1 = p_top.0 + t * (p_indent.0 - p_top.0);
+        let iy1 = p_top.1 + t * (p_indent.1 - p_top.1);
+        draw_circle(buf, ix1, iy1, 0.8, color);
+
+        // Inner lower edge
+        let ix2 = p_bot.0 + t * (p_indent.0 - p_bot.0);
+        let iy2 = p_bot.1 + t * (p_indent.1 - p_bot.1);
+        draw_circle(buf, ix2, iy2, 0.8, color);
+    }
+}

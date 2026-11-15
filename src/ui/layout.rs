@@ -4,13 +4,13 @@
 use crate::physics::SpringRect;
 use crate::render::{
     draw_battery_circle_ring, draw_bell_icon, draw_camera_icon, draw_circle, draw_clipboard_icon, draw_close_button,
-    draw_eyedropper_icon, draw_file_icon, draw_headphones_badge, draw_location_pin, draw_lyrics_button_ex,
+    draw_eyedropper_icon, draw_file_icon, draw_gemini_sparkle, draw_headphones_badge, draw_location_pin, draw_lyrics_button_ex,
     draw_microphone_icon, draw_monochrome_sound_wave,
     draw_nav_arrow_button, draw_nav_arrow_button_ex, draw_next_icon, draw_page_indicators,
     draw_pause_icon, draw_play_icon, draw_prev_icon,
     draw_progress_bar, draw_refresh_icon, draw_romaji_button_ex,
     draw_rounded_rect, draw_rounded_rect_stroke,
-    draw_seek_backward_button_ex, draw_seek_forward_button_ex,
+    draw_seek_backward_button_ex, draw_seek_forward_button_ex, draw_send_arrow,
     draw_snip_icon, draw_speaker_icon, draw_sun_icon, draw_theme_toggle_animated, draw_timer_icon,
     draw_todo_checkbox, draw_top_notch_liquid_glass_interpolated, draw_top_notch_liquid_glass_with_backdrop,
     draw_weather_icon,
@@ -57,6 +57,12 @@ pub enum ClickAction {
     CalendarDeleteEvent(u32),
     CalendarSyncGoogle,
     RefreshWeather,
+    TodoFocusInput,
+    CalendarFocusInput,
+    AssistantFocusInput,
+    AssistantSubmitPrompt,
+    AssistantClear,
+    AssistantCopyResponse,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -182,6 +188,8 @@ impl LayoutManager {
             IslandMode::Expanded(ExpandedPage::Tools) => (420.0, 148.0, 24.0),
             // Timer & Focus: Spacious 400x150, matches design aesthetic
             IslandMode::Expanded(ExpandedPage::Timer) => (400.0, 150.0, 24.0),
+            // Assistant: Gemini AI Assistant prompt and response (470x182)
+            IslandMode::Expanded(ExpandedPage::Assistant) => (470.0, 182.0, 24.0),
             // Lyrics: Generous width for synchronized scrolling lyrics
             IslandMode::Lyrics => (600.0, 150.0, 24.0),
             // Notifications:
@@ -301,6 +309,9 @@ impl LayoutManager {
             }
             IslandMode::Expanded(ExpandedPage::Tools) => {
                 self.render_tools(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+            }
+            IslandMode::Expanded(ExpandedPage::Assistant) => {
+                self.render_assistant(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
             }
             IslandMode::Lyrics => {
                 self.render_lyrics(buf, text_renderer, cur_x, cur_w, cur_h, state, lyrics, opacity, cursor_pos);
@@ -960,8 +971,8 @@ impl LayoutManager {
 
         // Bottom Page Indicator Dots (— • • • • • •) positioned safely at cy = 138.0 with plenty of breathing room!
         let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 0, 7, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 7);
+        draw_page_indicators(buf, center_x, indicator_y, 0, 8, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 8);
     }
 
 /// Intelligently wraps a single lyric line into up to two sub-lines if it exceeds max_width.
@@ -1619,8 +1630,8 @@ fn wrap_lyric_line<'a>(
         // Bottom Page Indicator Dots (• — • • • • •) (active index 1 of 7)
         let indicator_y = 138.0;
         let center_x = x + w * 0.5;
-        draw_page_indicators(buf, center_x, indicator_y, 1, 7, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 7);
+        draw_page_indicators(buf, center_x, indicator_y, 1, 8, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 8);
     }
 
     /// Mode 5: Shelf - Drag-and-drop file shelf, copy to clipboard, launch file
@@ -1747,8 +1758,8 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Page Indicator Dots (• • — • • • •) (active index 2 of 7)
         let indicator_y = 134.0;
-        draw_page_indicators(buf, x + w * 0.5, indicator_y, 2, 7, opacity);
-        self.register_page_dot_targets(x + w * 0.5, indicator_y, 7);
+        draw_page_indicators(buf, x + w * 0.5, indicator_y, 2, 8, opacity);
+        self.register_page_dot_targets(x + w * 0.5, indicator_y, 8);
     }
 
     /// Mode 6: To-do - Clean typography spacing, task statistics, scrollable task items
@@ -1822,43 +1833,24 @@ fn wrap_lyric_line<'a>(
             draw_rounded_rect(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, Color::rgba(18, 22, 28, 0.95 * opacity));
             draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.0, Color::rgba(255, 255, 255, 0.35 * opacity));
 
-            let text_val = &state.todo.input_buffer;
-            let max_text_w = input_rect.w - 40.0;
+            let text_rect = Rect { x: input_rect.x, y: input_rect.y, w: input_rect.w - 36.0, h: input_rect.h };
+            self.click_targets.push((text_rect, ClickAction::TodoFocusInput));
 
-            if text_val.is_empty() {
-                text_renderer.draw_text(buf, "Type task...", input_rect.x + 8.0, input_rect.y + 17.0, 10.0, Color::rgba(148, 163, 184, 0.7 * opacity), false);
-                let cursor_visible = (state.anim_time * 2.5).fract() < 0.5;
-                if cursor_visible {
-                    let cursor_x = (input_rect.x + 8.0) as usize;
-                    let min_y = (input_rect.y + 6.0) as usize;
-                    let max_y = (input_rect.y + 19.0) as usize;
-                    for py in min_y..=max_y {
-                        buf.blend_pixel(cursor_x, py, 255, 255, 255, 0.95 * opacity);
-                    }
-                }
-            } else {
-                // Ensure text stays inside input box: calculate visible suffix if longer than box
-                let mut visible_text = text_val.as_str();
-                while !visible_text.is_empty() && text_renderer.measure_text(visible_text, 10.0, false).0 > max_text_w {
-                    let mut chars = visible_text.chars();
-                    chars.next();
-                    visible_text = chars.as_str();
-                }
-
-                text_renderer.draw_text(buf, visible_text, input_rect.x + 8.0, input_rect.y + 17.0, 10.0, Color::rgba(255, 255, 255, 0.98 * opacity), false);
-
-                // Precise blinking cursor positioned using exact font advance width
-                let cursor_visible = (state.anim_time * 2.5).fract() < 0.5;
-                if cursor_visible {
-                    let (vis_w, _) = text_renderer.measure_text(visible_text, 10.0, false);
-                    let cursor_x = (input_rect.x + 8.0 + vis_w + 1.0) as usize;
-                    let min_y = (input_rect.y + 6.0) as usize;
-                    let max_y = (input_rect.y + 19.0) as usize;
-                    for py in min_y..=max_y {
-                        buf.blend_pixel(cursor_x, py, 255, 255, 255, 0.95 * opacity);
-                    }
-                }
-            }
+            state.todo.input.render(
+                buf,
+                text_renderer,
+                input_rect.x,
+                input_rect.y,
+                input_rect.w - 36.0,
+                input_rect.h,
+                10.0,
+                Color::rgba(255, 255, 255, 0.98 * opacity),
+                "Type task...",
+                true,
+                false,
+                opacity,
+                state.anim_time,
+            );
 
             // Save button (✓ vector checkmark)
             let ok_rect = Rect { x: input_rect.x + input_rect.w - 34.0, y: input_rect.y + 2.0, w: 16.0, h: 22.0 };
@@ -1969,8 +1961,8 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Page Indicator Dots (• • • • — • •) (active index 4 of 7)
         let indicator_y = 136.0;
-        draw_page_indicators(buf, x + w * 0.5, indicator_y, 4, 7, opacity);
-        self.register_page_dot_targets(x + w * 0.5, indicator_y, 7);
+        draw_page_indicators(buf, x + w * 0.5, indicator_y, 4, 8, opacity);
+        self.register_page_dot_targets(x + w * 0.5, indicator_y, 8);
     }
 
     /// Mode: Calendar & Agenda (Page 3 / 4th Page) - Interactive Month Grid & Google Calendar Sync
@@ -2176,24 +2168,24 @@ fn wrap_lyric_line<'a>(
             draw_rounded_rect(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, Color::rgba(18, 22, 28, 0.95 * opacity));
             draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.0, Color::rgba(255, 255, 255, 0.35 * opacity));
 
-            let val = &state.calendar.input_buffer;
-            if val.is_empty() {
-                text_renderer.draw_text(buf, "e.g. 14:00 Review", input_rect.x + 8.0, input_rect.y + 17.0, 10.0, Color::rgba(148, 163, 184, 0.7 * opacity), false);
-            } else {
-                text_renderer.draw_text(buf, val, input_rect.x + 8.0, input_rect.y + 17.0, 10.0, Color::rgba(255, 255, 255, 0.98 * opacity), false);
-            }
+            let text_rect = Rect { x: input_rect.x, y: input_rect.y, w: input_rect.w - 36.0, h: input_rect.h };
+            self.click_targets.push((text_rect, ClickAction::CalendarFocusInput));
 
-            // Blinking cursor
-            let cursor_visible = (state.anim_time * 2.5).fract() < 0.5;
-            if cursor_visible {
-                let (vw, _) = text_renderer.measure_text(val, 10.0, false);
-                let cx = (input_rect.x + 8.0 + vw + 1.0) as usize;
-                let min_y = (input_rect.y + 6.0) as usize;
-                let max_y = (input_rect.y + 19.0) as usize;
-                for py in min_y..=max_y {
-                    buf.blend_pixel(cx, py, 255, 255, 255, 0.95 * opacity);
-                }
-            }
+            state.calendar.input.render(
+                buf,
+                text_renderer,
+                input_rect.x,
+                input_rect.y,
+                input_rect.w - 36.0,
+                input_rect.h,
+                10.0,
+                Color::rgba(255, 255, 255, 0.98 * opacity),
+                "e.g. 14:00 Review",
+                true,
+                false,
+                opacity,
+                state.anim_time,
+            );
 
             // Save ✓ & Cancel ×
             let ok_rect = Rect { x: input_rect.x + input_rect.w - 34.0, y: input_rect.y + 2.0, w: 15.0, h: 22.0 };
@@ -2280,8 +2272,8 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Page Indicator Dots (• • • — • • •) (active index 3 of 7)
         let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 3, 7, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 7);
+        draw_page_indicators(buf, center_x, indicator_y, 3, 8, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 8);
     }
 
     /// Mode 7: Focus Timer & Stopwatch (Page 3)
@@ -2461,8 +2453,8 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Page Indicator Dots (• • • • • • —) (active index 6 of 7)
         let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 6, 7, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 7);
+        draw_page_indicators(buf, center_x, indicator_y, 6, 8, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 8);
     }
 
     /// Mode 8: Tools & Utilities (Page 4 / 5th Page) - Apple Control Center cards for Eyedropper, Screen Snip, and Mic Mute
@@ -2714,8 +2706,384 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Page Indicator Dots (• • • • • — •) (active index 5 of 7)
         let indicator_y = 134.0;
-        draw_page_indicators(buf, center_x, indicator_y, 5, 7, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 7);
+        draw_page_indicators(buf, center_x, indicator_y, 5, 8, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 8);
+    }
+
+    /// Helper function to wrap text within max_w and at most max_lines
+    pub fn wrap_text_lines(text: &str, max_w: f32, tr: &TextRenderer, size: f32, max_lines: usize) -> Vec<String> {
+        let mut lines = Vec::new();
+        for raw_line in text.lines() {
+            let mut cur_line = String::new();
+            for word in raw_line.split_whitespace() {
+                let candidate = if cur_line.is_empty() {
+                    word.to_string()
+                } else {
+                    format!("{} {}", cur_line, word)
+                };
+                let (w, _) = tr.measure_text(&candidate, size, false);
+                if w <= max_w {
+                    cur_line = candidate;
+                } else {
+                    if !cur_line.is_empty() {
+                        lines.push(std::mem::take(&mut cur_line));
+                        if lines.len() >= max_lines {
+                            break;
+                        }
+                    }
+                    cur_line = word.to_string();
+                }
+            }
+            if !cur_line.is_empty() && lines.len() < max_lines {
+                lines.push(cur_line);
+            }
+            if lines.len() >= max_lines {
+                break;
+            }
+        }
+        if lines.len() == max_lines {
+            if let Some(last) = lines.last_mut() {
+                if !last.ends_with("...") {
+                    last.push_str("...");
+                }
+            }
+        }
+        lines
+    }
+
+    /// Formats single-line input text so the cursor and recent typing are always visible.
+    /// If text exceeds available width, scrolls smoothly instead of truncating into "..."
+    #[allow(dead_code)]
+    pub fn format_input_viewport(
+        text: &str,
+        cursor: &str,
+        max_w: f32,
+        tr: &TextRenderer,
+        size: f32,
+        scroll_offset: usize,
+    ) -> String {
+        let full = format!("{}{}", text, cursor);
+        let (full_w, _) = tr.measure_text(&full, size, false);
+        if full_w <= max_w {
+            return full;
+        }
+
+        let chars: Vec<char> = text.chars().collect();
+        let total = chars.len();
+        let end_idx = total.saturating_sub(scroll_offset);
+        let has_more_after = end_idx < total;
+
+        let suffix = if has_more_after { "..." } else { cursor };
+        let (suffix_w, _) = tr.measure_text(suffix, size, false);
+        let (ellipsis_w, _) = tr.measure_text("...", size, false);
+
+        let mut cur_w = suffix_w;
+        let mut candidate_chars = Vec::new();
+        let mut start_idx = end_idx;
+
+        for i in (0..end_idx).rev() {
+            let ch = chars[i];
+            let (cw, _) = tr.measure_text(&ch.to_string(), size, false);
+            let needed_prefix = if i > 0 { ellipsis_w } else { 0.0 };
+            if cur_w + cw + needed_prefix > max_w {
+                break;
+            }
+            cur_w += cw;
+            candidate_chars.push(ch);
+            start_idx = i;
+        }
+        candidate_chars.reverse();
+        let visible_slice: String = candidate_chars.into_iter().collect();
+        let prefix = if start_idx > 0 { "..." } else { "" };
+        format!("{}{}{}", prefix, visible_slice, suffix)
+    }
+
+    /// Exact visible width for assistant prompt text input given island width
+    #[inline]
+    pub fn assistant_input_visible_w(cur_w: f32) -> f32 {
+        let card_w = cur_w - 88.0;
+        let box_w = card_w - 32.0;
+        (box_w - 16.0).max(50.0)
+    }
+
+    /// Exact text start X position for assistant text input given island X
+    #[inline]
+    pub fn assistant_input_text_start_x(cur_x: f32) -> f32 {
+        let card_x = cur_x + 44.0;
+        card_x + 10.0
+    }
+
+    /// Exact visible width for To-Do text input
+    #[inline]
+    pub fn todo_input_visible_w() -> f32 {
+        88.0
+    }
+
+    /// Exact text start X position for To-Do text input given island X
+    #[inline]
+    pub fn todo_input_text_start_x(cur_x: f32) -> f32 {
+        cur_x + 52.0
+    }
+
+    /// Exact visible width for Calendar event text input given island width
+    #[inline]
+    pub fn calendar_input_visible_w(cur_w: f32) -> f32 {
+        (cur_w - 330.0).max(50.0)
+    }
+
+    /// Exact text start X position for Calendar event text input given island X
+    #[inline]
+    pub fn calendar_input_text_start_x(cur_x: f32) -> f32 {
+        cur_x + 252.0
+    }
+
+    /// Mode: Gemini AI Assistant (Page 8) - Native AI desktop assistant powered by Antigravity
+    fn render_assistant(
+        &mut self,
+        buf: &mut PixelBuffer,
+        text_renderer: &TextRenderer,
+        x: f32,
+        w: f32,
+        h: f32,
+        state: &IslandState,
+        opacity: f32,
+        cursor_pos: Option<(f32, f32)>,
+    ) {
+        let center_x = x + w * 0.5;
+        let is_light = state.glass_theme == GlassTheme::FrostedLight;
+
+        // Apple Intelligence Glow halo stroke while thinking
+        if state.assistant.is_thinking {
+            let glow_phase = state.anim_time * 4.0;
+            let glow_alpha = (0.35 + 0.20 * glow_phase.sin()).max(0.1) * opacity;
+            draw_rounded_rect_stroke(buf, x + 1.0, 1.0, w - 2.0, h - 2.0, 23.0, 2.0, Color::rgba(96, 165, 250, glow_alpha));
+        }
+
+        // Top Header Row (cy = 18.0)
+        let cy = 18.0;
+        let header_title = if state.assistant.is_groq {
+            "Groq AI"
+        } else {
+            "Gemini AI"
+        };
+        text_renderer.draw_text(
+            buf,
+            header_title,
+            x + 16.0,
+            cy + 5.0,
+            13.0,
+            Color::rgba(255, 255, 255, 0.95 * opacity),
+            true,
+        );
+
+        // Center Time & Battery
+        draw_battery_circle_ring(
+            buf,
+            center_x - 72.0,
+            cy,
+            6.0,
+            state.battery_percent,
+            state.is_charging,
+            state.is_energy_saver,
+            opacity,
+        );
+        let header_time = get_formatted_header_time();
+        text_renderer.draw_text(
+            buf,
+            &header_time,
+            center_x - 58.0,
+            cy + 4.0,
+            11.5,
+            Color::rgba(255, 255, 255, 0.90 * opacity),
+            true,
+        );
+
+        // Glass Theme Toggle (top right, x + w - 52.0, w: 38.0, h: 18.0 for smooth, non-stick kinetic slide)
+        let theme_rect = Rect { x: x + w - 52.0, y: 9.0, w: 38.0, h: 18.0 };
+        let theme_hover = cursor_pos.map(|(px, py)| theme_rect.contains(px, py)).unwrap_or(false);
+        draw_theme_toggle_animated(buf, theme_rect.x, theme_rect.y, theme_rect.w, theme_rect.h, state.theme_spring.current, theme_hover, opacity);
+        self.click_targets.push((theme_rect, ClickAction::ToggleGlassTheme));
+
+        // Navigation Arrows (vertically centered next to card at y = 80.0)
+        let arrow_y = 80.0;
+        let prev_btn_rect = Rect { x: x + 10.0, y: arrow_y - 12.0, w: 22.0, h: 24.0 };
+        let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
+        draw_nav_arrow_button(buf, x + 21.0, arrow_y, 10.5, false, prev_hover, opacity);
+        self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
+
+        let next_btn_rect = Rect { x: x + w - 32.0, y: arrow_y - 12.0, w: 22.0, h: 24.0 };
+        let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
+        draw_nav_arrow_button(buf, x + w - 21.0, arrow_y, 10.5, true, next_hover, opacity);
+        self.click_targets.push((next_btn_rect, ClickAction::NextPage));
+
+        // Content Area:
+        // Response / Chat Card: x + 44.0, y: 34.0, w: w - 88.0, h: 92.0
+        let card_x = x + 44.0;
+        let card_w = w - 88.0;
+        let card_y = 34.0;
+        let card_h = 92.0;
+
+        let card_bg = if is_light {
+            Color::rgba(0, 0, 0, 0.05 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.07 * opacity)
+        };
+        let card_stroke = if is_light {
+            Color::rgba(0, 0, 0, 0.10 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.12 * opacity)
+        };
+        draw_rounded_rect(buf, card_x, card_y, card_w, card_h, 10.0, card_bg);
+        draw_rounded_rect_stroke(buf, card_x, card_y, card_w, card_h, 10.0, 1.0, card_stroke);
+
+        // Model / Status Badge
+        let badge_text = if state.assistant.is_thinking {
+            "Thinking..."
+        } else if state.assistant.is_groq {
+            "Groq • Qwen 3.8 (Free LPU)"
+        } else {
+            "Gemini 3.5 Flash Lite"
+        };
+        let badge_color = if state.assistant.is_thinking {
+            Color::rgba(96, 165, 250, 0.95 * opacity)
+        } else if state.assistant.is_groq {
+            Color::rgba(249, 115, 22, 0.95 * opacity)
+        } else {
+            Color::rgba(148, 163, 184, 0.85 * opacity)
+        };
+        draw_gemini_sparkle(buf, card_x + 14.0, card_y + 11.0, 4.0, badge_color);
+        text_renderer.draw_text(buf, badge_text, card_x + 22.0, card_y + 14.0, 9.0, badge_color, true);
+
+        // Action buttons in top right of card (Clear & Copy)
+        if !state.assistant.last_response.is_empty() && !state.assistant.is_thinking {
+            let clear_btn_w = 38.0;
+            let clear_btn_x = card_x + card_w - clear_btn_w - 48.0;
+            let clear_btn_rect = Rect { x: clear_btn_x, y: card_y + 5.0, w: clear_btn_w, h: 17.0 };
+            let clear_hover = cursor_pos.map(|(px, py)| clear_btn_rect.contains(px, py)).unwrap_or(false);
+            let clear_bg = if clear_hover { Color::rgba(255, 255, 255, 0.16 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+            draw_rounded_rect(buf, clear_btn_rect.x, clear_btn_rect.y, clear_btn_w, 17.0, 4.0, clear_bg);
+            text_renderer.draw_text(buf, "Clear", clear_btn_x + 7.0, card_y + 16.5, 9.0, Color::rgba(203, 213, 225, 0.90 * opacity), true);
+            self.click_targets.push((clear_btn_rect, ClickAction::AssistantClear));
+
+            let copy_btn_w = 40.0;
+            let copy_btn_x = card_x + card_w - copy_btn_w - 6.0;
+            let copy_btn_rect = Rect { x: copy_btn_x, y: card_y + 5.0, w: copy_btn_w, h: 17.0 };
+            let copy_hover = cursor_pos.map(|(px, py)| copy_btn_rect.contains(px, py)).unwrap_or(false);
+            let copy_bg = if copy_hover { Color::rgba(255, 255, 255, 0.16 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+            draw_rounded_rect(buf, copy_btn_rect.x, copy_btn_rect.y, copy_btn_w, 17.0, 4.0, copy_bg);
+            text_renderer.draw_text(buf, "Copy", copy_btn_x + 7.0, card_y + 16.5, 9.0, Color::rgba(226, 232, 240, 0.90 * opacity), true);
+            self.click_targets.push((copy_btn_rect, ClickAction::AssistantCopyResponse));
+        }
+
+        // Response text area with word wrapping and mouse wheel scrolling
+        let max_text_w = card_w - 24.0;
+        if state.assistant.is_thinking {
+            let dots_count = (state.anim_time * 3.0) as usize % 4;
+            let dots = match dots_count {
+                1 => ".  ",
+                2 => ".. ",
+                3 => "...",
+                _ => "   ",
+            };
+            let thinking_msg = format!("Sedang memproses{}", dots);
+            text_renderer.draw_text(buf, &thinking_msg, card_x + 12.0, card_y + 38.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), false);
+        } else if !state.assistant.last_response.is_empty() {
+            let all_lines = Self::wrap_text_lines(&state.assistant.last_response, max_text_w, text_renderer, 10.0, 120);
+            let visible_count = 4;
+            let max_scroll = all_lines.len().saturating_sub(visible_count);
+            let start = state.assistant.scroll_offset.min(max_scroll);
+            let end = (start + visible_count).min(all_lines.len());
+            let visible_slice = &all_lines[start..end];
+
+            let start_baseline = card_y + 33.0;
+            for (i, line) in visible_slice.iter().enumerate() {
+                let line_y = start_baseline + (i as f32) * 14.0;
+                text_renderer.draw_text(buf, line, card_x + 12.0, line_y, 10.0, Color::rgba(255, 255, 255, 0.92 * opacity), false);
+            }
+
+            // Scroll indicator if text exceeds 4 lines
+            if all_lines.len() > visible_count {
+                let indicator_text = format!("↕ {}-{}/{}", start + 1, end, all_lines.len());
+                text_renderer.draw_text(
+                    buf,
+                    &indicator_text,
+                    card_x + card_w - 56.0,
+                    card_y + card_h - 7.0,
+                    8.5,
+                    Color::rgba(148, 163, 184, 0.75 * opacity),
+                    false,
+                );
+            }
+        } else {
+            let placeholder_intro = if state.assistant.is_groq {
+                "Tanyakan apa saja ke Groq AI (Cepat & Bebas Batas)..."
+            } else {
+                "Tanyakan apa saja ke Gemini AI..."
+            };
+            text_renderer.draw_text(buf, placeholder_intro, card_x + 12.0, card_y + 36.0, 10.5, Color::rgba(226, 232, 240, 0.85 * opacity), false);
+            text_renderer.draw_text(buf, "Contoh: \"tambahin to-do beli susu\", \"pasang timer 25 menit\", \"matiin mic\", \"cuaca\"", card_x + 12.0, card_y + 54.0, 9.0, Color::rgba(148, 163, 184, 0.70 * opacity), false);
+        }
+
+        // Prompt Input Field Bar: card_x, y: 132.0, w: card_w, h: 28.0
+        let input_y = 132.0;
+        let input_h = 28.0;
+        let input_rect = Rect { x: card_x, y: input_y, w: card_w, h: input_h };
+        let input_hover = cursor_pos.map(|(px, py)| input_rect.contains(px, py)).unwrap_or(false);
+        let input_bg = if state.assistant.is_input_active {
+            Color::rgba(255, 255, 255, 0.12 * opacity)
+        } else if input_hover {
+            Color::rgba(255, 255, 255, 0.09 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.06 * opacity)
+        };
+        let input_stroke = if state.assistant.is_input_active {
+            Color::rgba(59, 130, 246, 0.85 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.10 * opacity)
+        };
+        draw_rounded_rect(buf, card_x, input_y, card_w, input_h, 8.0, input_bg);
+        draw_rounded_rect_stroke(buf, card_x, input_y, card_w, input_h, 8.0, 1.0, input_stroke);
+        self.click_targets.push((input_rect, ClickAction::AssistantFocusInput));
+
+        // Text inside input or placeholder using TextInput::render
+        let placeholder_text = if state.assistant.is_groq {
+            "Ask Groq AI..."
+        } else {
+            "Ask Gemini..."
+        };
+        state.assistant.input.render(
+            buf,
+            text_renderer,
+            card_x + 2.0,
+            input_y,
+            card_w - 32.0,
+            input_h,
+            10.5,
+            Color::rgba(255, 255, 255, 0.95 * opacity),
+            placeholder_text,
+            state.assistant.is_input_active,
+            false,
+            opacity,
+            state.anim_time,
+        );
+
+        // Send button on right of input bar
+        let send_btn_w = 24.0;
+        let send_btn_h = 24.0;
+        let send_btn_x = card_x + card_w - send_btn_w - 2.0;
+        let send_btn_rect = Rect { x: send_btn_x, y: input_y + 2.0, w: send_btn_w, h: send_btn_h };
+        let send_hover = cursor_pos.map(|(px, py)| send_btn_rect.contains(px, py)).unwrap_or(false);
+        let send_bg = if send_hover { Color::rgba(59, 130, 246, 0.85 * opacity) } else { Color::rgba(59, 130, 246, 0.55 * opacity) };
+        draw_rounded_rect(buf, send_btn_rect.x, send_btn_rect.y, send_btn_w, send_btn_h, 6.0, send_bg);
+        let arrow_cx = send_btn_x + send_btn_w * 0.5;
+        let arrow_cy = send_btn_rect.y + send_btn_h * 0.5;
+        draw_send_arrow(buf, arrow_cx, arrow_cy, 9.0, Color::rgba(255, 255, 255, 0.98 * opacity));
+        self.click_targets.push((send_btn_rect, ClickAction::AssistantSubmitPrompt));
+
+        // Bottom Page Indicator Dots (• • • • • • • —) (active index 7 of 8)
+        let indicator_y = 171.0;
+        draw_page_indicators(buf, center_x, indicator_y, 7, 8, opacity);
+        self.register_page_dot_targets(center_x, indicator_y, 8);
     }
     fn render_charging(
         &self,
@@ -3236,7 +3604,8 @@ fn wrap_lyric_line<'a>(
                 3 => ExpandedPage::Calendar,
                 4 => ExpandedPage::ToDo,
                 5 => ExpandedPage::Tools,
-                _ => ExpandedPage::Timer,
+                6 => ExpandedPage::Timer,
+                _ => ExpandedPage::Assistant,
             };
             self.click_targets.push((rect, ClickAction::SelectPage(page)));
         }
@@ -3693,7 +4062,7 @@ mod tests {
             let mut state = IslandState::new();
             state.mode = IslandMode::Expanded(ExpandedPage::ToDo);
             state.todo.is_input_active = true;
-            state.todo.input_buffer = "Beli buah segar di pasar pagi dan sayur bayam".to_string();
+            state.todo.input.set_text("Beli buah segar di pasar pagi dan sayur bayam");
             state.anim_time = 0.1; // Cursor visible (0.1 * 2.5 = 0.25 < 0.5)
             let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
             let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
@@ -3830,7 +4199,7 @@ mod tests {
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleMicMute));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage));
-            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 7);
+            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 8);
         }
 
         // 9b. Calendar & Agenda Page
@@ -3882,7 +4251,7 @@ mod tests {
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarJumpToToday));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarPromptAddEvent));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::CalendarSyncGoogle));
-            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 7);
+            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 8);
         }
 
         // 9c. Live Weather Page
@@ -3915,7 +4284,79 @@ mod tests {
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::RefreshWeather));
-            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 7);
+            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 8);
+        }
+
+        // 9d. Gemini AI Assistant Page
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Expanded(ExpandedPage::Assistant);
+            state.assistant.last_response = "Halo! Saya Gemini AI asisten desktop Anda. Saya siap membantu menjawab pertanyaan coding, produktivitas, atau menjalankan quick tools langsung dari Dynamic Island.".to_string();
+
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            let lyrics = SyncedLyrics::default();
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
+            save_bmp(&buf, &format!(r"{}\render_assistant.bmp", scratch_dir));
+
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleGlassTheme));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::AssistantFocusInput));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::AssistantSubmitPrompt));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::AssistantCopyResponse));
+            assert_eq!(lm.click_targets.iter().filter(|(_, a)| matches!(a, ClickAction::SelectPage(_))).count(), 8);
+        }
+
+        // 9d. Groq AI Assistant Page with Select All (Ctrl+A) Highlight Active
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Expanded(ExpandedPage::Assistant);
+            state.assistant.is_input_active = true;
+            state.assistant.input.set_text("Ganti settingan refresh rate monitor ke 144Hz");
+            state.assistant.input.select_all();
+
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            let lyrics = SyncedLyrics::default();
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
+            save_bmp(&buf, &format!(r"{}\render_assistant_selection.bmp", scratch_dir));
+        }
+
+        // 9e. Groq AI Assistant Page (Frosted Light)
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.glass_theme = GlassTheme::FrostedLight;
+            state.theme_spring.snap_to(0.0);
+            state.mode = IslandMode::Expanded(ExpandedPage::Assistant);
+            state.assistant.last_response = "Halo! Saya asisten desktop bertenaga Groq Cloud LPU. Sangat cepat dan bebas kuota ketat!".to_string();
+
+            let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+            let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+            springs.x.current = tx;
+            springs.y.current = ty;
+            springs.width.current = tw;
+            springs.height.current = th;
+            springs.corner_radius.current = tr_val;
+            springs.opacity.current = 1.0;
+            let lyrics = SyncedLyrics::default();
+            lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
+            save_bmp(&buf, &format!(r"{}\render_assistant_frosted.bmp", scratch_dir));
         }
 
         // 10. Voice Call HUD in Resting Mode
@@ -4061,6 +4502,24 @@ mod tests {
             assert_ne!(state.glass_theme, orig_theme);
             state.toggle_glass_theme();
             assert_eq!(state.glass_theme, orig_theme);
+        }
+
+        // 16. Assistant Input Viewport Horizontal Scrolling
+        {
+            let tr = TextRenderer::new();
+            let short = "Hi there";
+            let res = LayoutManager::format_input_viewport(short, "|", 200.0, &tr, 10.5, 0);
+            assert_eq!(res, "Hi there|");
+
+            let long = "Bagaimana cara mengubah refresh rate monitor menjadi 144Hz di Windows 11";
+            // Normal typing (scroll_offset = 0): cursor "|" MUST be at the end, and suffix visible!
+            let at_cursor = LayoutManager::format_input_viewport(long, "|", 150.0, &tr, 10.5, 0);
+            assert!(at_cursor.ends_with("Windows 11|") || at_cursor.ends_with("144Hz di Windows 11|"));
+            assert!(at_cursor.starts_with("..."));
+
+            // Scrolled left (scroll_offset = 40): earlier part of text is visible
+            let scrolled = LayoutManager::format_input_viewport(long, "|", 150.0, &tr, 10.5, 40);
+            assert!(scrolled.contains("Bagaimana") || scrolled.contains("cara"));
         }
     }
 }

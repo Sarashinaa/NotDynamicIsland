@@ -108,6 +108,16 @@ impl LyricsManager {
             *last = title_clean.clone();
         }
 
+        // 1. Instant Cache Hit: check if lyrics (and romaji) are already cached on disk
+        if let Some(cached) = load_lyrics_from_disk(&title_clean, &artist_clean) {
+            if !cached.has_cjk || (!cached.romaji_lines.is_empty() && cached.romaji_lines.len() == cached.lines.len()) {
+                if let Ok(mut lock) = self.current.lock() {
+                    *lock = cached;
+                }
+                return;
+            }
+        }
+
         let current_arc = self.current.clone();
 
         thread::spawn(move || {
@@ -142,13 +152,103 @@ impl LyricsManager {
                         };
                         updated_romaji.push((*t, text));
                     }
+                    lyrics.romaji_lines = updated_romaji.clone();
                     if let Ok(mut lock) = current_arc.lock() {
                         lock.romaji_lines = updated_romaji;
                     }
+                    save_lyrics_to_disk(&title_clean, &artist_clean, &lyrics);
                 }
+            } else if !lyrics.lines.is_empty() {
+                save_lyrics_to_disk(&title_clean, &artist_clean, &lyrics);
             }
         });
     }
+}
+
+fn get_cache_file_path(title: &str, artist: &str) -> Option<std::path::PathBuf> {
+    let app_data = std::env::var("APPDATA")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("."));
+    let cache_dir = app_data.join("NotDynamicIsland").join("lyrics_cache");
+    let _ = std::fs::create_dir_all(&cache_dir);
+
+    let clean_artist = artist.trim();
+    let clean_title = title.trim();
+    let mut safe_name = String::with_capacity(clean_artist.len() + clean_title.len() + 1);
+    for c in format!("{}_{}", clean_artist, clean_title).chars() {
+        if c.is_alphanumeric() || c == '-' || c == '_' {
+            safe_name.push(c);
+        } else if !safe_name.ends_with('_') {
+            safe_name.push('_');
+        }
+    }
+    let truncated: String = safe_name.chars().take(80).collect();
+    let trimmed = truncated.trim_matches('_');
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(cache_dir.join(format!("{}.txt", trimmed)))
+}
+
+fn load_lyrics_from_disk(title: &str, artist: &str) -> Option<SyncedLyrics> {
+    let path = get_cache_file_path(title, artist)?;
+    let content = std::fs::read_to_string(path).ok()?;
+    let mut lines = Vec::new();
+    let mut romaji_lines = Vec::new();
+    let mut has_cjk = false;
+
+    for line in content.lines() {
+        if let Some(val) = line.strip_prefix("HAS_CJK=") {
+            has_cjk = val.trim() == "1";
+        } else if let Some(val) = line.strip_prefix("LINE=") {
+            // format: timestamp|original|romaji
+            let parts: Vec<&str> = val.splitn(3, '|').collect();
+            if parts.len() >= 2 {
+                if let Ok(t) = parts[0].parse::<f32>() {
+                    let orig = parts[1].to_string();
+                    let ro = if parts.len() == 3 && !parts[2].is_empty() {
+                        parts[2].to_string()
+                    } else {
+                        orig.clone()
+                    };
+                    lines.push((t, orig));
+                    romaji_lines.push((t, ro));
+                }
+            }
+        }
+    }
+
+    if lines.is_empty() {
+        return None;
+    }
+
+    Some(SyncedLyrics {
+        track_title: title.to_string(),
+        lines,
+        romaji_lines,
+        has_cjk,
+    })
+}
+
+fn save_lyrics_to_disk(title: &str, artist: &str, lyrics: &SyncedLyrics) {
+    if lyrics.lines.is_empty() {
+        return;
+    }
+    let Some(path) = get_cache_file_path(title, artist) else {
+        return;
+    };
+    let mut content = String::with_capacity(lyrics.lines.len() * 64);
+    content.push_str(&format!("TITLE={}\n", title));
+    content.push_str(&format!("HAS_CJK={}\n", if lyrics.has_cjk { "1" } else { "0" }));
+    for (i, (t, orig)) in lyrics.lines.iter().enumerate() {
+        let ro = if i < lyrics.romaji_lines.len() {
+            &lyrics.romaji_lines[i].1
+        } else {
+            orig
+        };
+        content.push_str(&format!("LINE={:.2}|{}|{}\n", t, orig, ro));
+    }
+    let _ = std::fs::write(path, content);
 }
 
 fn fetch_lrclib_lyrics(title: &str, artist: &str) -> SyncedLyrics {
@@ -294,5 +394,40 @@ fn parse_lrc_time(t: &str) -> Option<f32> {
         Some(mins * 60.0 + secs)
     } else {
         None
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_lyrics_cache_roundtrip() {
+        let test_lyrics = SyncedLyrics {
+            track_title: "Test Song".to_string(),
+            lines: vec![
+                (1.5, "君に出会う前の自分を忘れたみたいに".to_string()),
+                (4.2, "君が居た頃の記憶を忘れられたなら".to_string()),
+            ],
+            romaji_lines: vec![
+                (1.5, "Kimi ni deau mae no jibun o wasureta mitai ni".to_string()),
+                (4.2, "kimi ga ita koro no kioku o wasure raretanara".to_string()),
+            ],
+            has_cjk: true,
+        };
+
+        save_lyrics_to_disk("Test Song", "Test Artist", &test_lyrics);
+        let loaded = load_lyrics_from_disk("Test Song", "Test Artist").expect("Must load cached lyrics");
+
+        assert_eq!(loaded.track_title, "Test Song");
+        assert!(loaded.has_cjk);
+        assert_eq!(loaded.lines.len(), 2);
+        assert_eq!(loaded.romaji_lines.len(), 2);
+        assert_eq!(loaded.romaji_lines[0].1, "Kimi ni deau mae no jibun o wasureta mitai ni");
+
+        // Clean up test cache file
+        if let Some(p) = get_cache_file_path("Test Song", "Test Artist") {
+            let _ = std::fs::remove_file(p);
+        }
     }
 }

@@ -358,72 +358,78 @@ fn fetch_google_romaji_batch(lines: &[String]) -> Vec<String> {
     }
     let joined = lines.join(" ^^^ ");
     let enc = url_encode(&joined);
-    let path_str = format!("/translate_a/single?client=gtx&sl=auto&tl=en&dt=rm&q={}", enc);
-    let mut path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
 
-    unsafe {
-        let session = WinHttpOpen(
-            w!("NotDynamicIsland/1.0"),
-            WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-            None,
-            None,
-            0,
-        );
-        if session.is_null() {
-            return Vec::new();
-        }
+    // Primary: dict-chrome-ex (generous rate limits, official extension client)
+    // Fallback: gtx (public client)
+    let clients = ["dict-chrome-ex", "gtx"];
+    for client in clients {
+        let path_str = format!("/translate_a/single?client={}&sl=auto&tl=en&dt=rm&q={}", client, enc);
+        let mut path_wide: Vec<u16> = path_str.encode_utf16().chain(std::iter::once(0)).collect();
 
-        let connect = WinHttpConnect(session, w!("translate.googleapis.com"), 443, 0);
-        if connect.is_null() {
-            let _ = WinHttpCloseHandle(session);
-            return Vec::new();
-        }
+        unsafe {
+            let session = WinHttpOpen(
+                w!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"),
+                WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
+                None,
+                None,
+                0,
+            );
+            if session.is_null() {
+                continue;
+            }
 
-        let request = WinHttpOpenRequest(
-            connect,
-            w!("GET"),
-            PCWSTR(path_wide.as_mut_ptr()),
-            None,
-            None,
-            std::ptr::null(),
-            WINHTTP_FLAG_SECURE,
-        );
+            let connect = WinHttpConnect(session, w!("translate.googleapis.com"), 443, 0);
+            if connect.is_null() {
+                let _ = WinHttpCloseHandle(session);
+                continue;
+            }
 
-        let mut result_json = String::new();
-        if !request.is_null() {
-            let sent = WinHttpSendRequest(request, None, None, 0, 0, 0);
-            if sent.is_ok() {
-                let rec = WinHttpReceiveResponse(request, std::ptr::null_mut());
-                if rec.is_ok() {
-                    let mut body = Vec::new();
-                    let mut buf = [0u8; 4096];
-                    let mut read_bytes = 0u32;
-                    while WinHttpReadData(
-                        request,
-                        buf.as_mut_ptr() as *mut _,
-                        buf.len() as u32,
-                        &mut read_bytes,
-                    )
-                    .is_ok()
-                        && read_bytes > 0
-                    {
-                        body.extend_from_slice(&buf[..read_bytes as usize]);
-                    }
-                    if let Ok(s) = String::from_utf8(body) {
-                        result_json = s;
+            let request = WinHttpOpenRequest(
+                connect,
+                w!("GET"),
+                PCWSTR(path_wide.as_mut_ptr()),
+                None,
+                None,
+                std::ptr::null(),
+                WINHTTP_FLAG_SECURE,
+            );
+
+            let mut result_json = String::new();
+            if !request.is_null() {
+                let sent = WinHttpSendRequest(request, None, None, 0, 0, 0);
+                if sent.is_ok() {
+                    let rec = WinHttpReceiveResponse(request, std::ptr::null_mut());
+                    if rec.is_ok() {
+                        let mut body = Vec::new();
+                        let mut buf = [0u8; 4096];
+                        let mut read_bytes = 0u32;
+                        while WinHttpReadData(
+                            request,
+                            buf.as_mut_ptr() as *mut _,
+                            buf.len() as u32,
+                            &mut read_bytes,
+                        )
+                        .is_ok()
+                            && read_bytes > 0
+                        {
+                            body.extend_from_slice(&buf[..read_bytes as usize]);
+                        }
+                        if let Ok(s) = String::from_utf8(body) {
+                            result_json = s;
+                        }
                     }
                 }
+                let _ = WinHttpCloseHandle(request);
             }
-            let _ = WinHttpCloseHandle(request);
-        }
 
-        let _ = WinHttpCloseHandle(connect);
-        let _ = WinHttpCloseHandle(session);
+            let _ = WinHttpCloseHandle(connect);
+            let _ = WinHttpCloseHandle(session);
 
-        if let Some(extracted) = extract_google_romanization(&result_json) {
-            let parts = split_translated_parts(&extracted, lines.len());
-            if parts.len() == lines.len() {
-                return parts;
+            if let Some(extracted) = extract_google_romanization(&result_json) {
+                let parts = split_translated_parts(&extracted, lines.len());
+                if parts.len() == lines.len() {
+                    return parts;
+                }
             }
         }
     }
@@ -435,7 +441,10 @@ fn fetch_google_romaji_batch(lines: &[String]) -> Vec<String> {
 /// Gracefully falls back to offline transliteration on network error or mismatch.
 pub fn fetch_google_romaji_all(lines: &[String]) -> Vec<String> {
     let mut all_results = Vec::with_capacity(lines.len());
-    for chunk in lines.chunks(20) {
+    for (idx, chunk) in lines.chunks(20).enumerate() {
+        if idx > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(150));
+        }
         let chunk_vec: Vec<String> = chunk.to_vec();
         let chunk_res = fetch_google_romaji_batch(&chunk_vec);
         if chunk_res.len() == chunk.len() {
