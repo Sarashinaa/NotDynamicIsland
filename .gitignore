@@ -28,4 +28,5 @@ token.json
 *.bmp
 run_log*.txt
 dist/
+GEMINI.md
 
