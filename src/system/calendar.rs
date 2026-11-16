@@ -830,7 +830,7 @@ mod tests {
 VERSION:2.0
 BEGIN:VEVENT
 DTSTART;TZID=Asia/Jakarta:20261111T170000
-SUMMARY:ILT-SS4-A26-AB: Innovation and Collaboration: Think\, Create\, and 
+SUMMARY:Sprint Planning: Architecture and Collaboration: Think\, Create\, and 
  Collaborate
 END:VEVENT
 BEGIN:VEVENT
@@ -841,7 +841,7 @@ END:VCALENDAR"#;
 
         let events = parse_ics_feed(sample_ics);
         assert_eq!(events.len(), 2);
-        assert_eq!(events[0].title, "ILT-SS4-A26-AB: Innovation and Collaboration: Think, Create, and Collaborate");
+        assert_eq!(events[0].title, "Sprint Planning: Architecture and Collaboration: Think, Create, and Collaborate");
         assert_eq!(events[0].year, 2026);
         assert_eq!(events[0].month, 11);
         assert_eq!(events[0].day, 11);

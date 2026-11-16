@@ -54,9 +54,10 @@ The result is a desktop companion that feels organic, responds instantaneously, 
 ## ✦ Key Features
 
 ### 💎 Liquid Glass & Kinetic Aesthetics
-- **Real-Time Optical Lens Diffusion**: In-house 60 FPS hardware-downsampled backdrop blur that softly diffuses windows and text behind the notch, preventing typography collision while preserving crystal-clear liquid glass transparency.
+- **Real-Time Optical Lens Diffusion**: In-house 60 FPS hardware-downsampled backdrop blur that softly diffuses windows and text behind the notch, preserving crystal-clear liquid glass transparency.
 - **Dual Optical Materials**: Toggle seamlessly between **Dark Obsidian** (deep translucent tint with high transmission) and **Crystal-Clear Light** (high-clarity liquid glass with pristine desktop transmittance).
-- **Dual-Stroke Optical Beveling**: 1.0px gradient outer contour with a 1.5px internal prism refraction layer that simulates genuine curved glass thickness.
+- **Background-Adaptive Contrast**: Automatic real-time wallpaper and window luminance detection (`bg_lum > 135.0`) dynamically inverts text, badges, and icons to dark obsidian or bright white, guaranteeing effortless readability on any wallpaper.
+- **Dual-Stroke Optical Beveling**: 1.0px gradient outer contour with a 1.5px internal prism refraction layer simulating genuine curved glass thickness.
 - **Wet-Look Specular Highlight**: 1.8px high-intensity top-edge light arc with smooth horizontal falloff.
 - **High-Refresh 125 FPS Kinetics**: Damped harmonic oscillator (`ζ ≈ 0.717`) ticking at 8ms resolution delivers butter-smooth 60–180Hz motion without micro-stutter.
 - **Surgical Hit-Testing**: Native `HTTRANSPARENT` passthrough outside active curves allows clicking, selecting, and dragging windows directly beneath the transparent canvas.
@@ -72,11 +73,13 @@ The result is a desktop companion that feels organic, responds instantaneously, 
 <br />
 
 ### 🗂️ Desktop Productivity Deck
+- **Live Weather**: Instant location & forecast, real-time temperature, condition text, high/low, humidity, and wind speed.
 - **Drop Shelf**: Stage up to 5 files or clipboard items by simply dragging them over the island. Click to instantly reveal in Windows Explorer.
 - **Interactive To-Do List**: Quick task entry, persistent completion checkboxes, progress tracker, and mouse-wheel scrolling.
 - **Calendar & Agenda**: Monthly calendar view with event badges. Synchronizes privately with Google Calendar via secret iCal feed (`calendar_sync.txt`).
 - **Focus Timer**: Dedicated Pomodoro timer and stopwatch with one-click presets for deep work sessions.
 - **Quick Control Hub**: Fast desktop utilities including Screen Snip (`Win+Shift+S`), Screen Eyedropper, and Microphone Mute toggle.
+- **Groq AI Assistant**: Ultra-fast LLM prompt engine powered by Groq Qwen 3.8B LPU, native text selection/copy/paste, and scrollable responses.
 
 <br />
 
@@ -160,7 +163,7 @@ To synchronize your personal agenda:
 git clone https://github.com/Sarashinaa/NotDynamicIsland.git
 cd NotDynamicIsland
 
-# 2. Run the unit test suite (17 tests verifying math, shelf, blur, and parsers)
+# 2. Run the unit test suite (44 tests verifying math, shelf, blur, inputs, and parsers)
 cargo test
 
 # 3. Build optimized release binary with LTO

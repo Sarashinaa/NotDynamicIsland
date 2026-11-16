@@ -10,7 +10,7 @@ windows = { version = "0.58", features = ["Win32_Foundation", "Win32_UI_WindowsA
 windows-core = "0.58"
 
 [profile.release]
-opt-level = 3
+opt-level = "s"
 lto = true
 codegen-units = 1
 panic = "abort"

@@ -106,10 +106,26 @@ pub enum GlassTheme {
     FrostedLight, // Sun ☀️: Apple Light Frosted Glass
 }
 
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+pub enum IslandShape {
+    TopNotch,     // Nempel bezel layar atas (y = 0.0)
+    FloatingPill, // Kapsul melayang dengan celah dari bezel (y = 8.0)
+}
+
+#[derive(Clone, Debug)]
+pub struct SubNotification {
+    pub kind: NotificationKind,
+    pub timeout_at: Instant,
+    pub is_dismissing: bool,
+}
+
 pub struct IslandState {
     pub mode: IslandMode,
     pub previous_mode: IslandMode,
+    pub shape: IslandShape,
     pub timeout_at: Option<Instant>,
+    pub sub_notification: Option<SubNotification>,
+    pub sub_notif_spring: Spring,
     pub unhover_deadline: Option<Instant>,
     pub active_page: ExpandedPage,
     pub media_info: MediaTrackInfo,
@@ -153,15 +169,20 @@ impl IslandState {
     pub fn new() -> Self {
         let (bat, chg) = query_battery_status();
         let saved_theme = Self::load_saved_glass_theme();
+        let saved_shape = Self::load_saved_shape();
         let initial_theme_val = match saved_theme {
             GlassTheme::DarkObsidian => 1.0,
             GlassTheme::FrostedLight => 0.0,
         };
         let theme_spring = Spring::new(initial_theme_val, 280.0, 24.0, 1.0);
+        let sub_notif_spring = Spring::new(0.0, 320.0, 24.0, 1.0);
         Self {
             mode: IslandMode::Resting,
             previous_mode: IslandMode::Resting,
+            shape: saved_shape,
             timeout_at: None,
+            sub_notification: None,
+            sub_notif_spring,
             unhover_deadline: None,
             active_page: ExpandedPage::Music,
             media_info: MediaTrackInfo::default(),
@@ -221,6 +242,11 @@ impl IslandState {
         GlassTheme::DarkObsidian
     }
 
+    #[inline]
+    pub fn is_light_theme(&self) -> bool {
+        self.theme_spring.current < 0.5
+    }
+
     pub fn toggle_glass_theme(&mut self) {
         self.glass_theme = match self.glass_theme {
             GlassTheme::DarkObsidian => GlassTheme::FrostedLight,
@@ -236,6 +262,35 @@ impl IslandState {
             GlassTheme::FrostedLight => "frosted",
         };
         let _ = std::fs::write(Self::get_theme_path(), val);
+    }
+
+    fn get_shape_path() -> std::path::PathBuf {
+        let app_data = std::env::var("APPDATA").unwrap_or_default();
+        if !app_data.is_empty() {
+            let p = std::path::PathBuf::from(app_data).join("NotDynamicIsland");
+            let _ = std::fs::create_dir_all(&p);
+            p.join("island_shape.txt")
+        } else {
+            std::path::PathBuf::from("island_shape.txt")
+        }
+    }
+
+    fn load_saved_shape() -> IslandShape {
+        if let Ok(content) = std::fs::read_to_string(Self::get_shape_path()) {
+            if content.trim().eq_ignore_ascii_case("pill") || content.trim().eq_ignore_ascii_case("floating") {
+                return IslandShape::FloatingPill;
+            }
+        }
+        IslandShape::TopNotch
+    }
+
+    pub fn set_shape(&mut self, shape: IslandShape) {
+        self.shape = shape;
+        let val = match shape {
+            IslandShape::TopNotch => "notch",
+            IslandShape::FloatingPill => "pill",
+        };
+        let _ = std::fs::write(Self::get_shape_path(), val);
     }
 
     pub fn set_call_active(&mut self, active: bool, is_video: bool, app_name: String) {
@@ -453,11 +508,43 @@ impl IslandState {
     }
 
     pub fn show_notification(&mut self, notif: NotificationKind, duration_ms: u64) {
-        if !matches!(self.mode, IslandMode::Notification(_)) {
-            self.previous_mode = self.mode.clone();
+        let is_user_interacting = self.is_hovered
+            || matches!(self.mode, IslandMode::Expanded(_) | IslandMode::Lyrics);
+
+        if is_user_interacting {
+            // When user is interacting with the expanded island, float notification underneath as an animated pill!
+            self.sub_notification = Some(SubNotification {
+                kind: notif,
+                timeout_at: Instant::now() + std::time::Duration::from_millis(duration_ms),
+                is_dismissing: false,
+            });
+            self.sub_notif_spring.snap_to(0.0);
+            self.sub_notif_spring.set_target(1.0);
+        } else {
+            if !matches!(self.mode, IslandMode::Notification(_)) {
+                self.previous_mode = self.mode.clone();
+            }
+            self.mode = IslandMode::Notification(notif);
+            self.timeout_at = Some(Instant::now() + std::time::Duration::from_millis(duration_ms));
         }
-        self.mode = IslandMode::Notification(notif);
-        self.timeout_at = Some(Instant::now() + std::time::Duration::from_millis(duration_ms));
+    }
+
+    pub fn dismiss_sub_notification(&mut self) {
+        if let Some(sub) = &mut self.sub_notification {
+            sub.is_dismissing = true;
+            self.sub_notif_spring.set_target(0.0);
+        }
+    }
+
+    pub fn restore_previous_mode(&mut self) {
+        self.timeout_at = None;
+        if self.is_hovered {
+            self.mode = IslandMode::Expanded(self.active_page);
+        } else if self.media_info.is_playing {
+            self.mode = IslandMode::Closed;
+        } else {
+            self.mode = IslandMode::Resting;
+        }
     }
 
     pub fn update_media(&mut self, info: MediaTrackInfo) {
@@ -484,6 +571,22 @@ impl IslandState {
         }
 
         let now = Instant::now();
+        let mut woke = false;
+
+        // 0. Check under-island sub-notification timeout
+        if let Some(sub) = &mut self.sub_notification {
+            if now >= sub.timeout_at && !sub.is_dismissing {
+                sub.is_dismissing = true;
+                self.sub_notif_spring.set_target(0.0);
+                woke = true;
+            }
+        }
+        if let Some(sub) = &self.sub_notification {
+            if sub.is_dismissing && self.sub_notif_spring.current <= 0.02 && self.sub_notif_spring.velocity.abs() < 0.05 {
+                self.sub_notification = None;
+                woke = true;
+            }
+        }
 
         // 1. Check transient notification timeout
         if let Some(deadline) = self.timeout_at {
@@ -516,7 +619,7 @@ impl IslandState {
             }
         }
 
-        false
+        woke
     }
 }
 

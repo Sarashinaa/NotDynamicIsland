@@ -236,6 +236,9 @@ pub fn load_groq_api_key() -> Option<String> {
             .ok()
             .and_then(|p| p.parent().map(|d| d.join("groq_key.txt")))
             .unwrap_or_default(),
+        std::env::var("APPDATA")
+            .map(|a| std::path::PathBuf::from(a).join("NotDynamicIsland").join("groq_key.txt"))
+            .unwrap_or_default(),
         std::env::var("USERPROFILE")
             .map(|u| std::path::PathBuf::from(u).join(".groq").join("api_key"))
             .unwrap_or_default(),

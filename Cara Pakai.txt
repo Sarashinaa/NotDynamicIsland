@@ -1,18 +1,20 @@
 ﻿==================================================
-    NotDynamicIsland (Project Nova) for Windows
+    NotDynamicIsland for Windows
 ==================================================
 
 Cara Pakai:
 1. Tinggal double-click file 'not_dynamic_island.exe'.
 2. Notch Dynamic Island akan langsung muncul di bagian atas layar monitor.
-3. Fitur Utama (Total 6 Halaman Interaktif):
-   - Halaman 1: Media Controller & Synced Lyrics (Apple Music style)
-   - Halaman 2: File Shelf (Drag & drop file hingga 5 item)
-   - Halaman 3: To-Do List (Tambah tugas, checklist centang)
-   - Halaman 4: Calendar & Agenda (Kalender bulanan interaktif, agenda harian, sync Google Calendar)
-   - Halaman 5: Focus Timer & Stopwatch (Pomodoro 25m, break, stopwatch)
-   - Halaman 6: Tools & Control Center (Eyedropper, Screen Snip, Mic Mute)
-   - Indikator Ekstra: Live Battery & AC Charger, Speed Download Meter, Call HUD (WA/Discord/IG).
+3. Fitur Utama (Total 8 Halaman Interaktif):
+   - Halaman 1: Media Controller & Synced Lyrics (Apple Music style, Romaji transliteration, micro-seek ±5s)
+   - Halaman 2: Live Weather & Forecast (Suhu real-time, kondisi cuaca, kelembapan, angin, high/low)
+   - Halaman 3: File Shelf (Drag & drop file hingga 5 item)
+   - Halaman 4: To-Do List (Tambah tugas, checklist centang)
+   - Halaman 5: Calendar & Agenda (Kalender bulanan interaktif, agenda harian, sync Google Calendar)
+   - Halaman 6: Focus Timer & Stopwatch (Pomodoro 25m, break, stopwatch)
+   - Halaman 7: Tools & Control Center (Eyedropper, Screen Snip, Mic Mute)
+   - Halaman 8: Groq AI Assistant (Qwen 3.8B LPU ultra-cepat)
+   - Indikator Ekstra: Live Battery & AC Charger, Brightness & Volume HUD, Call HUD, OSD Hardware Sensor.
 
 4. Cara Menghubungkan Google Calendar:
    - Buka Google Calendar di browser -> Settings -> Pilih Kalender Anda.
@@ -20,9 +22,15 @@ Cara Pakai:
    - Paste link tersebut ke file 'calendar_sync.txt' yang otomatis dibuat di samping exe / AppData.
    - Dynamic Island akan otomatis sinkron setiap 20 menit atau klik tombol [↻] di kalender!
 
-5. Navigasi:
+5. Cara Menggunakan Groq AI Assistant:
+   - Simpan API Key Groq Anda ke file 'groq_key.txt' di samping file exe, atau di %USERPROFILE%\.groq\api_key.
+   - Langsung ketik pertanyaan atau perintah melalui input interaktif AI Assistant.
+
+6. Navigasi & Tampilan:
    - Scroll mouse / swipe touchpad untuk berpindah halaman.
-   - Atau klik titik indikator halaman di bagian bawah notch.
-   - Klik kanan pada notch untuk membuka Menu, Quick Switch, atau Exit.
+   - Atau klik titik indikator halaman / tombol navigasi panah kiri-kanan.
+   - Klik switch Matahari / Bulan untuk beralih mode Liquid Glass (Dark Obsidian / Crystal Light).
+   - Teks & ikon otomatis adaptif terhadap wallpaper terang maupun gelap!
+   - Klik kanan pada notch untuk membuka Menu, Quick Switch, Display Selector, atau Exit.
 
 Tidak butuh install apa pun, portable & hemat RAM (< 10 MB).

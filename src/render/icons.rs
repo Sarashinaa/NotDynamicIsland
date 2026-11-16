@@ -327,8 +327,8 @@ pub fn draw_mascot_eyes(
     draw_rounded_rect(buf, right_x, eye_y, eye_w, eye_h, r, eye_color);
 }
 
-/// Renders the Circular Battery Ring with support for Energy Saver & Charging states
-pub fn draw_battery_circle_ring(
+/// Renders the Circular Battery Ring with support for Energy Saver & Charging states and backdrop luminance adaptation
+pub fn draw_battery_circle_ring_adaptive(
     buf: &mut PixelBuffer,
     cx: f32,
     cy: f32,
@@ -337,10 +337,15 @@ pub fn draw_battery_circle_ring(
     is_charging: bool,
     is_energy_saver: bool,
     opacity: f32,
+    is_bright: bool,
 ) {
     let thickness = 2.5;
     let progress = (percent as f32 / 100.0).clamp(0.05, 1.0);
-    let bg_color = Color::rgba(255, 255, 255, 0.15 * opacity);
+    let bg_color = if is_bright {
+        Color::rgba(0, 0, 0, 0.15 * opacity)
+    } else {
+        Color::rgba(255, 255, 255, 0.15 * opacity)
+    };
     let fg_color = if is_energy_saver {
         // User requirement: #EAA300 when Energy Saver is active
         Color::rgba(234, 163, 0, 0.98 * opacity)
@@ -358,8 +363,26 @@ pub fn draw_battery_circle_ring(
     super::primitives::draw_ring_meter(buf, cx, cy, radius, thickness, progress, bg_color, fg_color);
 
     if is_charging {
-        draw_lightning_bolt(buf, cx, cy, radius * 0.8, Color::rgba(255, 255, 255, 0.95 * opacity));
+        let bolt_color = if is_bright {
+            Color::rgba(24, 28, 36, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        };
+        draw_lightning_bolt(buf, cx, cy, radius * 0.8, bolt_color);
     }
+}
+
+pub fn draw_battery_circle_ring(
+    buf: &mut PixelBuffer,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    percent: u32,
+    is_charging: bool,
+    is_energy_saver: bool,
+    opacity: f32,
+) {
+    draw_battery_circle_ring_adaptive(buf, cx, cy, radius, percent, is_charging, is_energy_saver, opacity, false);
 }
 
 /// Renders the Circular Download Progress Ring with an elegant downward arrow inside
@@ -471,12 +494,16 @@ pub fn draw_monochrome_sound_wave_ex(
     is_playing: bool,
     anim_time: f32,
     opacity: f32,
-    _is_light: bool,
+    is_bright: bool,
 ) {
     let bar_count = 5;
     let bar_w = 2.4;
     let gap = (w - (bar_count as f32 * bar_w)) / (bar_count as f32 - 1.0);
-    let color = Color::rgba(255, 255, 255, 0.95 * opacity);
+    let color = if is_bright {
+        Color::rgba(24, 28, 36, 0.92 * opacity)
+    } else {
+        Color::rgba(255, 255, 255, 0.95 * opacity)
+    };
 
     for i in 0..bar_count {
         let bar_x = x + (i as f32) * (bar_w + gap);
@@ -516,16 +543,28 @@ pub fn draw_nav_arrow_button_ex(
     is_right: bool,
     is_hovered: bool,
     opacity: f32,
-    _is_light: bool,
+    is_light: bool,
 ) {
-    let bg_color = if is_hovered {
-        Color::rgba(255, 255, 255, 0.28 * opacity)
+    let bg_color = if is_light {
+        if is_hovered {
+            Color::rgba(0, 0, 0, 0.14 * opacity)
+        } else {
+            Color::rgba(0, 0, 0, 0.07 * opacity)
+        }
     } else {
-        Color::rgba(255, 255, 255, 0.14 * opacity)
+        if is_hovered {
+            Color::rgba(255, 255, 255, 0.28 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.14 * opacity)
+        }
     };
     draw_circle(buf, cx, cy, radius, bg_color);
 
-    let arrow_color = Color::rgba(255, 255, 255, 0.95 * opacity);
+    let arrow_color = if is_light {
+        Color::rgba(15, 23, 42, 0.95 * opacity)
+    } else {
+        Color::rgba(255, 255, 255, 0.95 * opacity)
+    };
     let arrow_size = radius * 0.42;
 
     let dir = if is_right { 1.0 } else { -1.0 };
@@ -551,63 +590,6 @@ pub fn draw_nav_arrow_button(
     draw_nav_arrow_button_ex(buf, cx, cy, radius, is_right, is_hovered, opacity, false);
 }
 
-/// Renders the Bottom Page Indicator Dots (e.g. — • •) from music.png, shelf.png, to-do.png
-pub fn draw_page_indicators_ex(
-    buf: &mut PixelBuffer,
-    cx: f32,
-    cy: f32,
-    active_idx: usize,
-    total: usize,
-    opacity: f32,
-    _is_light: bool,
-) {
-    let dot_spacing = 11.0;
-    let total_w = (total - 1) as f32 * dot_spacing + 12.0;
-    let start_x = cx - total_w * 0.5;
-
-    let active_color = Color::rgba(255, 255, 255, 0.95 * opacity);
-    let inactive_color = Color::rgba(255, 255, 255, 0.35 * opacity);
-
-    let mut cur_x = start_x;
-    for i in 0..total {
-        if i == active_idx {
-            // Active elongated pill
-            let pill_w = 14.0;
-            let pill_h = 4.0;
-            draw_rounded_rect(
-                buf,
-                cur_x,
-                cy - pill_h * 0.5,
-                pill_w,
-                pill_h,
-                pill_h * 0.5,
-                active_color,
-            );
-            cur_x += pill_w + 6.0;
-        } else {
-            // Inactive round dot
-            draw_circle(
-                buf,
-                cur_x + 2.0,
-                cy,
-                2.2,
-                inactive_color,
-            );
-            cur_x += dot_spacing;
-        }
-    }
-}
-
-pub fn draw_page_indicators(
-    buf: &mut PixelBuffer,
-    cx: f32,
-    cy: f32,
-    active_idx: usize,
-    total: usize,
-    opacity: f32,
-) {
-    draw_page_indicators_ex(buf, cx, cy, active_idx, total, opacity, false);
-}
 
 /// Renders Lyrics Speech Bubble Button 💬 from music.png & lyrics.png
 pub fn draw_lyrics_button_ex(
@@ -624,12 +606,12 @@ pub fn draw_lyrics_button_ex(
         let bg = if is_light {
             if is_active {
                 if is_hovered {
-                    Color::rgba(255, 255, 255, 0.45 * opacity)
+                    Color::rgba(0, 0, 0, 0.20 * opacity)
                 } else {
-                    Color::rgba(255, 255, 255, 0.32 * opacity)
+                    Color::rgba(0, 0, 0, 0.12 * opacity)
                 }
             } else {
-                Color::rgba(255, 255, 255, 0.18 * opacity)
+                Color::rgba(0, 0, 0, 0.07 * opacity)
             }
         } else {
             if is_active {
@@ -645,12 +627,22 @@ pub fn draw_lyrics_button_ex(
         draw_circle(buf, cx, cy, size * 0.65, bg);
     }
 
-    let icon_color = if is_active {
-        Color::rgba(255, 255, 255, 1.0 * opacity)
-    } else if is_hovered {
-        Color::rgba(255, 255, 255, 0.95 * opacity)
+    let icon_color = if is_light {
+        if is_active {
+            Color::rgba(15, 23, 42, 1.0 * opacity)
+        } else if is_hovered {
+            Color::rgba(15, 23, 42, 0.95 * opacity)
+        } else {
+            Color::rgba(71, 85, 105, 0.75 * opacity)
+        }
     } else {
-        Color::rgba(255, 255, 255, 0.70 * opacity)
+        if is_active {
+            Color::rgba(255, 255, 255, 1.0 * opacity)
+        } else if is_hovered {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.70 * opacity)
+        }
     };
 
     let w = size * 0.8;
@@ -659,7 +651,11 @@ pub fn draw_lyrics_button_ex(
     let y = cy - h * 0.5;
     draw_rounded_rect(buf, x, y, w, h, 3.0, icon_color);
 
-    let inner_dot_color = Color::rgba(0, 0, 0, 0.85 * opacity);
+    let inner_dot_color = if is_light {
+        Color::rgba(255, 255, 255, 0.95 * opacity)
+    } else {
+        Color::rgba(0, 0, 0, 0.85 * opacity)
+    };
     draw_circle(buf, cx - 3.0, cy, 1.0, inner_dot_color);
     draw_circle(buf, cx, cy, 1.0, inner_dot_color);
     draw_circle(buf, cx + 3.0, cy, 1.0, inner_dot_color);
@@ -693,12 +689,12 @@ pub fn draw_romaji_button_ex(
         let bg = if is_light {
             if is_active {
                 if is_hovered {
-                    Color::rgba(255, 255, 255, 0.45 * opacity)
+                    Color::rgba(0, 0, 0, 0.20 * opacity)
                 } else {
-                    Color::rgba(255, 255, 255, 0.32 * opacity)
+                    Color::rgba(0, 0, 0, 0.12 * opacity)
                 }
             } else {
-                Color::rgba(255, 255, 255, 0.18 * opacity)
+                Color::rgba(0, 0, 0, 0.07 * opacity)
             }
         } else {
             if is_active {
@@ -714,19 +710,29 @@ pub fn draw_romaji_button_ex(
         draw_circle(buf, cx, cy, size * 0.65, bg);
     } else {
         let default_bg = if is_light {
-            Color::rgba(255, 255, 255, 0.10 * opacity)
+            Color::rgba(0, 0, 0, 0.06 * opacity)
         } else {
             Color::rgba(255, 255, 255, 0.08 * opacity)
         };
         draw_circle(buf, cx, cy, size * 0.65, default_bg);
     }
 
-    let text_color = if is_active {
-        Color::rgba(255, 255, 255, 1.0 * opacity)
-    } else if is_hovered {
-        Color::rgba(255, 255, 255, 0.95 * opacity)
+    let text_color = if is_light {
+        if is_active {
+            Color::rgba(15, 23, 42, 1.0 * opacity)
+        } else if is_hovered {
+            Color::rgba(15, 23, 42, 0.95 * opacity)
+        } else {
+            Color::rgba(71, 85, 105, 0.75 * opacity)
+        }
     } else {
-        Color::rgba(255, 255, 255, 0.72 * opacity)
+        if is_active {
+            Color::rgba(255, 255, 255, 1.0 * opacity)
+        } else if is_hovered {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.72 * opacity)
+        }
     };
 
     let font_size = 9.0;
@@ -756,7 +762,7 @@ pub fn draw_romaji_button(
 }
 
 /// Renders To-Do Checkbox (Green Checkmark or Gray Circle) from to-do.png
-pub fn draw_todo_checkbox(
+pub fn draw_todo_checkbox_ex(
     buf: &mut PixelBuffer,
     cx: f32,
     cy: f32,
@@ -764,10 +770,15 @@ pub fn draw_todo_checkbox(
     done: bool,
     is_hovered: bool,
     opacity: f32,
+    is_light: bool,
 ) {
     if done {
-        // Apple-style elegant frosted silver completed badge
-        let color = Color::rgba(255, 255, 255, 0.35 * opacity);
+        // Completed badge: emerald green on light glass, elegant frosted silver on dark glass
+        let color = if is_light {
+            Color::rgba(34, 197, 94, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.35 * opacity)
+        };
         draw_circle(buf, cx, cy, radius, color);
 
         // Crisp white checkmark glyph
@@ -782,13 +793,25 @@ pub fn draw_todo_checkbox(
         }
     } else {
         // Inactive circle with border
-        let bg = if is_hovered {
-            Color::rgba(255, 255, 255, 0.18 * opacity)
+        let bg = if is_light {
+            if is_hovered {
+                Color::rgba(0, 0, 0, 0.10 * opacity)
+            } else {
+                Color::rgba(0, 0, 0, 0.04 * opacity)
+            }
         } else {
-            Color::rgba(255, 255, 255, 0.08 * opacity)
+            if is_hovered {
+                Color::rgba(255, 255, 255, 0.18 * opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.08 * opacity)
+            }
         };
         draw_circle(buf, cx, cy, radius, bg);
-        let border = Color::rgba(255, 255, 255, 0.4 * opacity);
+        let border = if is_light {
+            Color::rgba(0, 0, 0, 0.35 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.40 * opacity)
+        };
         draw_circle(buf, cx, cy, radius - 1.5, bg);
         // Draw thin border ring with full bounding coverage (no clipping on bottom or right!)
         let min_x = (cx - radius - 1.5).floor().max(0.0) as usize;
@@ -804,6 +827,18 @@ pub fn draw_todo_checkbox(
             }
         }
     }
+}
+
+pub fn draw_todo_checkbox(
+    buf: &mut PixelBuffer,
+    cx: f32,
+    cy: f32,
+    radius: f32,
+    done: bool,
+    is_hovered: bool,
+    opacity: f32,
+) {
+    draw_todo_checkbox_ex(buf, cx, cy, radius, done, is_hovered, opacity, false);
 }
 
 /// Renders Headphones Badge from headphones.png
@@ -849,14 +884,18 @@ pub fn draw_seek_backward_button_ex(
 ) {
     if is_hovered {
         let hover_bg = if is_light {
-            Color::rgba(255, 255, 255, 0.22 * opacity)
+            Color::rgba(0, 0, 0, 0.09 * opacity)
         } else {
             Color::rgba(255, 255, 255, 0.16 * opacity)
         };
         draw_circle(buf, cx, cy, size * 0.55, hover_bg);
     }
 
-    let color = Color::rgba(255, 255, 255, if is_hovered { 0.98 } else { 0.88 } * opacity);
+    let color = if is_light {
+        Color::rgba(15, 23, 42, if is_hovered { 0.98 } else { 0.88 } * opacity)
+    } else {
+        Color::rgba(255, 255, 255, if is_hovered { 0.98 } else { 0.88 } * opacity)
+    };
     let r = size * 0.36;
 
     // Draw circular arc leaving top open (-0.35 PI to 1.35 PI)
@@ -915,14 +954,18 @@ pub fn draw_seek_forward_button_ex(
 ) {
     if is_hovered {
         let hover_bg = if is_light {
-            Color::rgba(255, 255, 255, 0.22 * opacity)
+            Color::rgba(0, 0, 0, 0.09 * opacity)
         } else {
             Color::rgba(255, 255, 255, 0.16 * opacity)
         };
         draw_circle(buf, cx, cy, size * 0.55, hover_bg);
     }
 
-    let color = Color::rgba(255, 255, 255, if is_hovered { 0.98 } else { 0.88 } * opacity);
+    let color = if is_light {
+        Color::rgba(15, 23, 42, if is_hovered { 0.98 } else { 0.88 } * opacity)
+    } else {
+        Color::rgba(255, 255, 255, if is_hovered { 0.98 } else { 0.88 } * opacity)
+    };
     let r = size * 0.36;
 
     // Draw circular arc leaving top open (flipped horizontally)

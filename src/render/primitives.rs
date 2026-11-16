@@ -206,7 +206,19 @@ pub fn draw_progress_bar(
     }
 }
 
-/// High-precision Signed Distance Function (SDF) for top notch with:
+/// Exact 2D Rounded Box Signed Distance Function (SDF) with uniform corner radius
+#[inline]
+pub fn rounded_rect_sdf(p_xf: f32, p_yf: f32, x: f32, y: f32, w: f32, h: f32, radius: f32) -> f32 {
+    let hx = w * 0.5;
+    let hy = h * 0.5;
+    let cx = x + hx;
+    let cy = y + hy;
+    let r = radius.min(hx).min(hy);
+    let dx = (p_xf - cx).abs() - (hx - r);
+    let dy = (p_yf - cy).abs() - (hy - r);
+    dx.max(0.0).hypot(dy.max(0.0)) + dx.max(dy).min(0.0) - r
+}
+
 /// High-precision Signed Distance Function (SDF) for top notch with:
 /// - Inverted rounded corners flaring outward into the top screen bezel
 /// - Standard rounded corners on the bottom two corners
@@ -283,14 +295,22 @@ pub fn draw_top_notch(
 /// - Dual-stroke optical thickness (1px outer vertical gradient, 1.5px inner refraction)
 /// - Specular wet-look highlight arc (1.8px at top lip, 75% pure white fading out to edges)
 /// - Clean, pristine surface: zero dust, zero bubbles, zero scratches, zero rainbow/pelangi
-pub fn draw_top_notch_liquid_glass_core(
+#[derive(Copy, Clone, PartialEq)]
+pub enum GlassShape {
+    TopNotch,
+    FloatingPill { y: f32 },
+}
+
+/// Core liquid glass shader (fallback when backdrop blur is unavailable)
+pub fn draw_liquid_glass_core(
     buf: &mut PixelBuffer,
     x: f32,
     w: f32,
     h: f32,
     bottom_radius: f32,
     opacity: f32,
-    theme_progress: f32, // 0.0 = Clear Light, 1.0 = Dark Obsidian
+    theme_progress: f32,
+    shape: GlassShape,
 ) {
     if opacity <= 0.001 || w <= 0.0 || h <= 0.0 {
         return;
@@ -299,10 +319,22 @@ pub fn draw_top_notch_liquid_glass_core(
     let r_bottom = bottom_radius.min(w * 0.5).min(h * 0.5);
     let r_top = r_bottom;
 
-    let min_x = (x - r_top - 1.0).floor().max(0.0) as usize;
-    let max_x = (x + w + r_top + 1.0).ceil().min(buf.width as f32) as usize;
-    let min_y = 0usize;
-    let max_y = (h + 1.0).ceil().min(buf.height as f32) as usize;
+    let (y_offset, min_x, max_x, min_y, max_y) = match shape {
+        GlassShape::TopNotch => (
+            0.0,
+            (x - r_top - 1.0).floor().max(0.0) as usize,
+            (x + w + r_top + 1.0).ceil().min(buf.width as f32) as usize,
+            0usize,
+            (h + 1.0).ceil().min(buf.height as f32) as usize,
+        ),
+        GlassShape::FloatingPill { y } => (
+            y,
+            (x - 2.0).floor().max(0.0) as usize,
+            (x + w + 2.0).ceil().min(buf.width as f32) as usize,
+            (y - 2.0).floor().max(0.0) as usize,
+            (y + h + 2.0).ceil().min(buf.height as f32) as usize,
+        ),
+    };
 
     let half_w = w * 0.5;
     let cx = x + half_w;
@@ -310,13 +342,10 @@ pub fn draw_top_notch_liquid_glass_core(
 
     for py in min_y..max_y {
         let p_yf = py as f32 + 0.5;
-        let vert_t = (p_yf / h).clamp(0.0, 1.0);
+        let vert_t = ((p_yf - y_offset) / h).clamp(0.0, 1.0);
 
-        // Substrate color & opacity:
-        // Dark: 32% opacity obsidian dark (10, 12, 16)
-        // Light: crystal clear 7.5% at top lip -> 4% at bottom (255, 255, 255)
-        let dark_alpha = 0.32;
-        let light_alpha = 0.075 - vert_t * 0.035;
+        let dark_alpha = 0.94 - vert_t * 0.08;
+        let light_alpha = 0.88 - vert_t * 0.06;
         let base_alpha = (light_alpha + (dark_alpha - light_alpha) * t) * opacity;
 
         let base_r = (255.0 + (10.0 - 255.0) * t).round() as u8;
@@ -325,38 +354,146 @@ pub fn draw_top_notch_liquid_glass_core(
 
         for px in min_x..max_x {
             let p_xf = px as f32 + 0.5;
-            let dist = top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top);
+            let dist = match shape {
+                GlassShape::TopNotch => top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top),
+                GlassShape::FloatingPill { y } => rounded_rect_sdf(p_xf, p_yf, x, y, w, h, r_bottom),
+            };
             let coverage = (0.5 - dist).clamp(0.0, 1.0);
             if coverage > 0.0 {
                 // 1. Crystal-clear Liquid Glass Substrate
                 buf.blend_pixel(px, py, base_r, base_g, base_b, coverage * base_alpha);
 
-                // 2. Dual-Stroke Optical Thickness:
-                // a) Outer Stroke (1px): Vertical linear gradient from top (38%) to bottom (5%)
+                // 2. Dual-Stroke Optical Thickness
                 if dist > -1.0 && dist <= 0.0 {
                     let outer_alpha = (0.38 - vert_t * 0.33) * opacity;
                     buf.blend_pixel(px, py, 255, 255, 255, coverage * outer_alpha);
                 }
 
-                // b) Inner Stroke (1.5px at 1px padding): subtle internal refraction
                 if dist > -2.5 && dist <= -1.0 {
                     let inner_t = 1.0 - (dist + 1.75).abs() / 0.75;
                     let inner_alpha = inner_t * (0.08 + (1.0 - t) * 0.03) * opacity;
                     buf.blend_pixel(px, py, 185, 192, 205, coverage * inner_alpha);
                 }
 
-                // 3. Specular Wet-Look Highlight:
-                // 1.8px arc along top lip (75% pure white, smooth fade towards shoulders)
-                if p_yf <= 2.2 && dist <= 0.0 {
+                // 3. Specular Wet-Look Highlight
+                if p_yf >= y_offset && p_yf <= y_offset + 2.2 && dist <= 0.0 {
                     let norm_x = (p_xf - cx).abs() / half_w;
                     let fade_x = (1.0 - ((norm_x - 0.38) / 0.45).clamp(0.0, 1.0)).powf(1.5);
-                    let vert_sheen = (1.0 - (p_yf / 2.2)).clamp(0.0, 1.0);
+                    let vert_sheen = (1.0 - ((p_yf - y_offset) / 2.2)).clamp(0.0, 1.0);
                     let wet_specular = fade_x * vert_sheen * 0.75 * opacity;
                     buf.blend_pixel(px, py, 255, 255, 255, coverage * wet_specular);
                 }
             }
         }
     }
+}
+
+/// Unified Liquid Glass shader with active Lens Diffusion Backdrop (identical math for Notch & Pill)
+pub fn draw_liquid_glass_with_backdrop(
+    buf: &mut PixelBuffer,
+    x: f32,
+    w: f32,
+    h: f32,
+    bottom_radius: f32,
+    opacity: f32,
+    theme_progress: f32,
+    backdrop: &super::backdrop::BackdropBlur,
+    shape: GlassShape,
+) {
+    if opacity <= 0.001 || w <= 0.0 || h <= 0.0 {
+        return;
+    }
+
+    let r_bottom = bottom_radius.min(w * 0.5).min(h * 0.5);
+    let r_top = r_bottom;
+
+    let (y_offset, min_x, max_x, min_y, max_y) = match shape {
+        GlassShape::TopNotch => (
+            0.0,
+            (x - r_top - 1.0).floor().max(0.0) as usize,
+            (x + w + r_top + 1.0).ceil().min(buf.width as f32) as usize,
+            0usize,
+            (h + 1.0).ceil().min(buf.height as f32) as usize,
+        ),
+        GlassShape::FloatingPill { y } => (
+            y,
+            (x - 2.0).floor().max(0.0) as usize,
+            (x + w + 2.0).ceil().min(buf.width as f32) as usize,
+            (y - 2.0).floor().max(0.0) as usize,
+            (y + h + 2.0).ceil().min(buf.height as f32) as usize,
+        ),
+    };
+
+    let half_w = w * 0.5;
+    let cx = x + half_w;
+    let t = theme_progress.clamp(0.0, 1.0);
+
+    for py in min_y..max_y {
+        let p_yf = py as f32 + 0.5;
+        let vert_t = ((p_yf - y_offset) / h).clamp(0.0, 1.0);
+
+        let base_r = (255.0 + (10.0 - 255.0) * t).round();
+        let base_g = (255.0 + (12.0 - 255.0) * t).round();
+        let base_b = (255.0 + (16.0 - 255.0) * t).round();
+
+        for px in min_x..max_x {
+            let p_xf = px as f32 + 0.5;
+            let dist = match shape {
+                GlassShape::TopNotch => top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top),
+                GlassShape::FloatingPill { y } => rounded_rect_sdf(p_xf, p_yf, x, y, w, h, r_bottom),
+            };
+            let coverage = (0.5 - dist).clamp(0.0, 1.0);
+            if coverage > 0.0 {
+                // 1. Sample optically blurred background
+                let (bg_r, bg_g, bg_b) = backdrop.get_blurred_pixel(px, py);
+
+                // Optical glass transmittance:
+                let light_tint = 0.05 - vert_t * 0.03;
+                let dark_tint = 0.18 - vert_t * 0.08;
+                let tint = (light_tint + (dark_tint - light_tint) * t).clamp(0.0, 1.0);
+
+                let comp_r = ((bg_r as f32 * (1.0 - tint) + base_r * tint).min(255.0)).round() as u8;
+                let comp_g = ((bg_g as f32 * (1.0 - tint) + base_g * tint).min(255.0)).round() as u8;
+                let comp_b = ((bg_b as f32 * (1.0 - tint) + base_b * tint).min(255.0)).round() as u8;
+
+                let glass_alpha = opacity;
+                buf.blend_pixel(px, py, comp_r, comp_g, comp_b, coverage * glass_alpha);
+
+                // 2. Dual-Stroke Optical Thickness
+                if dist > -1.0 && dist <= 0.0 {
+                    let outer_alpha = (0.38 - vert_t * 0.33) * opacity;
+                    buf.blend_pixel(px, py, 255, 255, 255, coverage * outer_alpha);
+                }
+
+                if dist > -2.5 && dist <= -1.0 {
+                    let inner_t = 1.0 - (dist + 1.75).abs() / 0.75;
+                    let inner_alpha = inner_t * (0.08 + (1.0 - t) * 0.03) * opacity;
+                    buf.blend_pixel(px, py, 185, 192, 205, coverage * inner_alpha);
+                }
+
+                // 3. Specular Wet-Look Highlight
+                if p_yf >= y_offset && p_yf <= y_offset + 2.2 && dist <= 0.0 {
+                    let norm_x = (p_xf - cx).abs() / half_w;
+                    let fade_x = (1.0 - ((norm_x - 0.38) / 0.45).clamp(0.0, 1.0)).powf(1.5);
+                    let vert_sheen = (1.0 - ((p_yf - y_offset) / 2.2)).clamp(0.0, 1.0);
+                    let wet_specular = fade_x * vert_sheen * 0.75 * opacity;
+                    buf.blend_pixel(px, py, 255, 255, 255, coverage * wet_specular);
+                }
+            }
+        }
+    }
+}
+
+pub fn draw_top_notch_liquid_glass_core(
+    buf: &mut PixelBuffer,
+    x: f32,
+    w: f32,
+    h: f32,
+    bottom_radius: f32,
+    opacity: f32,
+    theme_progress: f32,
+) {
+    draw_liquid_glass_core(buf, x, w, h, bottom_radius, opacity, theme_progress, GlassShape::TopNotch);
 }
 
 /// Style 1: Pristine Dark Liquid Glass (Moon mode 🌙)
@@ -407,80 +544,36 @@ pub fn draw_top_notch_liquid_glass_with_backdrop(
     theme_progress: f32,
     backdrop: &super::backdrop::BackdropBlur,
 ) {
-    if opacity <= 0.001 || w <= 0.0 || h <= 0.0 {
-        return;
-    }
+    draw_liquid_glass_with_backdrop(buf, x, w, h, bottom_radius, opacity, theme_progress, backdrop, GlassShape::TopNotch);
+}
 
-    let r_bottom = bottom_radius.min(w * 0.5).min(h * 0.5);
-    let r_top = r_bottom;
+/// Renders Liquid Glass for the Floating Pill with active Lens Diffusion Backdrop
+pub fn draw_floating_pill_liquid_glass_with_backdrop(
+    buf: &mut PixelBuffer,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: f32,
+    opacity: f32,
+    theme_progress: f32,
+    backdrop: &super::backdrop::BackdropBlur,
+) {
+    draw_liquid_glass_with_backdrop(buf, x, w, h, radius, opacity, theme_progress, backdrop, GlassShape::FloatingPill { y });
+}
 
-    let min_x = (x - r_top - 1.0).floor().max(0.0) as usize;
-    let max_x = (x + w + r_top + 1.0).ceil().min(buf.width as f32) as usize;
-    let min_y = 0usize;
-    let max_y = (h + 1.0).ceil().min(buf.height as f32) as usize;
-
-    let half_w = w * 0.5;
-    let cx = x + half_w;
-    let t = theme_progress.clamp(0.0, 1.0);
-
-    for py in min_y..max_y {
-        let p_yf = py as f32 + 0.5;
-        let vert_t = (p_yf / h).clamp(0.0, 1.0);
-
-        let base_r = (255.0 + (10.0 - 255.0) * t).round();
-        let base_g = (255.0 + (12.0 - 255.0) * t).round();
-        let base_b = (255.0 + (16.0 - 255.0) * t).round();
-
-        for px in min_x..max_x {
-            let p_xf = px as f32 + 0.5;
-            let dist = top_notch_sdf(p_xf, p_yf, x, w, h, r_bottom, r_top);
-            let coverage = (0.5 - dist).clamp(0.0, 1.0);
-            if coverage > 0.0 {
-                // 1. Sample optically blurred background
-                let (bg_r, bg_g, bg_b) = backdrop.get_blurred_pixel(px, py);
-
-                // Optical glass transmittance:
-                // Light mode (t=0): Crystal-clear liquid glass (bening) with only 5% -> 2% subtle surface sheen (zero milky/butek haze)
-                // Dark mode (t=1): Crystal-clear dark liquid glass (bening obsidian) with only 18% -> 10% dark obsidian tint (zero smokey haze)
-                let light_tint = 0.05 - vert_t * 0.03;
-                let dark_tint = 0.18 - vert_t * 0.08;
-                let tint = (light_tint + (dark_tint - light_tint) * t).clamp(0.0, 1.0);
-
-                let comp_r = ((bg_r as f32 * (1.0 - tint) + base_r * tint).min(255.0)).round() as u8;
-                let comp_g = ((bg_g as f32 * (1.0 - tint) + base_g * tint).min(255.0)).round() as u8;
-                let comp_b = ((bg_b as f32 * (1.0 - tint) + base_b * tint).min(255.0)).round() as u8;
-
-                // Glass alpha is 1.0 * opacity so unblurred desktop does NOT leak through underneath;
-                // optical transmission is fully handled by blending the blurred backdrop with the glass tint above.
-                let glass_alpha = opacity;
-                buf.blend_pixel(px, py, comp_r, comp_g, comp_b, coverage * glass_alpha);
-
-                // 2. Dual-Stroke Optical Thickness:
-                // a) Outer Stroke (1px): Vertical linear gradient from top (38%) to bottom (5%)
-                if dist > -1.0 && dist <= 0.0 {
-                    let outer_alpha = (0.38 - vert_t * 0.33) * opacity;
-                    buf.blend_pixel(px, py, 255, 255, 255, coverage * outer_alpha);
-                }
-
-                // b) Inner Stroke (1.5px at 1px padding): subtle internal refraction
-                if dist > -2.5 && dist <= -1.0 {
-                    let inner_t = 1.0 - (dist + 1.75).abs() / 0.75;
-                    let inner_alpha = inner_t * (0.08 + (1.0 - t) * 0.03) * opacity;
-                    buf.blend_pixel(px, py, 185, 192, 205, coverage * inner_alpha);
-                }
-
-                // 3. Specular Wet-Look Highlight:
-                // 1.8px arc along top lip (75% pure white, smooth fade towards shoulders)
-                if p_yf <= 2.2 && dist <= 0.0 {
-                    let norm_x = (p_xf - cx).abs() / half_w;
-                    let fade_x = (1.0 - ((norm_x - 0.38) / 0.45).clamp(0.0, 1.0)).powf(1.5);
-                    let vert_sheen = (1.0 - (p_yf / 2.2)).clamp(0.0, 1.0);
-                    let wet_specular = fade_x * vert_sheen * 0.75 * opacity;
-                    buf.blend_pixel(px, py, 255, 255, 255, coverage * wet_specular);
-                }
-            }
-        }
-    }
+/// Fallback interpolated Liquid Glass for Floating Pill when backdrop is unavailable
+pub fn draw_floating_pill_liquid_glass_interpolated(
+    buf: &mut PixelBuffer,
+    x: f32,
+    y: f32,
+    w: f32,
+    h: f32,
+    radius: f32,
+    opacity: f32,
+    theme_progress: f32,
+) {
+    draw_liquid_glass_core(buf, x, w, h, radius, opacity, theme_progress, GlassShape::FloatingPill { y });
 }
 
 /// Backwards compatibility wrapper for dark liquid glass

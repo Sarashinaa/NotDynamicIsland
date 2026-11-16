@@ -36,7 +36,7 @@ use ui::{ClickAction, ExpandedPage, IslandMode, IslandState, LayoutManager, Rect
 use window::{Win32LayeredWindow, CANVAS_H, CANVAS_W, TIMER_ANIMATION_ID};
 
 use windows::Win32::Foundation::{
-    GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, WPARAM,
+    GetLastError, BOOL, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
 };
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::System::DataExchange::{
@@ -50,16 +50,17 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
 };
-use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
+use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, ShellExecuteW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
-    AppendMenuW, CreatePopupMenu, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW,
-    FindWindowW, GetCursorPos, GetMessageW, IsIconic, PostQuitMessage, RegisterShellHookWindow,
-    RegisterWindowMessageW, SetForegroundWindow, SetWindowPos, ShowWindow,
-    SetTimer, TrackPopupMenu, TranslateMessage, HTCLIENT, HTTRANSPARENT, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, MF_POPUP, MF_SEPARATOR, MF_STRING,
-    MSG, SC_MINIMIZE, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNORMAL, SW_SHOWNOACTIVATE,
+    AppendMenuW, BringWindowToTop, CreatePopupMenu, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW,
+    EnumWindows, FindWindowW, GetCursorPos, GetMessageW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
+    IsHungAppWindow, IsIconic, IsWindowVisible, PostQuitMessage, RegisterShellHookWindow, RegisterWindowMessageW,
+    SetForegroundWindow, SetWindowPos, ShowWindow, SetTimer, TrackPopupMenu, TranslateMessage,
+    GWL_STYLE, HTCLIENT, HTTRANSPARENT, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, MF_POPUP, MF_SEPARATOR, MF_STRING,
+    MSG, SC_MINIMIZE, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SW_SHOWNOACTIVATE,
     TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOWPOS, WM_CHAR, WM_DESTROY, WM_DROPFILES,
     WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_POWERBROADCAST, WM_RBUTTONUP,
-    WM_SYSCOMMAND, WM_TIMER, WM_WINDOWPOSCHANGING,
+    WM_SYSCOMMAND, WM_TIMER, WM_WINDOWPOSCHANGING, WS_CHILD,
 };
 
 const WM_MOUSEWHEEL: u32 = 0x020A;
@@ -137,17 +138,13 @@ fn wake_animation(hwnd: HWND, app: &mut App) {
             );
         }
     }
-    // Refresh desktop backdrop behind notch upon interaction if not captured within 50ms
-    if now.duration_since(app.last_backdrop_capture) >= std::time::Duration::from_millis(50) {
-        app.backdrop.capture(app.window.win_x, app.window.win_y);
-        app.last_backdrop_capture = now;
-    }
     app.settled_since = None;
     if !app.is_animating {
         app.is_animating = true;
         app.last_tick = now;
+        let anim_interval = system::display::get_optimal_animation_interval_ms();
         unsafe {
-            let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 8, None);
+            let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, anim_interval, None);
         }
     }
 }
@@ -452,6 +449,174 @@ fn read_clipboard_unicode_text(hwnd: HWND) -> Option<String> {
     }
 }
 
+/// Brings the application corresponding to `app_name` to the foreground (e.g. WhatsApp, Antigravity, Spotify).
+/// This runs asynchronously on a background worker thread to completely decouple from the UI thread,
+/// preventing any re-entrant mutex deadlocks or Win32 message stalls.
+pub fn activate_application(app_name: &str) {
+    let clean = app_name.trim();
+    if clean.is_empty() {
+        return;
+    }
+    let target = clean.to_lowercase();
+    // Ignore internal app features/banners, and ignore screenshot/snipping tool notifications
+    if target == "notification"
+        || target == "system"
+        || target == "shelf"
+        || target == "weather"
+        || target == "eyedropper"
+        || target == "focus timer"
+        || target == "gemini assistant"
+        || target == "todolist"
+        || target == "to-do"
+        || target == "calendar"
+        || target.contains("snip")
+        || target.contains("alat pemotong")
+        || target.contains("screensketch")
+        || target.contains("screenshot")
+    {
+        return;
+    }
+
+    struct SearchContext {
+        target: String,
+        my_pid: u32,
+        found_hwnd: Option<HWND>,
+    }
+
+    let my_pid = unsafe { windows::Win32::System::Threading::GetCurrentProcessId() };
+
+    let mut ctx = SearchContext {
+        target,
+        my_pid,
+        found_hwnd: None,
+    };
+
+    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+        let ctx = unsafe { &mut *(lparam.0 as *mut SearchContext) };
+
+        // Must be a visible window
+        if !unsafe { IsWindowVisible(hwnd).as_bool() } {
+            return BOOL(1);
+        }
+
+        // Exclude child windows
+        let style = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowLongW(hwnd, GWL_STYLE) as u32 };
+        if (style & WS_CHILD.0) != 0 {
+            return BOOL(1);
+        }
+
+        // Never target our own process!
+        let mut pid = 0u32;
+        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
+        if pid == 0 || pid == ctx.my_pid {
+            return BOOL(1);
+        }
+
+        // Skip hung windows to prevent hanging UI
+        if unsafe { IsHungAppWindow(hwnd).as_bool() } {
+            return BOOL(1);
+        }
+
+        // Check window rect: skip 0-size hidden or tool windows
+        let mut rect = RECT::default();
+        if unsafe { GetWindowRect(hwnd, &mut rect).is_ok() } {
+            if rect.right - rect.left <= 0 || rect.bottom - rect.top <= 0 {
+                return BOOL(1);
+            }
+        }
+
+        // 1. Check window text / title
+        let mut text_buf = [0u16; 512];
+        let len = unsafe { GetWindowTextW(hwnd, &mut text_buf) };
+        if len > 0 {
+            let title = String::from_utf16_lossy(&text_buf[..len as usize]).to_lowercase();
+            if title.contains(&ctx.target) {
+                ctx.found_hwnd = Some(hwnd);
+                return BOOL(0);
+            }
+        }
+
+        // 2. Check process executable name
+        if let Ok(h_proc) = unsafe {
+            windows::Win32::System::Threading::OpenProcess(
+                windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION,
+                false,
+                pid,
+            )
+        } {
+            let mut img_buf = [0u16; 1024];
+            let mut size = img_buf.len() as u32;
+            if unsafe {
+                windows::Win32::System::Threading::QueryFullProcessImageNameW(
+                    h_proc,
+                    windows::Win32::System::Threading::PROCESS_NAME_FORMAT(0),
+                    windows::core::PWSTR(img_buf.as_mut_ptr()),
+                    &mut size,
+                )
+            }.is_ok() && size > 0 {
+                let path = String::from_utf16_lossy(&img_buf[..size as usize]).to_lowercase();
+                if path.contains(&ctx.target) {
+                    ctx.found_hwnd = Some(hwnd);
+                    let _ = unsafe { windows::Win32::Foundation::CloseHandle(h_proc) };
+                    return BOOL(0);
+                }
+            }
+            let _ = unsafe { windows::Win32::Foundation::CloseHandle(h_proc) };
+        }
+
+        BOOL(1)
+    }
+
+    unsafe {
+        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
+    }
+
+    if let Some(hwnd) = ctx.found_hwnd {
+        unsafe {
+            if IsIconic(hwnd).as_bool() {
+                let _ = ShowWindow(hwnd, SW_RESTORE);
+            } else {
+                let _ = ShowWindow(hwnd, SW_SHOW);
+            }
+            let _ = BringWindowToTop(hwnd);
+            let _ = SetForegroundWindow(hwnd);
+            let _ = SetFocus(hwnd);
+        }
+    } else {
+        // Safe URI scheme fallback only for known applications
+        let uri = if ctx.target.contains("whatsapp") {
+            Some("whatsapp:")
+        } else if ctx.target.contains("spotify") {
+            Some("spotify:")
+        } else if ctx.target.contains("discord") {
+            Some("discord:")
+        } else if ctx.target.contains("telegram") || ctx.target.contains("tg") {
+            Some("tg:")
+        } else if ctx.target.contains("mail") || ctx.target.contains("outlook") {
+            Some("mailto:")
+        } else if ctx.target.contains("photo") || ctx.target.contains("foto") {
+            Some("ms-photos:")
+        } else if ctx.target.contains("calculator") || ctx.target.contains("kalkulator") {
+            Some("calculator:")
+        } else {
+            None
+        };
+        if let Some(uri_scheme) = uri {
+            let wide_uri: Vec<u16> = uri_scheme.encode_utf16().chain(std::iter::once(0)).collect();
+            unsafe {
+                let _ = ShellExecuteW(
+                    None,
+                    windows::core::w!("open"),
+                    windows::core::PCWSTR(wide_uri.as_ptr()),
+                    None,
+                    None,
+                    SW_SHOWNORMAL,
+                );
+            }
+        }
+    }
+}
+
 pub unsafe extern "system" fn window_proc(
     hwnd: HWND,
     msg: u32,
@@ -551,18 +716,38 @@ pub unsafe extern "system" fn window_proc(
                     }
 
                     let cur_x = app.springs.x.current;
+                    let cur_y = app.springs.y.current;
                     let cur_w = app.springs.width.current;
                     let cur_h = app.springs.height.current;
                     let cur_r = app.springs.corner_radius.current;
                     let r_top = cur_r.min(cur_w * 0.5).min(cur_h * 0.5);
 
                     let hit_margin = 6.0;
+                    let min_hit_y = if cur_y > 2.0 { cur_y - hit_margin } else { 0.0 };
                     if pt.x as f32 >= cur_x - r_top - hit_margin
                         && pt.x as f32 <= cur_x + cur_w + r_top + hit_margin
-                        && pt.y >= 0
-                        && (pt.y as f32) <= cur_h + hit_margin
+                        && (pt.y as f32) >= min_hit_y
+                        && (pt.y as f32) <= cur_y + cur_h + hit_margin
                     {
                         return LRESULT(HTCLIENT as isize);
+                    }
+
+                    // Check sub-notification pill hit zone if active
+                    if let Some(sub) = &app.island_state.sub_notification {
+                        let progress = app.island_state.sub_notif_spring.current;
+                        if progress > 0.3 && !sub.is_dismissing {
+                            let sub_w = 340.0 + (400.0 - 340.0) * progress.min(1.0);
+                            let sub_h = 44.0;
+                            let sub_x = (CANVAS_W as f32 - sub_w) * 0.5;
+                            let sub_y = (cur_y + cur_h + 8.0) - (1.0 - progress.min(1.0)) * 18.0;
+                            if (pt.x as f32) >= sub_x - hit_margin
+                                && (pt.x as f32) <= sub_x + sub_w + hit_margin
+                                && (pt.y as f32) >= sub_y - hit_margin
+                                && (pt.y as f32) <= sub_y + sub_h + hit_margin
+                            {
+                                return LRESULT(HTCLIENT as isize);
+                            }
+                        }
                     }
                 }
             }
@@ -577,6 +762,7 @@ pub unsafe extern "system" fn window_proc(
             if let Ok(mut lock) = APP.lock() {
                 if let Some(app) = lock.as_mut() {
                     let cur_x = app.springs.x.current;
+                    let cur_y = app.springs.y.current;
                     let cur_w = app.springs.width.current;
 
                     // 1. Check if user clicked/dragged on the media seek bar
@@ -584,7 +770,7 @@ pub unsafe extern "system" fn window_proc(
                         IslandMode::Expanded(ExpandedPage::Music) => {
                             let progress_x = cur_x + 56.0;
                             let progress_w = cur_w - 112.0;
-                            let bar_y = 90.0;
+                            let bar_y = cur_y + 90.0;
                             let bar_rect = Rect {
                                 x: progress_x - 8.0,
                                 y: bar_y - 10.0,
@@ -606,7 +792,7 @@ pub unsafe extern "system" fn window_proc(
                         IslandMode::Lyrics => {
                             let progress_x = cur_x + 50.0;
                             let progress_w = 110.0;
-                            let bar_y = 78.0;
+                            let bar_y = cur_y + 78.0;
                             let bar_rect = Rect {
                                 x: progress_x - 6.0,
                                 y: bar_y - 10.0,
@@ -634,7 +820,7 @@ pub unsafe extern "system" fn window_proc(
                         let cur_w = app.springs.width.current;
                         let item_count = app.island_state.shelf.items.len();
                         for i in 0..item_count {
-                            let card_rect = app.layout.get_shelf_card_rect(i, item_count, cur_x, cur_w);
+                            let card_rect = app.layout.get_shelf_card_rect(i, item_count, cur_x, cur_y, cur_w);
                             let close_rect = Rect {
                                 x: card_rect.x + card_rect.w - 14.0,
                                 y: card_rect.y + 2.0,
@@ -653,8 +839,8 @@ pub unsafe extern "system" fn window_proc(
 
                     // 3. If ToDo is in input mode and user clicks outside input pill, commit task
                     if app.island_state.todo.is_input_active {
-                        let left_x = cur_x + 44.0;
-                        let input_rect = Rect { x: left_x, y: 98.0, w: 140.0, h: 26.0 };
+                        let right_x = cur_x + 288.0;
+                        let input_rect = Rect { x: right_x, y: cur_y + 92.0, w: 146.0, h: 26.0 };
                         if !input_rect.contains(cx, cy) {
                             app.island_state.todo.commit_input();
                             wake_animation(hwnd, app);
@@ -747,6 +933,7 @@ pub unsafe extern "system" fn window_proc(
         WM_LBUTTONUP => {
             let cx = (lparam.0 & 0xFFFF) as i16 as f32;
             let cy = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
+            let mut app_to_activate: Option<String> = None;
 
             if let Ok(mut lock) = APP.lock() {
                 if let Some(app) = lock.as_mut() {
@@ -1132,9 +1319,17 @@ pub unsafe extern "system" fn window_proc(
                                     "Gemini Assistant".to_string(),
                                     "Response Copied".to_string(),
                                     "AI response copied to clipboard".to_string(),
-                                );
+                                    );
                                 wake_animation(hwnd, app);
                             }
+                        }
+                        Some(ClickAction::ActivateApp { app_name }) => {
+                            app.island_state.dismiss_sub_notification();
+                            if matches!(app.island_state.mode, IslandMode::Notification(_)) {
+                                app.island_state.restore_previous_mode();
+                            }
+                            wake_animation(hwnd, app);
+                            app_to_activate = Some(app_name);
                         }
                         None => {
                             // If user clicks anywhere on Resting or Closed notch, expand to active page!
@@ -1148,6 +1343,17 @@ pub unsafe extern "system" fn window_proc(
                         }
                     }
                 }
+            }
+
+            if let Some(app_name) = app_to_activate {
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+                        windows::Win32::UI::WindowsAndMessaging::ASFW_ANY,
+                    );
+                }
+                std::thread::spawn(move || {
+                    activate_application(&app_name);
+                });
             }
 
             LRESULT(0)
@@ -1236,6 +1442,26 @@ pub unsafe extern "system" fn window_proc(
                                 let _ = AppendMenuW(h_display, MF_STRING, 2000 + mon.index, windows::core::PCWSTR(item_w.as_ptr()));
                             }
                             let _ = AppendMenuW(hmenu, MF_POPUP, h_display.0 as usize, windows::core::w!("🖥️  Display Target"));
+                        }
+
+                        // Submenu: Island Shape (Top Notch vs Floating Pill)
+                        if let Ok(h_shape) = CreatePopupMenu() {
+                            let cur_shape = if let Ok(lock) = APP.lock() {
+                                lock.as_ref().map(|a| a.island_state.shape).unwrap_or(ui::IslandShape::TopNotch)
+                            } else {
+                                ui::IslandShape::TopNotch
+                            };
+                            let is_notch = cur_shape == ui::IslandShape::TopNotch;
+                            let notch_str = if is_notch { "●  Top Notch (Bezel Attached)" } else { "    Top Notch (Bezel Attached)" };
+                            let notch_w: Vec<u16> = notch_str.encode_utf16().chain(std::iter::once(0)).collect();
+                            let _ = AppendMenuW(h_shape, MF_STRING, 1040, windows::core::PCWSTR(notch_w.as_ptr()));
+
+                            let is_pill = cur_shape == ui::IslandShape::FloatingPill;
+                            let pill_str = if is_pill { "●  Floating Pill (Capsule)" } else { "    Floating Pill (Capsule)" };
+                            let pill_w: Vec<u16> = pill_str.encode_utf16().chain(std::iter::once(0)).collect();
+                            let _ = AppendMenuW(h_shape, MF_STRING, 1041, windows::core::PCWSTR(pill_w.as_ptr()));
+
+                            let _ = AppendMenuW(hmenu, MF_POPUP, h_shape.0 as usize, windows::core::w!("🎛️  Island Shape"));
                         }
 
                         // Theme Switcher
@@ -1357,6 +1583,16 @@ pub unsafe extern "system" fn window_proc(
                                                     "Fetching live forecast for current location...".to_string(),
                                                 );
                                             }
+                                        }
+                                        1040 => {
+                                            app.island_state.set_shape(ui::IslandShape::TopNotch);
+                                            app.settled_since = None;
+                                            wake_animation(hwnd, app);
+                                        }
+                                        1041 => {
+                                            app.island_state.set_shape(ui::IslandShape::FloatingPill);
+                                            app.settled_since = None;
+                                            wake_animation(hwnd, app);
                                         }
                                         2000 => {
                                             app.display_manager.set_target(DisplayTarget::FollowCursor);
@@ -1660,6 +1896,9 @@ pub unsafe extern "system" fn window_proc(
 
         WM_MOUSEWHEEL => {
             let delta = ((wparam.0 >> 16) & 0xFFFF) as i16;
+            let fw_keys = (wparam.0 & 0xFFFF) as u16;
+            let is_shift = (fw_keys & 0x0004) != 0
+                || unsafe { (windows::Win32::UI::Input::KeyboardAndMouse::GetKeyState(0x10) as i16) < 0 };
             let mut pt = POINT {
                 x: (lparam.0 & 0xFFFF) as i16 as i32,
                 y: ((lparam.0 >> 16) & 0xFFFF) as i16 as i32,
@@ -1670,104 +1909,135 @@ pub unsafe extern "system" fn window_proc(
             if let Ok(mut lock) = APP.lock() {
                 if let Some(app) = lock.as_mut() {
                     let cur_x = app.springs.x.current;
+                    let cur_y = app.springs.y.current;
+                    let cur_w = app.springs.width.current;
+                    let mouse_x = pt.x as f32;
+                    let mouse_y = pt.y as f32;
 
-                    if let IslandMode::Expanded(ExpandedPage::ToDo) = app.island_state.mode {
-                        // In ToDo page: strictly scroll the task list and NEVER glitch-switch pages!
-                        app.island_state.vwheel_accum += delta as i32;
-                        if app.island_state.vwheel_accum.abs() >= 60 {
-                            if app.island_state.vwheel_accum > 0 {
-                                app.island_state.todo.scroll_up();
-                            } else {
-                                app.island_state.todo.scroll_down();
+                    macro_rules! do_page_nav {
+                        ($delta:expr) => {
+                            app.island_state.vwheel_accum += $delta as i32;
+                            if app.island_state.vwheel_accum.abs() >= 120 {
+                                let forward = app.island_state.vwheel_accum < 0;
+                                app.island_state.vwheel_accum = 0;
+                                if app.island_state.mode == IslandMode::Resting
+                                    || app.island_state.mode == IslandMode::Closed
+                                {
+                                    app.island_state.on_mouse_enter();
+                                }
+                                app.island_state.navigate_page_clamped(forward);
+                                if app.island_state.active_page == ExpandedPage::Weather && app.island_state.weather.is_stale() {
+                                    if let Some(wm) = &app.weather_manager {
+                                        wm.trigger_refresh();
+                                    }
+                                }
+                                wake_animation(hwnd, app);
                             }
-                            app.island_state.vwheel_accum = 0;
-                            wake_animation(hwnd, app);
+                        };
+                    }
+
+                    // Universal Shift + MouseWheel: Always navigate pages horizontally across entire island!
+                    if is_shift {
+                        do_page_nav!(delta);
+                    } else if let IslandMode::Expanded(ExpandedPage::ToDo) = app.island_state.mode {
+                        // Smart Cursor Zone: Left side is task list, right side is menu navigation!
+                        let is_over_task_list = mouse_x >= cur_x + 28.0
+                            && mouse_x <= cur_x + 270.0
+                            && mouse_y >= cur_y + 28.0
+                            && mouse_y <= cur_y + 138.0;
+
+                        if is_over_task_list {
+                            app.island_state.vwheel_accum += delta as i32;
+                            if app.island_state.vwheel_accum.abs() >= 60 {
+                                if app.island_state.vwheel_accum > 0 {
+                                    app.island_state.todo.scroll_up();
+                                } else {
+                                    app.island_state.todo.scroll_down();
+                                }
+                                app.island_state.vwheel_accum = 0;
+                                wake_animation(hwnd, app);
+                            }
+                        } else {
+                            do_page_nav!(delta);
                         }
                     } else if let IslandMode::Expanded(ExpandedPage::Calendar) = app.island_state.mode {
-                        // In Calendar page: scroll month backwards/forwards
-                        app.island_state.vwheel_accum += delta as i32;
-                        if app.island_state.vwheel_accum.abs() >= 80 {
-                            if app.island_state.vwheel_accum > 0 {
-                                app.island_state.calendar.prev_month();
-                            } else {
-                                app.island_state.calendar.next_month();
+                        // Smart Cursor Zone: Only scroll month when hovered over month grid; otherwise switch pages!
+                        let is_over_month_grid = mouse_x >= cur_x + 28.0
+                            && mouse_x <= cur_x + 226.0
+                            && mouse_y >= cur_y + 28.0
+                            && mouse_y <= cur_y + 138.0;
+
+                        if is_over_month_grid {
+                            app.island_state.vwheel_accum += delta as i32;
+                            if app.island_state.vwheel_accum.abs() >= 80 {
+                                if app.island_state.vwheel_accum > 0 {
+                                    app.island_state.calendar.prev_month();
+                                } else {
+                                    app.island_state.calendar.next_month();
+                                }
+                                app.island_state.vwheel_accum = 0;
+                                wake_animation(hwnd, app);
                             }
-                            app.island_state.vwheel_accum = 0;
-                            wake_animation(hwnd, app);
+                        } else {
+                            do_page_nav!(delta);
                         }
                     } else if let IslandMode::Expanded(ExpandedPage::Assistant) = app.island_state.mode {
-                        let cur_w = app.springs.width.current;
                         let card_x = cur_x + 44.0;
                         let card_w = cur_w - 88.0;
-                        let input_rect = Rect { x: card_x, y: 132.0, w: card_w, h: 28.0 };
+                        let input_rect = Rect { x: card_x, y: cur_y + 132.0, w: card_w, h: 28.0 };
+                        let response_rect = Rect { x: card_x, y: cur_y + 34.0, w: card_w, h: 92.0 };
 
-                        if input_rect.contains(pt.x as f32, pt.y as f32) {
-                            // Over input field: scroll typed text horizontally so user can review long prompts!
+                        if input_rect.contains(mouse_x, mouse_y) {
+                            // Over input field: scroll typed text horizontally
                             if delta > 0 {
                                 app.island_state.assistant.scroll_input_left();
                             } else {
                                 app.island_state.assistant.scroll_input_right();
                             }
                             wake_animation(hwnd, app);
-                        } else {
-                            // Over response card: scroll response lines smoothly without cutting off
-                            app.island_state.vwheel_accum += delta as i32;
-                            if app.island_state.vwheel_accum.abs() >= 45 {
-                                let max_text_w = card_w - 24.0;
-                                let lines = LayoutManager::wrap_text_lines(
-                                    &app.island_state.assistant.last_response,
-                                    max_text_w,
-                                    &app.text_renderer,
-                                    10.0,
-                                    120,
-                                );
-                                let max_s = lines.len().saturating_sub(4);
-                                app.island_state.assistant.max_scroll = max_s;
-                                if app.island_state.vwheel_accum > 0 {
-                                    app.island_state.assistant.scroll_up();
-                                } else {
-                                    app.island_state.assistant.scroll_down();
+                        } else if response_rect.contains(mouse_x, mouse_y) {
+                            let max_text_w = card_w - 24.0;
+                            let lines = LayoutManager::wrap_text_lines(
+                                &app.island_state.assistant.last_response,
+                                max_text_w,
+                                &app.text_renderer,
+                                10.0,
+                                120,
+                            );
+                            let max_s = lines.len().saturating_sub(4);
+                            app.island_state.assistant.max_scroll = max_s;
+                            if max_s > 0 {
+                                // Over response card with scrollable text: scroll response lines
+                                app.island_state.vwheel_accum += delta as i32;
+                                if app.island_state.vwheel_accum.abs() >= 45 {
+                                    if app.island_state.vwheel_accum > 0 {
+                                        app.island_state.assistant.scroll_up();
+                                    } else {
+                                        app.island_state.assistant.scroll_down();
+                                    }
+                                    app.island_state.vwheel_accum = 0;
+                                    wake_animation(hwnd, app);
                                 }
-                                app.island_state.vwheel_accum = 0;
-                                wake_animation(hwnd, app);
+                            } else {
+                                // Short or empty response: switch pages!
+                                do_page_nav!(delta);
                             }
+                        } else {
+                            // Outside inner cards (e.g. bottom dock, header, margins): switch pages!
+                            do_page_nav!(delta);
                         }
                     } else if let IslandMode::Lyrics = app.island_state.mode {
                         // In Lyrics view: if cursor is on the right side (lyrics pane), scroll lyrics!
                         let div_x = cur_x + 230.0;
-                        if (pt.x as f32) >= div_x {
+                        if mouse_x >= div_x {
                             app.island_state.scroll_lyrics(delta as f32);
                             wake_animation(hwnd, app);
                         } else {
-                            // On the left side: switch pages
-                            app.island_state.vwheel_accum += delta as i32;
-                            if app.island_state.vwheel_accum.abs() >= 120 {
-                                let forward = app.island_state.vwheel_accum < 0;
-                                app.island_state.vwheel_accum = 0;
-                                app.island_state.navigate_page_clamped(forward);
-                                wake_animation(hwnd, app);
-                            }
+                            do_page_nav!(delta);
                         }
                     } else {
                         // On other pages: accumulate until full mouse wheel click (|accum| >= 120) before switching
-                        app.island_state.vwheel_accum += delta as i32;
-                        if app.island_state.vwheel_accum.abs() >= 120 {
-                            let forward = app.island_state.vwheel_accum < 0;
-                            app.island_state.vwheel_accum = 0;
-                            if app.island_state.mode == IslandMode::Resting
-                                || app.island_state.mode == IslandMode::Closed
-                            {
-                                app.island_state.on_mouse_enter();
-                            }
-                            // Clamped navigation: stops at ends ("mentok")
-                            app.island_state.navigate_page_clamped(forward);
-                            if app.island_state.active_page == ExpandedPage::Weather && app.island_state.weather.is_stale() {
-                                if let Some(wm) = &app.weather_manager {
-                                    wm.trigger_refresh();
-                                }
-                            }
-                            wake_animation(hwnd, app);
-                        }
+                        do_page_nav!(delta);
                     }
                 }
             }
@@ -1832,9 +2102,26 @@ pub unsafe extern "system" fn window_proc(
                             let _ = ScreenToClient(hwnd, &mut pt);
                         }
                         let cur_x = app.springs.x.current;
+                        let cur_y = app.springs.y.current;
                         let cur_w = app.springs.width.current;
                         let cur_h = app.springs.height.current;
-                        if (pt.x as f32) < cur_x || (pt.x as f32) > (cur_x + cur_w) || pt.y < 0 || (pt.y as f32) > cur_h {
+                        let min_y = if cur_y > 2.0 { cur_y - 4.0 } else { 0.0 };
+                        let in_island = (pt.x as f32) >= cur_x && (pt.x as f32) <= (cur_x + cur_w) && (pt.y as f32) >= min_y && (pt.y as f32) <= (cur_y + cur_h);
+                        let in_sub = if let Some(sub) = &app.island_state.sub_notification {
+                            let progress = app.island_state.sub_notif_spring.current;
+                            if progress > 0.2 && !sub.is_dismissing {
+                                let sub_w = 340.0 + (400.0 - 340.0) * progress.min(1.0);
+                                let sub_h = 44.0;
+                                let sub_x = (CANVAS_W as f32 - sub_w) * 0.5;
+                                let sub_y = (cur_y + cur_h + 8.0) - (1.0 - progress.min(1.0)) * 18.0;
+                                (pt.x as f32) >= sub_x - 4.0 && (pt.x as f32) <= sub_x + sub_w + 4.0 && (pt.y as f32) >= sub_y - 4.0 && (pt.y as f32) <= sub_y + sub_h + 4.0
+                            } else {
+                                false
+                            }
+                        } else {
+                            false
+                        };
+                        if !in_island && !in_sub {
                             app.island_state.is_hovered = false;
                             app.island_state.unhover_deadline = Some(Instant::now() + std::time::Duration::from_millis(500));
                         }
@@ -2413,6 +2700,7 @@ pub unsafe extern "system" fn window_proc(
                         // Advance spring simulation
                         let is_spring_moving = app.springs.update(dt);
                         let is_theme_moving = app.island_state.theme_spring.update(dt);
+                        let is_sub_notif_moving = app.island_state.sub_notif_spring.update(dt);
 
                         // Get cursor position for hover states
                         let mut cursor_pt = POINT::default();
@@ -2469,15 +2757,15 @@ pub unsafe extern "system" fn window_proc(
                         //   rock-solid, locked 60 FPS buttery smoothness without a single dropped frame!
                         // - Fluid 30 FPS (~33ms) while resting open under hover:
                         //   Maintains live background sync (scrolling web, video) with zero jitter while notch is static.
-                        // - 2 FPS (500ms) for background media playback when notch is idle/resting
+                        // - Fluid 8 FPS (120ms) for background wallpaper luminance tracking when notch is idle/resting
                         let min_interval = if fg_changed {
                             std::time::Duration::from_millis(0)
-                        } else if is_spring_moving || is_theme_moving {
+                        } else if is_spring_moving || is_theme_moving || is_sub_notif_moving {
                             std::time::Duration::from_secs(3600)
                         } else if app.island_state.is_hovered {
                             std::time::Duration::from_millis(33)
                         } else {
-                            std::time::Duration::from_millis(500)
+                            std::time::Duration::from_millis(120)
                         };
 
                         if now.duration_since(app.last_backdrop_capture) >= min_interval {
@@ -2503,6 +2791,8 @@ pub unsafe extern "system" fn window_proc(
                         // Is animation actively needed?
                         let is_busy = is_spring_moving
                             || is_theme_moving
+                            || is_sub_notif_moving
+                            || app.island_state.sub_notification.is_some()
                             || app.island_state.is_hovered
                             || app.island_state.is_dragging_slider
                             || app.island_state.pending_shelf_drag.is_some()
@@ -2636,20 +2926,25 @@ fn main() {
         let _ = AddClipboardFormatListener(hwnd);
     }
 
-    // 4. Initialize spring geometry at top center (Resting mode dimensions: 236x32, r:16)
+    // 4. Initialize state & saved preferences
+    let mut island_state = IslandState::new();
+    island_state.calendar.trigger_sync(hwnd);
+
+    // 5. Initialize spring geometry at top center (Resting mode dimensions: 236x32, r:16)
     let initial_w = 236.0;
     let initial_h = 32.0;
     let initial_r = 16.0;
     let initial_x = (CANVAS_W as f32 - initial_w) * 0.5;
-    let initial_y = 0.0;
+    let initial_y = match island_state.shape {
+        ui::IslandShape::TopNotch => 0.0,
+        ui::IslandShape::FloatingPill => 8.0,
+    };
     let springs = SpringRect::new(initial_x, initial_y, initial_w, initial_h, initial_r);
 
-    // 5. Initialize renderers
+    // 6. Initialize renderers
     let text_renderer = TextRenderer::new();
     let pixel_buffer = PixelBuffer::new(CANVAS_W, CANVAS_H);
     let layout = LayoutManager::new();
-    let mut island_state = IslandState::new();
-    island_state.calendar.trigger_sync(hwnd);
 
     // 6. Connect System Listeners
     let mut volume_listener = VolumeListener::new();
@@ -2728,7 +3023,8 @@ fn main() {
 
     // 9. Start initial animation tick to render the first frame
     unsafe {
-        let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 8, None);
+        let anim_interval = system::display::get_optimal_animation_interval_ms();
+        let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, anim_interval, None);
     }
 
     trim_working_set();

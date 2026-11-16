@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering};
 use windows::Win32::Foundation::{BOOL, HMODULE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, GetMonitorInfoW, MonitorFromPoint, HDC, HMONITOR,
-    MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
+    EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW,
+    ENUM_CURRENT_SETTINGS, HDC, HMONITOR, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, PostMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
@@ -38,6 +38,32 @@ pub struct MonitorInfo {
     pub is_primary: bool,
     pub rect: RECT,
     pub name: String,
+}
+
+/// Queries the primary display refresh rate in Hz (e.g. 60, 120, 144, 180, 240). Defaults to 60 if unavailable.
+pub fn get_primary_refresh_rate() -> u32 {
+    unsafe {
+        let mut dm = DEVMODEW::default();
+        dm.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+        if EnumDisplaySettingsW(
+            None,
+            ENUM_CURRENT_SETTINGS,
+            &mut dm,
+        ).as_bool() && dm.dmDisplayFrequency >= 30 {
+            return dm.dmDisplayFrequency;
+        }
+        60
+    }
+}
+
+/// Computes optimal animation timer tick interval in milliseconds for the current display.
+/// For 180Hz displays: 5ms (~200Hz tick rate).
+/// For 144Hz displays: 6ms (~166Hz tick rate).
+/// For 120Hz displays: 8ms (125Hz tick rate).
+/// For 60Hz displays: 16ms (60Hz tick rate).
+pub fn get_optimal_animation_interval_ms() -> u32 {
+    let hz = get_primary_refresh_rate();
+    (1000 / hz).clamp(1, 16)
 }
 
 pub struct DisplayManager {

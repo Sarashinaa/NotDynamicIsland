@@ -3,21 +3,22 @@
 
 use crate::physics::SpringRect;
 use crate::render::{
-    draw_battery_circle_ring, draw_bell_icon, draw_camera_icon, draw_circle, draw_clipboard_icon, draw_close_button,
+    draw_battery_circle_ring_adaptive, draw_bell_icon, draw_camera_icon, draw_circle, draw_clipboard_icon, draw_close_button,
     draw_eyedropper_icon, draw_file_icon, draw_gemini_sparkle, draw_headphones_badge, draw_location_pin, draw_lyrics_button_ex,
-    draw_microphone_icon, draw_monochrome_sound_wave,
-    draw_nav_arrow_button, draw_nav_arrow_button_ex, draw_next_icon, draw_page_indicators,
+    draw_microphone_icon, draw_monochrome_sound_wave_ex,
+    draw_nav_arrow_button_ex, draw_next_icon,
     draw_pause_icon, draw_play_icon, draw_prev_icon,
     draw_progress_bar, draw_refresh_icon, draw_romaji_button_ex,
     draw_rounded_rect, draw_rounded_rect_stroke,
     draw_seek_backward_button_ex, draw_seek_forward_button_ex, draw_send_arrow,
     draw_snip_icon, draw_speaker_icon, draw_sun_icon, draw_theme_toggle_animated, draw_timer_icon,
-    draw_todo_checkbox, draw_top_notch_liquid_glass_interpolated, draw_top_notch_liquid_glass_with_backdrop,
+    draw_todo_checkbox, draw_todo_checkbox_ex, draw_top_notch_liquid_glass_interpolated, draw_top_notch_liquid_glass_with_backdrop,
+    draw_floating_pill_liquid_glass_interpolated, draw_floating_pill_liquid_glass_with_backdrop,
     draw_weather_icon,
     BackdropBlur, Color, PixelBuffer, TextRenderer,
 };
 use crate::system::lyrics::SyncedLyrics;
-use crate::ui::state::{ExpandedPage, GlassTheme, IslandMode, IslandState, NotificationKind};
+use crate::ui::state::{ExpandedPage, IslandMode, IslandShape, IslandState, NotificationKind};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClickAction {
@@ -63,6 +64,7 @@ pub enum ClickAction {
     AssistantSubmitPrompt,
     AssistantClear,
     AssistantCopyResponse,
+    ActivateApp { app_name: String },
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -86,6 +88,62 @@ pub struct LyricLineLayout<'a> {
     pub is_wrapped: bool,
     pub line1: &'a str,
     pub line2: Option<&'a str>,
+}
+
+#[derive(Clone, Copy, Debug)]
+#[allow(dead_code)]
+pub struct SemanticPalette {
+    pub is_light: bool,
+    pub primary_fg: Color,
+    pub secondary_fg: Color,
+    pub muted_fg: Color,
+    pub card_bg: Color,
+    pub card_stroke: Color,
+    pub btn_bg: Color,
+    pub btn_hover_bg: Color,
+    pub btn_active_bg: Color,
+    pub icon_col: Color,
+    pub track_bg: Color,
+    pub track_fill: Color,
+    pub divider_col: Color,
+}
+
+impl SemanticPalette {
+    pub fn new(is_light: bool, opacity: f32) -> Self {
+        if is_light {
+            Self {
+                is_light: true,
+                primary_fg: Color::rgba(15, 23, 42, 0.96 * opacity),
+                secondary_fg: Color::rgba(71, 85, 105, 0.88 * opacity),
+                muted_fg: Color::rgba(100, 116, 139, 0.70 * opacity),
+                card_bg: Color::rgba(0, 0, 0, 0.05 * opacity),
+                card_stroke: Color::rgba(0, 0, 0, 0.08 * opacity),
+                btn_bg: Color::rgba(0, 0, 0, 0.07 * opacity),
+                btn_hover_bg: Color::rgba(0, 0, 0, 0.13 * opacity),
+                btn_active_bg: Color::rgba(0, 0, 0, 0.20 * opacity),
+                icon_col: Color::rgba(15, 23, 42, 0.92 * opacity),
+                track_bg: Color::rgba(0, 0, 0, 0.12 * opacity),
+                track_fill: Color::rgba(15, 23, 42, 0.92 * opacity),
+                divider_col: Color::rgba(0, 0, 0, 0.08 * opacity),
+            }
+        } else {
+            Self {
+                is_light: false,
+                primary_fg: Color::rgba(255, 255, 255, 0.98 * opacity),
+                secondary_fg: Color::rgba(148, 163, 184, 0.85 * opacity),
+                muted_fg: Color::rgba(148, 163, 184, 0.60 * opacity),
+                card_bg: Color::rgba(255, 255, 255, 0.06 * opacity),
+                card_stroke: Color::rgba(255, 255, 255, 0.12 * opacity),
+                btn_bg: Color::rgba(255, 255, 255, 0.14 * opacity),
+                btn_hover_bg: Color::rgba(255, 255, 255, 0.24 * opacity),
+                btn_active_bg: Color::rgba(255, 255, 255, 0.32 * opacity),
+                icon_col: Color::rgba(255, 255, 255, 0.95 * opacity),
+                track_bg: Color::rgba(255, 255, 255, 0.18 * opacity),
+                track_fill: Color::rgba(255, 255, 255, 0.95 * opacity),
+                divider_col: Color::rgba(255, 255, 255, 0.08 * opacity),
+            }
+        }
+    }
 }
 
 pub struct LayoutManager {
@@ -174,22 +232,22 @@ impl LayoutManager {
             }
             // Closed: Battery ring + centered date & time + sound wave
             IslandMode::Closed => (256.0, 32.0, 16.0),
-            // Music: Increased height to 150px to provide generous breathing room above bottom dots
-            IslandMode::Expanded(ExpandedPage::Music) => (392.0, 150.0, 24.0),
-            // Weather: Clean Apple Weather layout (420x150)
+            // Music: 392x154, generous breathing room with 10px gap to bottom dock
+            IslandMode::Expanded(ExpandedPage::Music) => (392.0, 154.0, 24.0),
+            // Weather: Clean Apple Weather layout (420x150, 10px gap to dock)
             IslandMode::Expanded(ExpandedPage::Weather) => (420.0, 150.0, 24.0),
-            // Shelf:
+            // Shelf: 426x146, 12px gap to dock
             IslandMode::Expanded(ExpandedPage::Shelf) => (426.0, 146.0, 24.0),
-            // Calendar & Agenda: Dual-pane month grid + daily agenda (456x152)
-            IslandMode::Expanded(ExpandedPage::Calendar) => (456.0, 152.0, 24.0),
-            // To-do: 480x160 with dynamic multi-line task boxes and navigation arrows
+            // Calendar & Agenda: Dual-pane month grid + daily agenda (456x168, 12px gap to dock)
+            IslandMode::Expanded(ExpandedPage::Calendar) => (456.0, 168.0, 24.0),
+            // To-do: 480x160 with left task list and right stats/controls, 12px gap to dock
             IslandMode::Expanded(ExpandedPage::ToDo) => (480.0, 160.0, 24.0),
-            // Tools & Control Center: 3 Apple-style utility cards (420x148)
+            // Tools & Control Center: 3 Apple-style utility cards (420x148, 12px gap to dock)
             IslandMode::Expanded(ExpandedPage::Tools) => (420.0, 148.0, 24.0),
-            // Timer & Focus: Spacious 400x150, matches design aesthetic
-            IslandMode::Expanded(ExpandedPage::Timer) => (400.0, 150.0, 24.0),
-            // Assistant: Gemini AI Assistant prompt and response (470x182)
-            IslandMode::Expanded(ExpandedPage::Assistant) => (470.0, 182.0, 24.0),
+            // Timer & Focus: Spacious 400x156, 12px gap to dock
+            IslandMode::Expanded(ExpandedPage::Timer) => (400.0, 156.0, 24.0),
+            // Assistant: Gemini / Groq AI Assistant prompt and response (470x184, 12px gap to dock)
+            IslandMode::Expanded(ExpandedPage::Assistant) => (470.0, 184.0, 24.0),
             // Lyrics: Generous width for synchronized scrolling lyrics
             IslandMode::Lyrics => (600.0, 150.0, 24.0),
             // Notifications:
@@ -207,7 +265,10 @@ impl LayoutManager {
         };
 
         let x = (canvas_w - w) * 0.5;
-        let y = 0.0;
+        let y = match state.shape {
+            crate::ui::IslandShape::TopNotch => 0.0,
+            crate::ui::IslandShape::FloatingPill => 8.0,
+        };
         (x, y, w, h, r)
     }
 
@@ -217,10 +278,11 @@ impl LayoutManager {
         index: usize,
         file_count: usize,
         cur_x: f32,
+        cur_y: f32,
         cur_w: f32,
     ) -> Rect {
         let box_x = cur_x + 44.0;
-        let box_y = 36.0;
+        let box_y = cur_y + 36.0;
         let box_w = cur_w - 88.0;
         let box_h = 76.0;
         let card_w = (box_w - 16.0) / (file_count as f32).max(1.0);
@@ -248,6 +310,7 @@ impl LayoutManager {
         self.click_targets.clear();
 
         let cur_x = springs.x.current;
+        let cur_y = springs.y.current;
         let cur_w = springs.width.current;
         let cur_h = springs.height.current;
         let cur_r = springs.corner_radius.current;
@@ -258,97 +321,153 @@ impl LayoutManager {
         }
 
         let theme_progress = state.theme_spring.current.clamp(0.0, 1.0);
-        if let Some(bd) = backdrop {
-            draw_top_notch_liquid_glass_with_backdrop(
-                buf,
-                cur_x,
-                cur_w,
-                cur_h,
-                cur_r,
-                opacity,
-                theme_progress,
-                bd,
-            );
-        } else {
-            draw_top_notch_liquid_glass_interpolated(
-                buf,
-                cur_x,
-                cur_w,
-                cur_h,
-                cur_r,
-                opacity,
-                theme_progress,
-            );
+        match state.shape {
+            IslandShape::TopNotch => {
+                if let Some(bd) = backdrop {
+                    draw_top_notch_liquid_glass_with_backdrop(
+                        buf,
+                        cur_x,
+                        cur_w,
+                        cur_h,
+                        cur_r,
+                        opacity,
+                        theme_progress,
+                        bd,
+                    );
+                } else {
+                    draw_top_notch_liquid_glass_interpolated(
+                        buf,
+                        cur_x,
+                        cur_w,
+                        cur_h,
+                        cur_r,
+                        opacity,
+                        theme_progress,
+                    );
+                }
+            }
+            IslandShape::FloatingPill => {
+                if let Some(bd) = backdrop {
+                    draw_floating_pill_liquid_glass_with_backdrop(
+                        buf,
+                        cur_x,
+                        cur_y,
+                        cur_w,
+                        cur_h,
+                        cur_r,
+                        opacity,
+                        theme_progress,
+                        bd,
+                    );
+                } else {
+                    draw_floating_pill_liquid_glass_interpolated(
+                        buf,
+                        cur_x,
+                        cur_y,
+                        cur_w,
+                        cur_h,
+                        cur_r,
+                        opacity,
+                        theme_progress,
+                    );
+                }
+            }
         }
+
+        // Background-adaptive color scheme (identical to render_resting and render_closed):
+        // Dynamically compute perceived wallpaper/desktop luminance behind the expanded dynamic island.
+        // When wallpaper/window behind is bright (>135.0), text & icons become dark charcoal.
+        // When wallpaper/window behind is dark (<=135.0), text & icons become light/white.
+        let bg_lum = backdrop.map(|bd| bd.get_region_luminance(cur_x, cur_y, cur_w, cur_h)).unwrap_or(0.0);
+        let is_light = if backdrop.is_some() {
+            bg_lum > 135.0
+        } else {
+            state.is_light_theme()
+        };
 
         // 4. Render component contents based on state
         match &state.mode {
             IslandMode::Resting => {
-                self.render_resting(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity);
+                self.render_resting(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, backdrop);
             }
             IslandMode::Closed => {
-                self.render_closed(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity);
+                self.render_closed(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, backdrop);
             }
             IslandMode::Expanded(ExpandedPage::Music) => {
-                self.render_music(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+                self.render_music(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, cursor_pos, is_light);
             }
             IslandMode::Expanded(ExpandedPage::Weather) => {
-                self.render_weather(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+                self.render_weather(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, cursor_pos, is_light);
             }
             IslandMode::Expanded(ExpandedPage::Shelf) => {
-                self.render_shelf(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+                self.render_shelf(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, cursor_pos, is_light);
             }
             IslandMode::Expanded(ExpandedPage::ToDo) => {
-                self.render_todo(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+                self.render_todo(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, cursor_pos, is_light);
             }
             IslandMode::Expanded(ExpandedPage::Calendar) => {
-                self.render_calendar(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+                self.render_calendar(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, cursor_pos, is_light);
             }
             IslandMode::Expanded(ExpandedPage::Timer) => {
-                self.render_timer(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+                self.render_timer(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, cursor_pos, is_light);
             }
             IslandMode::Expanded(ExpandedPage::Tools) => {
-                self.render_tools(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+                self.render_tools(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, cursor_pos, is_light);
             }
             IslandMode::Expanded(ExpandedPage::Assistant) => {
-                self.render_assistant(buf, text_renderer, cur_x, cur_w, cur_h, state, opacity, cursor_pos);
+                self.render_assistant(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, opacity, cursor_pos, is_light);
             }
             IslandMode::Lyrics => {
-                self.render_lyrics(buf, text_renderer, cur_x, cur_w, cur_h, state, lyrics, opacity, cursor_pos);
+                self.render_lyrics(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, state, lyrics, opacity, cursor_pos, is_light);
             }
             IslandMode::Notification(NotificationKind::Charging { percent }) => {
-                self.render_charging(buf, text_renderer, cur_x, cur_w, cur_h, *percent, true, opacity);
+                self.render_charging(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, *percent, true, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::ChargerDisconnected { percent }) => {
-                self.render_charging(buf, text_renderer, cur_x, cur_w, cur_h, *percent, false, opacity);
+                self.render_charging(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, *percent, false, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::Brightness { level }) => {
-                self.render_brightness(buf, text_renderer, cur_x, cur_w, cur_h, *level, opacity);
+                self.render_brightness(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, *level, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::Headphones { name, battery, connected }) => {
-                self.render_headphones(buf, text_renderer, cur_x, cur_w, cur_h, name, *battery, *connected, opacity);
+                self.render_headphones(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, name, *battery, *connected, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::Volume { level, muted }) => {
-                self.render_volume(buf, text_renderer, cur_x, cur_w, cur_h, *level, *muted, opacity);
+                self.render_volume(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, *level, *muted, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::CapsLock { enabled }) => {
-                self.render_caps_lock(buf, text_renderer, cur_x, cur_w, cur_h, *enabled, opacity);
+                self.render_caps_lock(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, *enabled, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::Banner { app_name, title, message }) => {
-                self.render_banner(buf, text_renderer, cur_x, cur_w, cur_h, app_name, title, message, opacity);
+                self.render_banner(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, app_name, title, message, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::ColorPicked { hex, rgb }) => {
-                self.render_color_picked(buf, text_renderer, cur_x, cur_w, cur_h, hex, rgb, opacity);
+                self.render_color_picked(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, hex, rgb, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::PrivacyAlert { is_camera, app_name }) => {
-                self.render_privacy_alert(buf, text_renderer, cur_x, cur_w, cur_h, *is_camera, app_name, opacity);
+                self.render_privacy_alert(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, *is_camera, app_name, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::TimerCompleted { message }) => {
-                self.render_timer_completed(buf, text_renderer, cur_x, cur_w, cur_h, message, opacity);
+                self.render_timer_completed(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, message, opacity, is_light);
             }
             IslandMode::Notification(NotificationKind::ClipboardCopied { preview, item_count, is_file }) => {
-                self.render_clipboard_copied(buf, text_renderer, cur_x, cur_w, cur_h, preview, *item_count, *is_file, opacity);
+                self.render_clipboard_copied(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, preview, *item_count, *is_file, opacity, is_light);
             }
+        }
+
+        // 5. Render sub-notification pill if active while user is interacting with expanded island
+        if let Some(sub) = &state.sub_notification {
+            self.render_sub_notification(
+                buf,
+                text_renderer,
+                cur_y + cur_h + 8.0,
+                sub,
+                state.sub_notif_spring.current,
+                opacity,
+                cursor_pos,
+                theme_progress,
+                backdrop,
+            );
         }
     }
 
@@ -359,16 +478,43 @@ impl LayoutManager {
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         state: &IslandState,
         opacity: f32,
+        backdrop: Option<&BackdropBlur>,
     ) {
-        let cy = h * 0.5;
+        let cy = y + h * 0.5;
 
-        // Left: Green Battery Ring
+        // Dynamically compute perceived wallpaper/desktop luminance behind the island
+        let lum = backdrop.map(|bd| bd.get_region_luminance(x, y, w, h)).unwrap_or(0.0);
+        let is_bright = lum > 135.0;
+
+        let primary_text_color = if is_bright {
+            Color::rgba(24, 28, 36, 0.96 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
+        let secondary_text_color = if is_bright {
+            Color::rgba(51, 65, 85, 0.92 * opacity)
+        } else {
+            Color::rgba(203, 213, 225, 0.90 * opacity)
+        };
+        let sep_color = if is_bright {
+            Color::rgba(100, 116, 139, 0.85 * opacity)
+        } else {
+            Color::rgba(148, 163, 184, 0.70 * opacity)
+        };
+        let icon_color = if is_bright {
+            Color::rgba(24, 28, 36, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        };
+
+        // Left: Green Battery Ring (adapts background track & charging lightning bolt)
         let bat_cx = x + 18.0;
-        draw_battery_circle_ring(
+        draw_battery_circle_ring_adaptive(
             buf,
             bat_cx,
             cy,
@@ -377,6 +523,7 @@ impl LayoutManager {
             state.is_charging,
             state.is_energy_saver,
             opacity,
+            is_bright,
         );
 
         if state.active_call.is_active {
@@ -397,7 +544,7 @@ impl LayoutManager {
                 draw_camera_icon(buf, icon_x, cy, 11.0, Color::rgba(34, 197, 94, 0.98 * opacity));
             }
 
-            // 2. Right: Local Time (Bold white, right-aligned)
+            // 2. Right: Local Time (Bold, right-aligned)
             let (_, time_str) = get_formatted_date_parts();
             let (time_w, _) = text_renderer.measure_text(&time_str, 11.5, true);
             let time_x = x + w - 16.0 - time_w;
@@ -407,7 +554,7 @@ impl LayoutManager {
                 time_x,
                 cy + 4.5,
                 11.5,
-                Color::rgba(255, 255, 255, 0.98 * opacity),
+                primary_text_color,
                 true,
             );
 
@@ -421,7 +568,7 @@ impl LayoutManager {
                 text_x,
                 cy + 4.0,
                 11.0,
-                Color::rgba(255, 255, 255, 0.98 * opacity),
+                primary_text_color,
                 true,
             );
         } else {
@@ -447,7 +594,7 @@ impl LayoutManager {
 
             let privacy_width = (x + w - 10.0) - priv_x;
 
-            // Right: Local Time (Bold white, right-aligned before privacy dots)
+            // Right: Local Time (Bold, right-aligned before privacy dots)
             let (time_w, _) = text_renderer.measure_text(&time_str, 11.5, true);
             let time_x = x + w - 16.0 - privacy_width - time_w;
             text_renderer.draw_text(
@@ -456,7 +603,7 @@ impl LayoutManager {
                 time_x,
                 cy + 4.5,
                 11.5,
-                Color::rgba(255, 255, 255, 0.98 * opacity),
+                primary_text_color,
                 true,
             );
 
@@ -488,7 +635,7 @@ impl LayoutManager {
                 icon_sz,
                 state.weather.condition(),
                 state.weather.is_day,
-                Color::rgba(255, 255, 255, 0.95 * opacity),
+                icon_color,
             );
 
             let temp_x = start_center_x + icon_sz + 4.0;
@@ -498,14 +645,14 @@ impl LayoutManager {
                 temp_x,
                 cy + 4.0,
                 10.5,
-                Color::rgba(255, 255, 255, 0.96 * opacity),
+                primary_text_color,
                 true,
             );
 
             // Click target to open Weather directly
             let weather_rect = Rect {
                 x: start_center_x - 4.0,
-                y: 0.0,
+                y,
                 w: icon_sz + 4.0 + temp_w + 8.0,
                 h,
             };
@@ -518,7 +665,7 @@ impl LayoutManager {
                 sep_x,
                 cy + 4.0,
                 10.5,
-                Color::rgba(148, 163, 184, 0.70 * opacity),
+                sep_color,
                 false,
             );
 
@@ -529,13 +676,13 @@ impl LayoutManager {
                 date_x,
                 cy + 4.0,
                 10.5,
-                Color::rgba(203, 213, 225, 0.90 * opacity),
+                secondary_text_color,
                 false,
             );
         }
 
         // Clicking expands to active page
-        self.click_targets.push((Rect { x, y: 0.0, w, h }, ClickAction::NextPage));
+        self.click_targets.push((Rect { x, y, w, h }, ClickAction::NextPage));
     }
 
     /// Mode 2: Closed - Battery ring (left) + Centered Date & Time + Live Sound Wave (right)
@@ -545,12 +692,34 @@ impl LayoutManager {
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         state: &IslandState,
         opacity: f32,
+        backdrop: Option<&BackdropBlur>,
     ) {
-        let cy = h * 0.5;
+        let cy = y + h * 0.5;
+
+        // Dynamically compute perceived wallpaper/desktop luminance behind the island
+        let lum = backdrop.map(|bd| bd.get_region_luminance(x, y, w, h)).unwrap_or(0.0);
+        let is_bright = lum > 135.0;
+
+        let primary_text_color = if is_bright {
+            Color::rgba(24, 28, 36, 0.96 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
+        let sep_color = if is_bright {
+            Color::rgba(100, 116, 139, 0.85 * opacity)
+        } else {
+            Color::rgba(148, 163, 184, 0.70 * opacity)
+        };
+        let icon_color = if is_bright {
+            Color::rgba(24, 28, 36, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        };
 
         // Right: Privacy dots & Live Monochrome Sound Wave
         let mut right_edge = x + w - 38.0;
@@ -577,7 +746,7 @@ impl LayoutManager {
 
         let wave_x = right_edge;
         let wave_y = cy - 6.0;
-        draw_monochrome_sound_wave(
+        draw_monochrome_sound_wave_ex(
             buf,
             wave_x,
             wave_y,
@@ -586,11 +755,12 @@ impl LayoutManager {
             state.media_info.is_playing,
             state.anim_time,
             opacity,
+            is_bright,
         );
 
         // Left: Green Battery Ring
         let bat_cx = x + 18.0;
-        draw_battery_circle_ring(
+        draw_battery_circle_ring_adaptive(
             buf,
             bat_cx,
             cy,
@@ -599,6 +769,7 @@ impl LayoutManager {
             state.is_charging,
             state.is_energy_saver,
             opacity,
+            is_bright,
         );
 
         // Center: Weather Micro-Badge • Day, Date, Year & Time centered between battery & sound wave
@@ -625,7 +796,7 @@ impl LayoutManager {
             icon_sz,
             state.weather.condition(),
             state.weather.is_day,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            icon_color,
         );
 
         let temp_x = start_center_x + icon_sz + 4.0;
@@ -635,14 +806,14 @@ impl LayoutManager {
             temp_x,
             cy + 4.0,
             10.5,
-            Color::rgba(255, 255, 255, 0.96 * opacity),
+            primary_text_color,
             true,
         );
 
         // Click target for Weather badge
         let weather_rect = Rect {
             x: start_center_x - 4.0,
-            y: 0.0,
+            y,
             w: icon_sz + 4.0 + temp_w + 8.0,
             h,
         };
@@ -655,7 +826,7 @@ impl LayoutManager {
             sep_x,
             cy + 4.0,
             10.5,
-            Color::rgba(148, 163, 184, 0.70 * opacity),
+            sep_color,
             false,
         );
 
@@ -666,12 +837,12 @@ impl LayoutManager {
             date_x,
             cy + 4.0,
             10.5,
-            Color::rgba(255, 255, 255, 0.96 * opacity),
+            primary_text_color,
             false,
         );
 
         // Clicking expands to active page
-        self.click_targets.push((Rect { x, y: 0.0, w, h }, ClickAction::NextPage));
+        self.click_targets.push((Rect { x, y, w, h }, ClickAction::NextPage));
     }
 
     /// Mode 3: Music - Complete media controls, album artwork, interactive seek bar, and page navigation
@@ -680,20 +851,24 @@ impl LayoutManager {
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         state: &IslandState,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
     ) {
         let _ = h;
+        let palette = SemanticPalette::new(is_light, opacity);
+
         // Top Header: Battery Ring + Date & Time + Soundwave
-        self.render_header_bar(buf, text_renderer, x, w, state, opacity);
+        self.render_header_bar(buf, text_renderer, x, y, w, state, opacity, is_light);
 
         // Sun ☀️ / Moon 🌙 Theme Toggle in top-left vacant area (y: 9.0..27.0, aligned with cy=18.0)
         let theme_rect = Rect {
             x: x + 16.0,
-            y: 9.0,
+            y: y + 9.0,
             w: 38.0,
             h: 18.0,
         };
@@ -716,7 +891,7 @@ impl LayoutManager {
         // Middle Row: Album Artwork Tile
         let art_size = 46.0;
         let art_x = x + 16.0;
-        let art_y = 36.0;
+        let art_y = y + 36.0;
         render_album_art_tile(
             buf,
             art_x,
@@ -741,12 +916,10 @@ impl LayoutManager {
         let title = &title_buf;
         let artist = &artist_buf;
 
-        let is_light = state.glass_theme == GlassTheme::FrostedLight;
-
-        let title_color = Color::rgba(255, 255, 255, 0.98 * opacity);
-        let artist_color = Color::rgba(156, 163, 175, 0.85 * opacity);
-        let time_text_color = Color::rgba(156, 163, 175, 0.80 * opacity);
-        let icon_primary_color = Color::rgba(255, 255, 255, 0.95 * opacity);
+        let title_color = palette.primary_fg;
+        let artist_color = palette.secondary_fg;
+        let time_text_color = palette.muted_fg;
+        let icon_primary_color = palette.icon_col;
 
         text_renderer.draw_text_truncated(
             buf,
@@ -783,7 +956,7 @@ impl LayoutManager {
         self.click_targets.push((next_page_rect, ClickAction::NextPage));
 
         // Interactive Progress Bar Row
-        let bar_y = 90.0;
+        let bar_y = y + 86.0;
         let progress_x = x + 56.0;
         let progress_w = w - 112.0;
 
@@ -827,15 +1000,15 @@ impl LayoutManager {
 
         // When hovered or dragged: thicker and brighter with visible circular thumb knob!
         let bar_h = if is_bar_active { 6.0 } else { 3.5 };
-        let bar_bg = if is_bar_active {
-            Color::rgba(255, 255, 255, 0.28 * opacity)
+        let bar_bg = if is_light {
+            if is_bar_active { Color::rgba(0, 0, 0, 0.22 * opacity) } else { Color::rgba(0, 0, 0, 0.12 * opacity) }
         } else {
-            Color::rgba(255, 255, 255, 0.16 * opacity)
+            if is_bar_active { Color::rgba(255, 255, 255, 0.28 * opacity) } else { Color::rgba(255, 255, 255, 0.16 * opacity) }
         };
-        let bar_fill = if is_bar_active {
-            Color::rgba(255, 255, 255, 1.0 * opacity)
+        let bar_fill = if is_light {
+            if is_bar_active { Color::rgba(15, 23, 42, 0.98 * opacity) } else { Color::rgba(15, 23, 42, 0.88 * opacity) }
         } else {
-            Color::rgba(255, 255, 255, 0.95 * opacity)
+            if is_bar_active { Color::rgba(255, 255, 255, 1.0 * opacity) } else { Color::rgba(255, 255, 255, 0.95 * opacity) }
         };
 
         // Render progress bar
@@ -854,8 +1027,11 @@ impl LayoutManager {
         if (is_bar_active || is_bar_hovered) && state.media_info.duration_secs > 0 {
             let thumb_x = progress_x + progress_val * progress_w;
             let thumb_y = bar_y;
-            let halo_color = Color::rgba(255, 255, 255, 0.38 * opacity);
-            let knob_color = Color::rgba(255, 255, 255, 1.0 * opacity);
+            let (halo_color, knob_color) = if is_light {
+                (Color::rgba(15, 23, 42, 0.25 * opacity), Color::rgba(15, 23, 42, 0.98 * opacity))
+            } else {
+                (Color::rgba(255, 255, 255, 0.38 * opacity), Color::rgba(255, 255, 255, 1.0 * opacity))
+            };
             draw_circle(buf, thumb_x, thumb_y, 7.5, halo_color);
             draw_circle(buf, thumb_x, thumb_y, 5.5, knob_color);
         }
@@ -879,8 +1055,8 @@ impl LayoutManager {
             false,
         );
 
-        // Bottom Controls Row: Positioned at ctrl_y = 112px
-        let ctrl_y = 112.0;
+        // Bottom Controls Row: Positioned at ctrl_y = 108px
+        let ctrl_y = y + 108.0;
 
         // Lyrics Button (speech bubble 💬) on left
         let lyrics_rect = Rect {
@@ -896,6 +1072,12 @@ impl LayoutManager {
         // Center Media Controls: Previous, Play/Pause, Next
         let center_x = x + w * 0.5;
 
+        let hover_circle = if is_light {
+            Color::rgba(0, 0, 0, 0.08 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.16 * opacity)
+        };
+
         // Prev Button
         let prev_rect = Rect {
             x: center_x - 48.0,
@@ -905,7 +1087,6 @@ impl LayoutManager {
         };
         let prev_hover = cursor_pos.map(|(px, py)| prev_rect.contains(px, py)).unwrap_or(false);
         if prev_hover {
-            let hover_circle = Color::rgba(255, 255, 255, 0.16 * opacity);
             draw_circle(buf, center_x - 36.0, ctrl_y, 12.0, hover_circle);
         }
         draw_prev_icon(buf, center_x - 43.0, ctrl_y - 6.0, 13.0, icon_primary_color);
@@ -919,10 +1100,18 @@ impl LayoutManager {
             h: 28.0,
         };
         let play_hover = cursor_pos.map(|(px, py)| play_rect.contains(px, py)).unwrap_or(false);
-        let play_bg = if play_hover {
-            Color::rgba(255, 255, 255, 0.28 * opacity)
+        let play_bg = if is_light {
+            if play_hover {
+                Color::rgba(0, 0, 0, 0.18 * opacity)
+            } else {
+                Color::rgba(0, 0, 0, 0.10 * opacity)
+            }
         } else {
-            Color::rgba(255, 255, 255, 0.16 * opacity)
+            if play_hover {
+                Color::rgba(255, 255, 255, 0.28 * opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.16 * opacity)
+            }
         };
         draw_circle(buf, center_x, ctrl_y, 14.0, play_bg);
         if state.media_info.is_playing {
@@ -941,7 +1130,6 @@ impl LayoutManager {
         };
         let next_hover = cursor_pos.map(|(px, py)| next_rect.contains(px, py)).unwrap_or(false);
         if next_hover {
-            let hover_circle = Color::rgba(255, 255, 255, 0.16 * opacity);
             draw_circle(buf, center_x + 36.0, ctrl_y, 12.0, hover_circle);
         }
         draw_next_icon(buf, center_x + 29.0, ctrl_y - 6.0, 13.0, icon_primary_color);
@@ -969,10 +1157,9 @@ impl LayoutManager {
         draw_seek_forward_button_ex(buf, text_renderer, x + w - 28.0, ctrl_y, 18.0, seek_fwd_hover, opacity, is_light);
         self.click_targets.push((seek_fwd_rect, ClickAction::SeekRelative(5)));
 
-        // Bottom Page Indicator Dots (— • • • • • •) positioned safely at cy = 138.0 with plenty of breathing room!
-        let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 0, 8, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 8);
+        // Bottom Interactive Navigation Dock (GNOME Isle Style)
+        let indicator_y = y + 142.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 0, opacity, cursor_pos, is_light);
     }
 
 /// Intelligently wraps a single lyric line into up to two sub-lines if it exceeds max_width.
@@ -1087,18 +1274,20 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         state: &IslandState,
         lyrics: &SyncedLyrics,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
     ) {
         let _ = h;
         let left_w = 260.0;
         let art_size = 42.0;
         let art_x = x + 16.0;
-        let art_y = 18.0;
+        let art_y = y + 18.0;
 
         // Left: Album Art Tile
         render_album_art_tile(
@@ -1125,11 +1314,11 @@ fn wrap_lyric_line<'a>(
         let title = &title_buf;
         let artist = &artist_buf;
 
-        let is_light = matches!(state.glass_theme, GlassTheme::FrostedLight);
+        let palette = SemanticPalette::new(is_light, opacity);
         let (title_col, artist_col, time_col) = (
-            Color::rgba(255, 255, 255, 0.98 * opacity),
-            Color::rgba(156, 163, 175, 0.85 * opacity),
-            Color::rgba(156, 163, 175, 0.80 * opacity),
+            palette.primary_fg,
+            palette.secondary_fg,
+            palette.muted_fg,
         );
 
         text_renderer.draw_text_truncated(
@@ -1154,7 +1343,7 @@ fn wrap_lyric_line<'a>(
         );
 
         // Progress bar with hover thickness and interactive dragging knob
-        let bar_y = 78.0;
+        let bar_y = y + 78.0;
         let p_x = x + 50.0;
         let p_w = 110.0;
 
@@ -1189,7 +1378,19 @@ fn wrap_lyric_line<'a>(
         };
 
         let bar_h = if is_bar_active { 5.5 } else { 3.5 };
-        let (bar_bg, bar_fill) = {
+        let (bar_bg, bar_fill) = if is_light {
+            let bg = if is_bar_active {
+                Color::rgba(0, 0, 0, 0.22 * opacity)
+            } else {
+                Color::rgba(0, 0, 0, 0.12 * opacity)
+            };
+            let fill = if is_bar_active {
+                Color::rgba(15, 23, 42, 0.98 * opacity)
+            } else {
+                Color::rgba(15, 23, 42, 0.88 * opacity)
+            };
+            (bg, fill)
+        } else {
             let bg = if is_bar_active {
                 Color::rgba(255, 255, 255, 0.28 * opacity)
             } else {
@@ -1208,8 +1409,13 @@ fn wrap_lyric_line<'a>(
         if (is_bar_active || is_bar_hovered) && state.media_info.duration_secs > 0 {
             let thumb_x = p_x + p_val * p_w;
             let thumb_y = bar_y;
-            draw_circle(buf, thumb_x, thumb_y, 6.5, Color::rgba(255, 255, 255, 0.38 * opacity));
-            draw_circle(buf, thumb_x, thumb_y, 4.5, Color::rgba(255, 255, 255, 1.0 * opacity));
+            let (halo_col, knob_col) = if is_light {
+                (Color::rgba(15, 23, 42, 0.25 * opacity), Color::rgba(15, 23, 42, 0.98 * opacity))
+            } else {
+                (Color::rgba(255, 255, 255, 0.38 * opacity), Color::rgba(255, 255, 255, 1.0 * opacity))
+            };
+            draw_circle(buf, thumb_x, thumb_y, 6.5, halo_col);
+            draw_circle(buf, thumb_x, thumb_y, 4.5, knob_col);
         }
 
         if let Some((mx, _)) = cursor_pos {
@@ -1223,7 +1429,7 @@ fn wrap_lyric_line<'a>(
         text_renderer.draw_text(buf, &rem_time_str, p_x + p_w + 6.0, bar_y + 4.0, 9.5, time_col, false);
 
         // Controls Row
-        let ctrl_y = 112.0;
+        let ctrl_y = y + 112.0;
 
         // Lyrics Button
         let lyr_rect = Rect { x: x + 12.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
@@ -1242,9 +1448,13 @@ fn wrap_lyric_line<'a>(
 
         // Playback Controls Cluster centered around pb_center = x + 150.0
         let pb_center = x + 150.0;
-        let ctrl_icon_col = Color::rgba(255, 255, 255, 0.92 * opacity);
-        let play_icon_col = Color::rgba(255, 255, 255, 0.98 * opacity);
-        let hover_bg = Color::rgba(255, 255, 255, 0.14 * opacity);
+        let ctrl_icon_col = palette.icon_col;
+        let play_icon_col = palette.icon_col;
+        let hover_bg = if is_light {
+            Color::rgba(0, 0, 0, 0.08 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.14 * opacity)
+        };
 
         // Seek Backward (-5s)
         let seek_back_rect = Rect { x: pb_center - 68.0, y: ctrl_y - 12.0, w: 24.0, h: 24.0 };
@@ -1264,10 +1474,18 @@ fn wrap_lyric_line<'a>(
         // Play/Pause
         let play_rect = Rect { x: pb_center - 13.0, y: ctrl_y - 13.0, w: 26.0, h: 26.0 };
         let play_hover = cursor_pos.map(|(px, py)| play_rect.contains(px, py)).unwrap_or(false);
-        let play_bg = if play_hover {
-            Color::rgba(255, 255, 255, 0.28 * opacity)
+        let play_bg = if is_light {
+            if play_hover {
+                Color::rgba(0, 0, 0, 0.18 * opacity)
+            } else {
+                Color::rgba(0, 0, 0, 0.10 * opacity)
+            }
         } else {
-            Color::rgba(255, 255, 255, 0.16 * opacity)
+            if play_hover {
+                Color::rgba(255, 255, 255, 0.28 * opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.16 * opacity)
+            }
         };
         draw_circle(buf, pb_center, ctrl_y, 13.0, play_bg);
         if state.media_info.is_playing {
@@ -1297,8 +1515,8 @@ fn wrap_lyric_line<'a>(
         let lyrics_max_w = w - left_w - 36.0;
 
         let (no_lyr_head, no_lyr_sub) = (
-            Color::rgba(255, 255, 255, 0.95 * opacity),
-            Color::rgba(148, 163, 184, 0.70 * opacity),
+            palette.primary_fg,
+            palette.secondary_fg,
         );
 
         if !has_track || lyrics.lines.is_empty() {
@@ -1307,7 +1525,7 @@ fn wrap_lyric_line<'a>(
                 buf,
                 "No lyrics available",
                 lyrics_x,
-                70.0,
+                y + 70.0,
                 14.0,
                 lyrics_max_w,
                 no_lyr_head,
@@ -1317,7 +1535,7 @@ fn wrap_lyric_line<'a>(
                 buf,
                 "Play music on Spotify or your browser to view lyrics",
                 lyrics_x,
-                94.0,
+                y + 94.0,
                 11.0,
                 lyrics_max_w,
                 no_lyr_sub,
@@ -1332,19 +1550,20 @@ fn wrap_lyric_line<'a>(
         let layouts = Self::compute_lyric_layouts(text_renderer, lyrics, lyrics_max_w, state.show_romaji);
         let scroll_y = state.lyrics_scroll_y;
         let line_step = 18.0f32;
+        let center_lyric_y = y + 74.0;
 
         for (i, item) in layouts.iter().enumerate() {
-            let line_y = 74.0 + (item.y_offset - scroll_y);
+            let line_y = center_lyric_y + (item.y_offset - scroll_y);
 
             // Safe vertical bounds: culls lines crossing top or bottom border
-            if line_y < 10.0 || line_y > 122.0 {
+            if line_y < y + 10.0 || line_y > y + 122.0 {
                 continue;
             }
 
             let dist = if item.is_wrapped {
-                (line_y + 9.0 - 74.0).abs()
+                (line_y + 9.0 - center_lyric_y).abs()
             } else {
-                (line_y - 74.0).abs()
+                (line_y - center_lyric_y).abs()
             };
             let is_active = i == active_idx;
 
@@ -1360,9 +1579,14 @@ fn wrap_lyric_line<'a>(
             }
 
             let (font_size, color) = if is_active {
-                (13.5, Color::rgba(255, 255, 255, 0.98 * opacity))
+                (13.5, palette.primary_fg)
             } else {
-                (11.0, Color::rgba(148, 163, 184, (0.75 * fade) * opacity))
+                let inactive_col = if is_light {
+                    Color::rgba(71, 85, 105, (0.75 * fade) * opacity)
+                } else {
+                    Color::rgba(148, 163, 184, (0.75 * fade) * opacity)
+                };
+                (11.0, inactive_col)
             };
 
             match item.line2 {
@@ -1405,7 +1629,7 @@ fn wrap_lyric_line<'a>(
                         color,
                         is_active,
                     );
-                    if line_y + 4.0 + line_step <= 124.0 {
+                    if line_y + 4.0 + line_step <= y + 124.0 {
                         text_renderer.draw_text_truncated(
                             buf,
                             l2,
@@ -1428,20 +1652,24 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         state: &IslandState,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
     ) {
         let _ = h;
+        let palette = SemanticPalette::new(is_light, opacity);
+
         // Top Header: Battery Ring + Date & Time + Soundwave
-        self.render_header_bar(buf, text_renderer, x, w, state, opacity);
+        self.render_header_bar(buf, text_renderer, x, y, w, state, opacity, is_light);
 
         // Sun / Moon Theme Toggle in top-left
         let theme_rect = Rect {
             x: x + 16.0,
-            y: 9.0,
+            y: y + 9.0,
             w: 38.0,
             h: 18.0,
         };
@@ -1463,21 +1691,21 @@ fn wrap_lyric_line<'a>(
 
         // Navigation Arrows:
         // Left Nav Arrow (<) back to Music
-        let prev_btn_rect = Rect { x: x + 10.0, y: 56.0, w: 22.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 10.0, y: y + 56.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + 21.0, 68.0, 10.5, false, prev_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + 21.0, y + 68.0, 10.5, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
         // Right Nav Arrow (>) forward to File Shelf
-        let next_btn_rect = Rect { x: x + w - 32.0, y: 56.0, w: 22.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 32.0, y: y + 56.0, w: 22.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + w - 21.0, 68.0, 10.5, true, next_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + w - 21.0, y + 68.0, 10.5, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // Left Side: Hero Weather Section (Icon + Big Temp + Condition + City)
         let hero_card_rect = Rect {
             x: x + 35.0,
-            y: 35.0,
+            y: y + 35.0,
             w: 105.0,
             h: 84.0,
         };
@@ -1490,7 +1718,7 @@ fn wrap_lyric_line<'a>(
                 hero_card_rect.w,
                 hero_card_rect.h,
                 10.0,
-                Color::rgba(255, 255, 255, 0.06 * opacity),
+                palette.card_bg,
             );
             draw_rounded_rect_stroke(
                 buf,
@@ -1500,13 +1728,13 @@ fn wrap_lyric_line<'a>(
                 hero_card_rect.h,
                 10.0,
                 1.0,
-                Color::rgba(255, 255, 255, 0.12 * opacity),
+                palette.card_stroke,
             );
         }
         self.click_targets.push((hero_card_rect, ClickAction::RefreshWeather));
 
         let hero_cx = x + 60.0;
-        let hero_cy = 56.0;
+        let hero_cy = y + 56.0;
         draw_weather_icon(
             buf,
             hero_cx,
@@ -1514,7 +1742,7 @@ fn wrap_lyric_line<'a>(
             36.0,
             state.weather.condition(),
             state.weather.is_day,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            palette.icon_col,
         );
 
         let temp_str = state.weather.format_temp_compact();
@@ -1525,7 +1753,7 @@ fn wrap_lyric_line<'a>(
             temp_x,
             hero_cy + 10.0,
             28.0,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
+            palette.primary_fg,
             true,
         );
 
@@ -1538,11 +1766,11 @@ fn wrap_lyric_line<'a>(
             cond_x,
             hero_cy + 30.0,
             11.5,
-            Color::rgba(226, 232, 240, 0.94 * opacity),
+            palette.secondary_fg,
             true,
         );
 
-        // Location / City (e.g. "Ciruas" or "Ciruas (Offline)")
+        // Location / City (e.g. "Tokyo" or "Tokyo (Offline)")
         let city_text = if !state.weather.is_loaded {
             "No Connection".to_string()
         } else if state.weather.is_offline {
@@ -1553,14 +1781,14 @@ fn wrap_lyric_line<'a>(
 
         let pin_x = cond_x + 4.0;
         let pin_y = hero_cy + 45.0;
-        draw_location_pin(buf, pin_x, pin_y, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity));
+        draw_location_pin(buf, pin_x, pin_y, 8.5, palette.secondary_fg);
         text_renderer.draw_text(
             buf,
             &city_text,
             pin_x + 8.0,
             hero_cy + 48.0,
             10.5,
-            Color::rgba(148, 163, 184, 0.85 * opacity),
+            palette.secondary_fg,
             false,
         );
 
@@ -1569,69 +1797,68 @@ fn wrap_lyric_line<'a>(
         let col_w = 106.0;
         let col_gap = 8.0;
         let row_h = 35.0;
-        let row1_y = 42.0;
-        let row2_y = 83.0;
+        let row1_y = y + 42.0;
+        let row2_y = y + 83.0;
 
-        let glass_card_bg = Color::rgba(255, 255, 255, 0.08 * opacity);
-        let glass_card_border = Color::rgba(255, 255, 255, 0.12 * opacity);
+        let glass_card_bg = palette.card_bg;
+        let glass_card_border = palette.card_stroke;
 
         // Pill 1: High / Low
         let p1_x = grid_x;
         let p1_y = row1_y;
         draw_rounded_rect(buf, p1_x, p1_y, col_w, row_h, 8.0, glass_card_bg);
         draw_rounded_rect_stroke(buf, p1_x, p1_y, col_w, row_h, 8.0, 1.0, glass_card_border);
-        text_renderer.draw_text(buf, "RANGE", p1_x + 10.0, p1_y + 12.0, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity), true);
+        text_renderer.draw_text(buf, "RANGE", p1_x + 10.0, p1_y + 12.0, 8.5, palette.muted_fg, true);
         let hl_str = if !state.weather.is_loaded {
             "-- / --".to_string()
         } else {
             format!("{:.0}° / {:.0}°", state.weather.temp_max.round(), state.weather.temp_min.round())
         };
-        text_renderer.draw_text(buf, &hl_str, p1_x + 10.0, p1_y + 26.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, &hl_str, p1_x + 10.0, p1_y + 26.0, 11.0, palette.primary_fg, true);
 
         // Pill 2: Feels Like
         let p2_x = grid_x + col_w + col_gap;
         let p2_y = row1_y;
         draw_rounded_rect(buf, p2_x, p2_y, col_w, row_h, 8.0, glass_card_bg);
         draw_rounded_rect_stroke(buf, p2_x, p2_y, col_w, row_h, 8.0, 1.0, glass_card_border);
-        text_renderer.draw_text(buf, "FEELS LIKE", p2_x + 10.0, p2_y + 12.0, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity), true);
+        text_renderer.draw_text(buf, "FEELS LIKE", p2_x + 10.0, p2_y + 12.0, 8.5, palette.muted_fg, true);
         let feels_str = if !state.weather.is_loaded {
             "--".to_string()
         } else {
             format!("{:.0}°C", state.weather.apparent_temperature.round())
         };
-        text_renderer.draw_text(buf, &feels_str, p2_x + 10.0, p2_y + 26.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, &feels_str, p2_x + 10.0, p2_y + 26.0, 11.0, palette.primary_fg, true);
 
         // Pill 3: Humidity
         let p3_x = grid_x;
         let p3_y = row2_y;
         draw_rounded_rect(buf, p3_x, p3_y, col_w, row_h, 8.0, glass_card_bg);
         draw_rounded_rect_stroke(buf, p3_x, p3_y, col_w, row_h, 8.0, 1.0, glass_card_border);
-        text_renderer.draw_text(buf, "HUMIDITY", p3_x + 10.0, p3_y + 12.0, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity), true);
+        text_renderer.draw_text(buf, "HUMIDITY", p3_x + 10.0, p3_y + 12.0, 8.5, palette.muted_fg, true);
         let hum_str = if !state.weather.is_loaded {
             "--%".to_string()
         } else {
             format!("{}%", state.weather.relative_humidity)
         };
-        text_renderer.draw_text(buf, &hum_str, p3_x + 10.0, p3_y + 26.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, &hum_str, p3_x + 10.0, p3_y + 26.0, 11.0, palette.primary_fg, true);
 
         // Pill 4: Wind Speed
         let p4_x = grid_x + col_w + col_gap;
         let p4_y = row2_y;
         draw_rounded_rect(buf, p4_x, p4_y, col_w, row_h, 8.0, glass_card_bg);
         draw_rounded_rect_stroke(buf, p4_x, p4_y, col_w, row_h, 8.0, 1.0, glass_card_border);
-        text_renderer.draw_text(buf, "WIND", p4_x + 10.0, p4_y + 12.0, 8.5, Color::rgba(148, 163, 184, 0.85 * opacity), true);
+        text_renderer.draw_text(buf, "WIND", p4_x + 10.0, p4_y + 12.0, 8.5, palette.muted_fg, true);
         let wind_str = if !state.weather.is_loaded {
             "--".to_string()
         } else {
             format!("{:.1} km/h", state.weather.wind_speed)
         };
-        text_renderer.draw_text(buf, &wind_str, p4_x + 10.0, p4_y + 26.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, &wind_str, p4_x + 10.0, p4_y + 26.0, 11.0, palette.primary_fg, true);
 
-        // Bottom Page Indicator Dots (• — • • • • •) (active index 1 of 7)
-        let indicator_y = 138.0;
+        // Bottom Interactive Navigation Dock (GNOME Isle Style)
+        let indicator_y = y + 138.0;
         let center_x = x + w * 0.5;
-        draw_page_indicators(buf, center_x, indicator_y, 1, 8, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 8);
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 1, opacity, cursor_pos, is_light);
     }
 
     /// Mode 5: Shelf - Drag-and-drop file shelf, copy to clipboard, launch file
@@ -1640,46 +1867,50 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         state: &IslandState,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
     ) {
         let _ = h;
+        let palette = SemanticPalette::new(is_light, opacity);
+
         // Top Header
-        let cy = 18.0;
-        text_renderer.draw_text(buf, "Shelf", x + 16.0, cy + 5.0, 13.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        let cy = y + 18.0;
+        text_renderer.draw_text(buf, "Shelf", x + 16.0, cy + 5.0, 13.0, palette.primary_fg, true);
 
         // Center Time & Battery
-        draw_battery_circle_ring(buf, x + w * 0.5 - 72.0, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity);
+        draw_battery_circle_ring_adaptive(buf, x + w * 0.5 - 72.0, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity, is_light);
         let header_time = get_formatted_header_time();
-        text_renderer.draw_text(buf, &header_time, x + w * 0.5 - 58.0, cy + 4.0, 11.5, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, &header_time, x + w * 0.5 - 58.0, cy + 4.0, 11.5, palette.primary_fg, true);
 
         // Nav Arrows: < to Music, > to ToDo
-        let prev_btn_rect = Rect { x: x + 12.0, y: 56.0, w: 24.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 12.0, y: y + 56.0, w: 24.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + 24.0, 68.0, 11.0, false, prev_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + 24.0, y + 68.0, 11.0, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
-        let next_btn_rect = Rect { x: x + w - 36.0, y: 56.0, w: 24.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 36.0, y: y + 56.0, w: 24.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + w - 24.0, 68.0, 11.0, true, next_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + w - 24.0, y + 68.0, 11.0, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // Shelf Container Box
         let box_x = x + 44.0;
-        let box_y = 36.0;
+        let box_y = y + 36.0;
         let box_w = w - 88.0;
         let box_h = 76.0;
 
-        draw_rounded_rect(buf, box_x, box_y, box_w, box_h, 12.0, Color::rgba(255, 255, 255, 0.05 * opacity));
-        draw_rounded_rect_stroke(buf, box_x, box_y, box_w, box_h, 12.0, 1.0, Color::rgba(255, 255, 255, 0.15 * opacity));
+        draw_rounded_rect(buf, box_x, box_y, box_w, box_h, 12.0, palette.card_bg);
+        draw_rounded_rect_stroke(buf, box_x, box_y, box_w, box_h, 12.0, 1.0, palette.card_stroke);
 
         if state.shelf.items.is_empty() {
             let center_box_x = box_x + box_w * 0.5;
-            draw_rounded_rect(buf, center_box_x - 10.0, box_y + 12.0, 20.0, 10.0, 2.0, Color::rgba(255, 255, 255, 0.7 * opacity));
-            draw_circle(buf, center_box_x, box_y + 10.0, 2.0, Color::rgba(255, 255, 255, 0.9 * opacity));
+            draw_rounded_rect(buf, center_box_x - 10.0, box_y + 12.0, 20.0, 10.0, 2.0, palette.muted_fg);
+            draw_circle(buf, center_box_x, box_y + 10.0, 2.0, palette.muted_fg);
 
             text_renderer.draw_text(
                 buf,
@@ -1687,7 +1918,7 @@ fn wrap_lyric_line<'a>(
                 center_box_x - 70.0,
                 box_y + 40.0,
                 11.5,
-                Color::rgba(255, 255, 255, 0.92 * opacity),
+                palette.primary_fg,
                 true,
             );
             text_renderer.draw_text(
@@ -1696,20 +1927,20 @@ fn wrap_lyric_line<'a>(
                 center_box_x - 88.0,
                 box_y + 56.0,
                 9.5,
-                Color::rgba(148, 163, 184, 0.75 * opacity),
+                palette.secondary_fg,
                 false,
             );
         } else {
             let item_count = state.shelf.items.len();
 
             for (i, item) in state.shelf.items.iter().enumerate() {
-                let card_rect = self.get_shelf_card_rect(i, item_count, x, w);
+                let card_rect = self.get_shelf_card_rect(i, item_count, x, y, w);
                 let is_hovered = cursor_pos.map(|(px, py)| card_rect.contains(px, py)).unwrap_or(false);
 
                 let card_bg = if is_hovered {
-                    Color::rgba(255, 255, 255, 0.20 * opacity)
+                    palette.btn_hover_bg
                 } else {
-                    Color::rgba(255, 255, 255, 0.08 * opacity)
+                    palette.btn_bg
                 };
                 draw_rounded_rect(buf, card_rect.x, card_rect.y, card_rect.w, card_rect.h, 8.0, card_bg);
 
@@ -1726,7 +1957,7 @@ fn wrap_lyric_line<'a>(
                     card_rect.y + 48.0,
                     9.0,
                     card_rect.w - 8.0,
-                    Color::rgba(255, 255, 255, 0.95 * opacity),
+                    palette.primary_fg,
                     true,
                 );
                 text_renderer.draw_text_truncated(
@@ -1736,7 +1967,7 @@ fn wrap_lyric_line<'a>(
                     card_rect.y + 58.0,
                     8.0,
                     card_rect.w - 8.0,
-                    Color::rgba(148, 163, 184, 0.8 * opacity),
+                    palette.secondary_fg,
                     false,
                 );
 
@@ -1756,10 +1987,9 @@ fn wrap_lyric_line<'a>(
             }
         }
 
-        // Bottom Page Indicator Dots (• • — • • • •) (active index 2 of 7)
-        let indicator_y = 134.0;
-        draw_page_indicators(buf, x + w * 0.5, indicator_y, 2, 8, opacity);
-        self.register_page_dot_targets(x + w * 0.5, indicator_y, 8);
+        // Bottom Interactive Navigation Dock (GNOME Isle Style)
+        let indicator_y = y + 134.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, 2, opacity, cursor_pos, is_light);
     }
 
     /// Mode 6: To-do - Clean typography spacing, task statistics, scrollable task items
@@ -1768,142 +1998,51 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         state: &IslandState,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
     ) {
         let _ = h;
+        let palette = SemanticPalette::new(is_light, opacity);
+
         // Top Header
-        let cy = 18.0;
-        text_renderer.draw_text(buf, "TodoList", x + 16.0, cy + 5.0, 13.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        let cy = y + 18.0;
+        text_renderer.draw_text(buf, "TodoList", x + 16.0, cy + 5.0, 13.0, palette.primary_fg, true);
 
         // Center Time & Battery
-        draw_battery_circle_ring(buf, x + w * 0.5 - 72.0, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity);
+        draw_battery_circle_ring_adaptive(buf, x + w * 0.5 - 72.0, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity, is_light);
         let header_time = get_formatted_header_time();
-        text_renderer.draw_text(buf, &header_time, x + w * 0.5 - 58.0, cy + 4.0, 11.5, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, &header_time, x + w * 0.5 - 58.0, cy + 4.0, 11.5, palette.primary_fg, true);
 
         // Right side: Sound wave if media playing
         if state.media_info.is_playing {
-            draw_monochrome_sound_wave(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity);
+            draw_monochrome_sound_wave_ex(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity, is_light);
         }
 
         // Prev Arrow Button (<) to cycle to Shelf
-        let prev_btn_rect = Rect { x: x + 12.0, y: 62.0, w: 24.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 12.0, y: y + 62.0, w: 24.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + 24.0, 74.0, 11.0, false, prev_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + 24.0, y + 74.0, 11.0, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
         // Next Arrow Button (>) to cycle to Calendar
-        let next_btn_rect = Rect { x: x + w - 36.0, y: 62.0, w: 24.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 36.0, y: y + 62.0, w: 24.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + w - 24.0, 74.0, 11.0, true, next_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + w - 24.0, y + 74.0, 11.0, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
-        // Left Column: Statistics "X/Y Task Done Today" with clean vertical spacing
-        let left_x = x + 44.0;
-        let (done_cnt, total_cnt) = state.todo.counts();
-        let score_str = format!("{}/{}", done_cnt, total_cnt);
-
-        text_renderer.draw_text(
-            buf,
-            &score_str,
-            left_x,
-            56.0,
-            20.0,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
-            true,
-        );
-        text_renderer.draw_text(
-            buf,
-            "Task Done Today",
-            left_x,
-            78.0,
-            10.5,
-            Color::rgba(148, 163, 184, 0.85 * opacity),
-            false,
-        );
-
-        // Interactive Task Input Mode or Action Buttons (+ Add Task & ✎ Clear)
-        if state.todo.is_input_active {
-            let input_rect = Rect { x: left_x, y: 98.0, w: 140.0, h: 26.0 };
-            // Dark input pill with frosted translucent outline
-            draw_rounded_rect(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, Color::rgba(18, 22, 28, 0.95 * opacity));
-            draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.0, Color::rgba(255, 255, 255, 0.35 * opacity));
-
-            let text_rect = Rect { x: input_rect.x, y: input_rect.y, w: input_rect.w - 36.0, h: input_rect.h };
-            self.click_targets.push((text_rect, ClickAction::TodoFocusInput));
-
-            state.todo.input.render(
-                buf,
-                text_renderer,
-                input_rect.x,
-                input_rect.y,
-                input_rect.w - 36.0,
-                input_rect.h,
-                10.0,
-                Color::rgba(255, 255, 255, 0.98 * opacity),
-                "Type task...",
-                true,
-                false,
-                opacity,
-                state.anim_time,
-            );
-
-            // Save button (✓ vector checkmark)
-            let ok_rect = Rect { x: input_rect.x + input_rect.w - 34.0, y: input_rect.y + 2.0, w: 16.0, h: 22.0 };
-            let ok_hover = cursor_pos.map(|(px, py)| ok_rect.contains(px, py)).unwrap_or(false);
-            let ok_col = if ok_hover { Color::rgba(255, 255, 255, 1.0 * opacity) } else { Color::rgba(255, 255, 255, 0.70 * opacity) };
-            let ok_cx = ok_rect.x + 8.0;
-            let ok_cy = ok_rect.y + 11.0;
-            for i in 0..5 {
-                let t = i as f32 / 4.0;
-                draw_circle(buf, ok_cx - 3.5 + t * 2.0, ok_cy + t * 2.0, 0.9, ok_col);
-            }
-            for i in 0..7 {
-                let t = i as f32 / 6.0;
-                draw_circle(buf, ok_cx - 1.5 + t * 5.0, ok_cy + 2.0 - t * 6.0, 0.9, ok_col);
-            }
-            self.click_targets.push((ok_rect, ClickAction::CommitAddTask));
-
-            // Cancel button (✕ vector cross)
-            let cancel_rect = Rect { x: input_rect.x + input_rect.w - 18.0, y: input_rect.y + 2.0, w: 16.0, h: 22.0 };
-            let cancel_hover = cursor_pos.map(|(px, py)| cancel_rect.contains(px, py)).unwrap_or(false);
-            let cancel_col = if cancel_hover { Color::rgba(255, 255, 255, 0.95 * opacity) } else { Color::rgba(156, 163, 175, 0.75 * opacity) };
-            let cancel_cx = cancel_rect.x + 8.0;
-            let cancel_cy = cancel_rect.y + 11.0;
-            for i in 0..8 {
-                let t = (i as f32 / 7.0) * 6.0 - 3.0;
-                draw_circle(buf, cancel_cx + t, cancel_cy + t, 0.9, cancel_col);
-                draw_circle(buf, cancel_cx + t, cancel_cy - t, 0.9, cancel_col);
-            }
-            self.click_targets.push((cancel_rect, ClickAction::CancelAddTask));
-        } else {
-            // Buttons: + Add Task & ✎ Clear positioned cleanly at y = 100.0
-            let add_btn_rect = Rect { x: left_x, y: 100.0, w: 72.0, h: 22.0 };
-            let add_hover = cursor_pos.map(|(px, py)| add_btn_rect.contains(px, py)).unwrap_or(false);
-            let add_bg = if add_hover { Color::rgba(255, 255, 255, 0.25 * opacity) } else { Color::rgba(255, 255, 255, 0.12 * opacity) };
-            draw_rounded_rect(buf, add_btn_rect.x, add_btn_rect.y, add_btn_rect.w, add_btn_rect.h, 6.0, add_bg);
-            text_renderer.draw_text(buf, "+ Add Task", add_btn_rect.x + 8.0, add_btn_rect.y + 15.0, 9.5, Color::rgba(255, 255, 255, 0.95 * opacity), true);
-            self.click_targets.push((add_btn_rect, ClickAction::PromptAddTask));
-
-            let clear_btn_rect = Rect { x: left_x + 78.0, y: 100.0, w: 56.0, h: 22.0 };
-            let clear_hover = cursor_pos.map(|(px, py)| clear_btn_rect.contains(px, py)).unwrap_or(false);
-            let clear_bg = if clear_hover { Color::rgba(255, 255, 255, 0.25 * opacity) } else { Color::rgba(255, 255, 255, 0.12 * opacity) };
-            draw_rounded_rect(buf, clear_btn_rect.x, clear_btn_rect.y, clear_btn_rect.w, clear_btn_rect.h, 6.0, clear_bg);
-            text_renderer.draw_text(buf, "✎ Clear", clear_btn_rect.x + 8.0, clear_btn_rect.y + 15.0, 9.5, Color::rgba(255, 255, 255, 0.95 * opacity), false);
-            self.click_targets.push((clear_btn_rect, ClickAction::ClearDoneTodo));
-        }
-
-        // Right Column: Scrollable Task List Items with dynamic multi-line wrap
-        let right_x = x + 196.0;
-        let right_w = w - 250.0;
-        let max_text_w = right_w - 36.0;
+        // LEFT COLUMN: Scrollable Task List Items with dynamic multi-line wrap
+        let list_x = x + 38.0;
+        let list_w = 224.0;
+        let max_text_w = list_w - 36.0;
         let item_gap = 4.0;
-        let max_list_bottom = 138.0;
+        let max_list_bottom = y + 122.0;
 
-        let mut cur_item_y = 35.0;
+        let mut cur_item_y = y + 34.0;
         let mut rendered_count = 0;
 
         for item in state.todo.items.iter().skip(state.todo.scroll_offset) {
@@ -1919,32 +2058,36 @@ fn wrap_lyric_line<'a>(
             }
 
             let item_rect = Rect {
-                x: right_x,
+                x: list_x,
                 y: cur_item_y,
-                w: right_w,
+                w: list_w,
                 h: item_h,
             };
             let is_hovered = cursor_pos.map(|(px, py)| item_rect.contains(px, py)).unwrap_or(false);
 
             let item_bg = if item.done {
-                Color::rgba(255, 255, 255, 0.04 * opacity)
+                if is_light {
+                    Color::rgba(0, 0, 0, 0.02 * opacity)
+                } else {
+                    Color::rgba(255, 255, 255, 0.04 * opacity)
+                }
             } else if is_hovered {
-                Color::rgba(255, 255, 255, 0.16 * opacity)
+                palette.btn_hover_bg
             } else {
-                Color::rgba(255, 255, 255, 0.08 * opacity)
+                palette.card_bg
             };
             draw_rounded_rect(buf, item_rect.x, item_rect.y, item_rect.w, item_rect.h, 7.0, item_bg);
 
             // Checkbox centered vertically in the pill
             let check_cx = item_rect.x + 14.0;
             let check_cy = item_rect.y + item_h * 0.5;
-            draw_todo_checkbox(buf, check_cx, check_cy, 6.5, item.done, is_hovered, opacity);
+            draw_todo_checkbox_ex(buf, check_cx, check_cy, 6.5, item.done, is_hovered, opacity, is_light);
 
             // Task text lines
             let text_color = if item.done {
-                Color::rgba(148, 163, 184, 0.65 * opacity)
+                palette.muted_fg
             } else {
-                Color::rgba(255, 255, 255, 0.95 * opacity)
+                palette.primary_fg
             };
 
             for (line_idx, line) in lines.iter().enumerate() {
@@ -1984,24 +2127,139 @@ fn wrap_lyric_line<'a>(
             rendered_count += 1;
         }
 
-        // Scrollbar Indicator (on right edge of task box)
+        // Scrollbar Indicator (on right edge of left task list)
         let total_items = state.todo.items.len();
         if total_items > rendered_count || state.todo.scroll_offset > 0 {
-            let sb_x = right_x + right_w + 5.0;
-            let sb_y = 36.0;
-            let sb_h = 98.0;
+            let sb_x = list_x + list_w + 3.0;
+            let sb_y = y + 36.0;
+            let sb_h = 82.0;
             let visible_ratio = (rendered_count as f32 / total_items.max(1) as f32).clamp(0.2, 1.0);
             let thumb_h = (sb_h * visible_ratio).max(14.0);
             let max_scroll = total_items.saturating_sub(1).max(1);
             let scroll_frac = (state.todo.scroll_offset as f32 / max_scroll as f32).clamp(0.0, 1.0);
             let thumb_y = sb_y + scroll_frac * (sb_h - thumb_h);
-            draw_rounded_rect(buf, sb_x, thumb_y, 3.0, thumb_h, 1.5, Color::rgba(255, 255, 255, 0.35 * opacity));
+            let thumb_col = if is_light { Color::rgba(0, 0, 0, 0.25 * opacity) } else { Color::rgba(255, 255, 255, 0.35 * opacity) };
+            draw_rounded_rect(buf, sb_x, thumb_y, 3.0, thumb_h, 1.5, thumb_col);
         }
 
-        // Bottom Page Indicator Dots (• • • • — • •) (active index 4 of 7)
-        let indicator_y = 148.0;
-        draw_page_indicators(buf, x + w * 0.5, indicator_y, 4, 8, opacity);
-        self.register_page_dot_targets(x + w * 0.5, indicator_y, 8);
+        // VERTICAL DIVIDER LINE between task list and right controls
+        let div_x = x + 272.0;
+        let min_y = (y + 34.0) as usize;
+        let max_y = (y + 122.0) as usize;
+        for py in min_y..=max_y {
+            buf.blend_pixel(div_x as usize, py, palette.divider_col.r, palette.divider_col.g, palette.divider_col.b, palette.divider_col.a);
+        }
+
+        // RIGHT COLUMN: Statistics "X/Y Task Done Today" & Action Controls
+        let right_x = x + 288.0;
+        let (done_cnt, total_cnt) = state.todo.counts();
+        let score_str = format!("{}/{}", done_cnt, total_cnt);
+
+        text_renderer.draw_text(
+            buf,
+            &score_str,
+            right_x,
+            y + 54.0,
+            20.0,
+            palette.primary_fg,
+            true,
+        );
+        text_renderer.draw_text(
+            buf,
+            "Task Done Today",
+            right_x,
+            y + 74.0,
+            10.5,
+            palette.secondary_fg,
+            false,
+        );
+
+        // Interactive Task Input Mode or Action Buttons (+ Add Task & ✎ Clear)
+        if state.todo.is_input_active {
+            let input_rect = Rect { x: right_x, y: y + 92.0, w: 146.0, h: 26.0 };
+            let (input_bg, input_stroke, input_text_col) = if is_light {
+                (
+                    Color::rgba(240, 243, 246, 0.95 * opacity),
+                    Color::rgba(0, 0, 0, 0.15 * opacity),
+                    Color::rgba(15, 23, 42, 0.98 * opacity),
+                )
+            } else {
+                (
+                    Color::rgba(18, 22, 28, 0.95 * opacity),
+                    Color::rgba(255, 255, 255, 0.35 * opacity),
+                    Color::rgba(255, 255, 255, 0.98 * opacity),
+                )
+            };
+            draw_rounded_rect(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, input_bg);
+            draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.0, input_stroke);
+
+            let text_rect = Rect { x: input_rect.x, y: input_rect.y, w: input_rect.w - 36.0, h: input_rect.h };
+            self.click_targets.push((text_rect, ClickAction::TodoFocusInput));
+
+            state.todo.input.render(
+                buf,
+                text_renderer,
+                input_rect.x,
+                input_rect.y,
+                input_rect.w - 36.0,
+                input_rect.h,
+                10.0,
+                input_text_col,
+                "Type task...",
+                true,
+                false,
+                opacity,
+                state.anim_time,
+            );
+
+            // Save button (✓ vector checkmark)
+            let ok_rect = Rect { x: input_rect.x + input_rect.w - 34.0, y: input_rect.y + 2.0, w: 16.0, h: 22.0 };
+            let ok_hover = cursor_pos.map(|(px, py)| ok_rect.contains(px, py)).unwrap_or(false);
+            let ok_col = if ok_hover { Color::rgba(34, 197, 94, 1.0 * opacity) } else { Color::rgba(34, 197, 94, 0.70 * opacity) };
+            let ok_cx = ok_rect.x + 8.0;
+            let ok_cy = ok_rect.y + 11.0;
+            for i in 0..5 {
+                let t = i as f32 / 4.0;
+                draw_circle(buf, ok_cx - 3.5 + t * 2.0, ok_cy + t * 2.0, 0.9, ok_col);
+            }
+            for i in 0..7 {
+                let t = i as f32 / 6.0;
+                draw_circle(buf, ok_cx - 1.5 + t * 5.0, ok_cy + 2.0 - t * 6.0, 0.9, ok_col);
+            }
+            self.click_targets.push((ok_rect, ClickAction::CommitAddTask));
+
+            // Cancel button (✕ vector cross)
+            let cancel_rect = Rect { x: input_rect.x + input_rect.w - 18.0, y: input_rect.y + 2.0, w: 16.0, h: 22.0 };
+            let cancel_hover = cursor_pos.map(|(px, py)| cancel_rect.contains(px, py)).unwrap_or(false);
+            let cancel_col = if cancel_hover { Color::rgba(239, 68, 68, 1.0 * opacity) } else { Color::rgba(239, 68, 68, 0.70 * opacity) };
+            let cancel_cx = cancel_rect.x + 8.0;
+            let cancel_cy = cancel_rect.y + 11.0;
+            for i in 0..8 {
+                let t = (i as f32 / 7.0) * 6.0 - 3.0;
+                draw_circle(buf, cancel_cx + t, cancel_cy + t, 0.9, cancel_col);
+                draw_circle(buf, cancel_cx + t, cancel_cy - t, 0.9, cancel_col);
+            }
+            self.click_targets.push((cancel_rect, ClickAction::CancelAddTask));
+        } else {
+            // Buttons: + Add Task & ✎ Clear positioned cleanly at y = 94.0
+            let add_btn_rect = Rect { x: right_x, y: y + 94.0, w: 76.0, h: 22.0 };
+            let add_hover = cursor_pos.map(|(px, py)| add_btn_rect.contains(px, py)).unwrap_or(false);
+            let add_bg = if add_hover { palette.btn_hover_bg } else { palette.btn_bg };
+            draw_rounded_rect(buf, add_btn_rect.x, add_btn_rect.y, add_btn_rect.w, add_btn_rect.h, 6.0, add_bg);
+            text_renderer.draw_text(buf, "+ Add Task", add_btn_rect.x + 8.0, add_btn_rect.y + 15.0, 9.5, palette.primary_fg, true);
+            self.click_targets.push((add_btn_rect, ClickAction::PromptAddTask));
+
+            let clear_btn_rect = Rect { x: right_x + 82.0, y: y + 94.0, w: 58.0, h: 22.0 };
+            let clear_hover = cursor_pos.map(|(px, py)| clear_btn_rect.contains(px, py)).unwrap_or(false);
+            let clear_bg = if clear_hover { palette.btn_hover_bg } else { palette.btn_bg };
+            draw_rounded_rect(buf, clear_btn_rect.x, clear_btn_rect.y, clear_btn_rect.w, clear_btn_rect.h, 6.0, clear_bg);
+            text_renderer.draw_text(buf, "✎ Clear", clear_btn_rect.x + 8.0, clear_btn_rect.y + 15.0, 9.5, palette.secondary_fg, false);
+            self.click_targets.push((clear_btn_rect, ClickAction::ClearDoneTodo));
+        }
+
+        // Bottom Interactive Navigation Dock (GNOME Isle Style)
+        let indicator_y = y + 144.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, 4, opacity, cursor_pos, is_light);
     }
 
     /// Mode: Calendar & Agenda (Page 3 / 4th Page) - Interactive Month Grid & Google Calendar Sync
@@ -2010,28 +2268,31 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         _h: f32,
         state: &IslandState,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
     ) {
         let center_x = x + w * 0.5;
+        let palette = SemanticPalette::new(is_light, opacity);
 
         // Top Header Row (cy = 18.0)
-        let cy = 18.0;
+        let cy = y + 18.0;
         text_renderer.draw_text(
             buf,
             "Calendar",
             x + 16.0,
             cy + 5.0,
             13.0,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            palette.primary_fg,
             true,
         );
 
         // Center Time & Battery
-        draw_battery_circle_ring(
+        draw_battery_circle_ring_adaptive(
             buf,
             center_x - 72.0,
             cy,
@@ -2040,6 +2301,7 @@ fn wrap_lyric_line<'a>(
             state.is_charging,
             state.is_energy_saver,
             opacity,
+            is_light,
         );
         let header_time = get_formatted_header_time();
         text_renderer.draw_text(
@@ -2048,24 +2310,24 @@ fn wrap_lyric_line<'a>(
             center_x - 58.0,
             cy + 4.0,
             11.5,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            palette.primary_fg,
             true,
         );
 
         // Right side: Sound wave if media playing
         if state.media_info.is_playing {
-            draw_monochrome_sound_wave(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity);
+            draw_monochrome_sound_wave_ex(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity, is_light);
         }
 
         // Nav Arrows: < to To-Do, > to Focus Timer
-        let prev_btn_rect = Rect { x: x + 10.0, y: 56.0, w: 20.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 10.0, y: y + 56.0, w: 20.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + 18.0, 68.0, 10.0, false, prev_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + 18.0, y + 68.0, 10.0, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
-        let next_btn_rect = Rect { x: x + w - 28.0, y: 56.0, w: 20.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 28.0, y: y + 56.0, w: 20.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + w - 18.0, 68.0, 10.0, true, next_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + w - 18.0, y + 68.0, 10.0, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // LEFT PANE: Mini Interactive Month Grid
@@ -2073,52 +2335,52 @@ fn wrap_lyric_line<'a>(
         let left_w = 188.0;
 
         // Header Row: Month & Year on left, [<] [>] [Today] on right
-        let m_header_y = 31.0;
+        let m_header_y = y + 30.0;
 
         // Month Title (e.g. OCTOBER 2026)
         let m_name = crate::system::calendar::month_name(state.calendar.view_month);
         let m_title = format!("{} {}", m_name, state.calendar.view_year);
-        text_renderer.draw_text(buf, &m_title, left_x + 2.0, m_header_y + 11.0, 9.5, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, &m_title, left_x + 2.0, m_header_y + 11.0, 9.5, palette.primary_fg, true);
 
         // Prev Month [<]
         let pm_rect = Rect { x: left_x + left_w - 70.0, y: m_header_y, w: 16.0, h: 15.0 };
         let pm_hover = cursor_pos.map(|(px, py)| pm_rect.contains(px, py)).unwrap_or(false);
-        let pm_bg = if pm_hover { Color::rgba(255, 255, 255, 0.20 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+        let pm_bg = if pm_hover { palette.btn_hover_bg } else { palette.btn_bg };
         draw_rounded_rect(buf, pm_rect.x, pm_rect.y, pm_rect.w, pm_rect.h, 3.5, pm_bg);
-        text_renderer.draw_text(buf, "<", pm_rect.x + 4.5, m_header_y + 11.0, 9.0, Color::rgba(255, 255, 255, 0.90 * opacity), true);
+        text_renderer.draw_text(buf, "<", pm_rect.x + 4.5, m_header_y + 11.0, 9.0, palette.primary_fg, true);
         self.click_targets.push((pm_rect, ClickAction::CalendarPrevMonth));
 
         // Next Month [>]
         let nm_rect = Rect { x: left_x + left_w - 51.0, y: m_header_y, w: 16.0, h: 15.0 };
         let nm_hover = cursor_pos.map(|(px, py)| nm_rect.contains(px, py)).unwrap_or(false);
-        let nm_bg = if nm_hover { Color::rgba(255, 255, 255, 0.20 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+        let nm_bg = if nm_hover { palette.btn_hover_bg } else { palette.btn_bg };
         draw_rounded_rect(buf, nm_rect.x, nm_rect.y, nm_rect.w, nm_rect.h, 3.5, nm_bg);
-        text_renderer.draw_text(buf, ">", nm_rect.x + 5.0, m_header_y + 11.0, 9.0, Color::rgba(255, 255, 255, 0.90 * opacity), true);
+        text_renderer.draw_text(buf, ">", nm_rect.x + 5.0, m_header_y + 11.0, 9.0, palette.primary_fg, true);
         self.click_targets.push((nm_rect, ClickAction::CalendarNextMonth));
 
         // [Today] Pill button
         let today_btn_rect = Rect { x: left_x + left_w - 32.0, y: m_header_y, w: 32.0, h: 15.0 };
         let today_hover = cursor_pos.map(|(px, py)| today_btn_rect.contains(px, py)).unwrap_or(false);
-        let today_bg = if today_hover { Color::rgba(255, 255, 255, 0.22 * opacity) } else { Color::rgba(255, 255, 255, 0.10 * opacity) };
+        let today_bg = if today_hover { palette.btn_hover_bg } else { palette.btn_bg };
         draw_rounded_rect(buf, today_btn_rect.x, today_btn_rect.y, today_btn_rect.w, today_btn_rect.h, 4.0, today_bg);
-        text_renderer.draw_text(buf, "Today", today_btn_rect.x + 4.0, today_btn_rect.y + 11.0, 8.5, Color::rgba(255, 255, 255, 0.90 * opacity), false);
+        text_renderer.draw_text(buf, "Today", today_btn_rect.x + 4.0, today_btn_rect.y + 11.0, 8.5, palette.secondary_fg, false);
         self.click_targets.push((today_btn_rect, ClickAction::CalendarJumpToToday));
 
         // Day of Week Header row: Su Mo Tu We Th Fr Sa
-        let dow_y = 57.0;
+        let dow_y = y + 54.0;
         let col_w = left_w / 7.0;
         let dows = ["S", "M", "T", "W", "T", "F", "S"];
         for (i, d_str) in dows.iter().enumerate() {
             let cx = left_x + (i as f32 + 0.5) * col_w;
             let (dw, _) = text_renderer.measure_text(d_str, 8.5, false);
-            text_renderer.draw_text(buf, d_str, cx - dw * 0.5, dow_y, 8.5, Color::rgba(148, 163, 184, 0.75 * opacity), false);
+            text_renderer.draw_text(buf, d_str, cx - dw * 0.5, dow_y, 8.5, palette.muted_fg, false);
         }
 
         // Days Grid: 1..=days_in_month
         let start_dow = crate::system::calendar::day_of_week(state.calendar.view_year, state.calendar.view_month, 1);
         let total_days = crate::system::calendar::days_in_month(state.calendar.view_year, state.calendar.view_month);
-        let grid_start_y = 70.0;
-        let row_h = 11.5;
+        let grid_start_y = y + 66.0;
+        let row_h = 10.5;
 
         for d in 1..=total_days {
             let offset = (start_dow + d - 1) as usize;
@@ -2137,9 +2399,9 @@ fn wrap_lyric_line<'a>(
             let is_hovered = cursor_pos.map(|(px, py)| day_rect.contains(px, py)).unwrap_or(false);
 
             if is_selected {
-                draw_rounded_rect(buf, cx - 8.0, cy - 1.0, 16.0, 12.0, 3.5, Color::rgba(255, 255, 255, 0.25 * opacity));
+                draw_rounded_rect(buf, cx - 8.0, cy - 1.0, 16.0, 12.0, 3.5, palette.btn_active_bg);
             } else if is_hovered {
-                draw_rounded_rect(buf, cx - 8.0, cy - 1.0, 16.0, 12.0, 3.5, Color::rgba(255, 255, 255, 0.10 * opacity));
+                draw_rounded_rect(buf, cx - 8.0, cy - 1.0, 16.0, 12.0, 3.5, palette.btn_hover_bg);
             }
 
             if is_today {
@@ -2149,11 +2411,11 @@ fn wrap_lyric_line<'a>(
             let num_str = d.to_string();
             let (nw, _) = text_renderer.measure_text(&num_str, 8.5, is_today || is_selected);
             let num_col = if is_selected {
-                Color::rgba(255, 255, 255, 1.0 * opacity)
+                palette.primary_fg
             } else if is_today {
                 Color::rgba(34, 197, 94, 0.98 * opacity)
             } else {
-                Color::rgba(226, 232, 240, 0.85 * opacity)
+                palette.secondary_fg
             };
             text_renderer.draw_text(buf, &num_str, cx - nw * 0.5, cy + 8.0, 8.5, num_col, is_today || is_selected);
 
@@ -2167,10 +2429,10 @@ fn wrap_lyric_line<'a>(
 
         // VERTICAL DIVIDER LINE between panes
         let div_x = left_x + left_w + 10.0;
-        let min_y = 36.0 as usize;
-        let max_y = 132.0 as usize;
+        let min_y = (y + 34.0) as usize;
+        let max_y = (y + 130.0) as usize;
         for py in min_y..=max_y {
-            buf.blend_pixel(div_x as usize, py, 255, 255, 255, 0.08 * opacity);
+            buf.blend_pixel(div_x as usize, py, palette.divider_col.r, palette.divider_col.g, palette.divider_col.b, palette.divider_col.a);
         }
 
         // RIGHT PANE: Daily Agenda & Events
@@ -2182,30 +2444,43 @@ fn wrap_lyric_line<'a>(
         let dow_name = crate::system::calendar::day_name_short(dow_sel);
         let m_sel_name = crate::system::calendar::month_short(state.calendar.view_month);
         let header_str = format!("{}, {} {}", dow_name, state.calendar.selected_day, m_sel_name);
-        text_renderer.draw_text(buf, &header_str, right_x, 46.0, 11.5, Color::rgba(255, 255, 255, 0.98 * opacity), true);
+        text_renderer.draw_text(buf, &header_str, right_x, y + 42.0, 11.5, palette.primary_fg, true);
 
         // Action Buttons: [+] Add Event & [↻] Sync
-        let sync_btn_rect = Rect { x: right_x + right_w - 22.0, y: 34.0, w: 20.0, h: 18.0 };
+        let sync_btn_rect = Rect { x: right_x + right_w - 22.0, y: y + 32.0, w: 20.0, h: 18.0 };
         let sync_hover = cursor_pos.map(|(px, py)| sync_btn_rect.contains(px, py)).unwrap_or(false);
-        let sync_bg = if sync_hover { Color::rgba(255, 255, 255, 0.20 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+        let sync_bg = if sync_hover { palette.btn_hover_bg } else { palette.btn_bg };
         draw_rounded_rect(buf, sync_btn_rect.x, sync_btn_rect.y, sync_btn_rect.w, sync_btn_rect.h, 4.0, sync_bg);
-        let sync_col = if sync_hover { Color::rgba(255, 255, 255, 1.0 * opacity) } else { Color::rgba(203, 213, 225, 0.85 * opacity) };
+        let sync_col = if sync_hover { palette.primary_fg } else { palette.secondary_fg };
         draw_refresh_icon(buf, sync_btn_rect.x + 10.0, sync_btn_rect.y + 9.0, 4.5, sync_col);
         self.click_targets.push((sync_btn_rect, ClickAction::CalendarSyncGoogle));
 
-        let add_btn_rect = Rect { x: right_x + right_w - 46.0, y: 34.0, w: 20.0, h: 18.0 };
+        let add_btn_rect = Rect { x: right_x + right_w - 46.0, y: y + 32.0, w: 20.0, h: 18.0 };
         let add_hover = cursor_pos.map(|(px, py)| add_btn_rect.contains(px, py)).unwrap_or(false);
-        let add_bg = if add_hover { Color::rgba(255, 255, 255, 0.20 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+        let add_bg = if add_hover { palette.btn_hover_bg } else { palette.btn_bg };
         draw_rounded_rect(buf, add_btn_rect.x, add_btn_rect.y, add_btn_rect.w, add_btn_rect.h, 4.0, add_bg);
-        text_renderer.draw_text(buf, "+", add_btn_rect.x + 6.0, add_btn_rect.y + 13.5, 12.0, Color::rgba(255, 255, 255, 0.90 * opacity), true);
+        text_renderer.draw_text(buf, "+", add_btn_rect.x + 6.0, add_btn_rect.y + 13.5, 12.0, palette.primary_fg, true);
         self.click_targets.push((add_btn_rect, ClickAction::CalendarPromptAddEvent));
 
         // Agenda Items or Inline Input
         if state.calendar.is_input_active {
             // Render Input Box
-            let input_rect = Rect { x: right_x, y: 56.0, w: right_w, h: 26.0 };
-            draw_rounded_rect(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, Color::rgba(18, 22, 28, 0.95 * opacity));
-            draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.0, Color::rgba(255, 255, 255, 0.35 * opacity));
+            let input_rect = Rect { x: right_x, y: y + 52.0, w: right_w, h: 26.0 };
+            let (input_bg, input_stroke, input_text_col) = if is_light {
+                (
+                    Color::rgba(240, 243, 246, 0.95 * opacity),
+                    Color::rgba(0, 0, 0, 0.15 * opacity),
+                    Color::rgba(15, 23, 42, 0.98 * opacity),
+                )
+            } else {
+                (
+                    Color::rgba(18, 22, 28, 0.95 * opacity),
+                    Color::rgba(255, 255, 255, 0.35 * opacity),
+                    Color::rgba(255, 255, 255, 0.98 * opacity),
+                )
+            };
+            draw_rounded_rect(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, input_bg);
+            draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.0, input_stroke);
 
             let text_rect = Rect { x: input_rect.x, y: input_rect.y, w: input_rect.w - 36.0, h: input_rect.h };
             self.click_targets.push((text_rect, ClickAction::CalendarFocusInput));
@@ -2218,7 +2493,7 @@ fn wrap_lyric_line<'a>(
                 input_rect.w - 36.0,
                 input_rect.h,
                 10.0,
-                Color::rgba(255, 255, 255, 0.98 * opacity),
+                input_text_col,
                 "e.g. 14:00 Review",
                 true,
                 false,
@@ -2242,12 +2517,12 @@ fn wrap_lyric_line<'a>(
             let events = state.calendar.get_events_for_selected();
             if events.is_empty() {
                 // Empty state
-                text_renderer.draw_text(buf, "No events scheduled", right_x, 72.0, 10.5, Color::rgba(148, 163, 184, 0.70 * opacity), false);
-                text_renderer.draw_text(buf, "Free all day • Enjoy! ✨", right_x, 88.0, 9.5, Color::rgba(100, 116, 139, 0.60 * opacity), false);
+                text_renderer.draw_text(buf, "No events scheduled", right_x, y + 72.0, 10.5, palette.secondary_fg, false);
+                text_renderer.draw_text(buf, "Free all day • Enjoy! ✨", right_x, y + 88.0, 9.5, palette.muted_fg, false);
             } else {
                 // List up to 3 events
                 let item_h = 22.0;
-                let start_item_y = 55.0;
+                let start_item_y = y + 52.0;
                 let visible_count = events.len().min(3);
                 for i in 0..visible_count {
                     let e = events[i];
@@ -2255,7 +2530,7 @@ fn wrap_lyric_line<'a>(
                     let item_rect = Rect { x: right_x, y: iy, w: right_w, h: item_h };
                     let is_hover = cursor_pos.map(|(px, py)| item_rect.contains(px, py)).unwrap_or(false);
 
-                    let bg = if is_hover { Color::rgba(255, 255, 255, 0.12 * opacity) } else { Color::rgba(255, 255, 255, 0.06 * opacity) };
+                    let bg = if is_hover { palette.btn_hover_bg } else { palette.card_bg };
                     draw_rounded_rect(buf, item_rect.x, item_rect.y, item_rect.w, item_rect.h, 5.0, bg);
 
                     // Color Strip
@@ -2269,13 +2544,13 @@ fn wrap_lyric_line<'a>(
                     draw_rounded_rect(buf, item_rect.x + 3.0, item_rect.y + 3.0, 2.5, item_h - 6.0, 1.0, bar_col);
 
                     // Time Text
-                    text_renderer.draw_text(buf, &e.time_str, item_rect.x + 9.0, item_rect.y + 15.0, 9.0, Color::rgba(203, 213, 225, 0.90 * opacity), true);
+                    text_renderer.draw_text(buf, &e.time_str, item_rect.x + 9.0, item_rect.y + 15.0, 9.0, palette.secondary_fg, true);
                     let (time_w, _) = text_renderer.measure_text(&e.time_str, 9.0, true);
 
                     // Title Text
                     let title_x = item_rect.x + 13.0 + time_w;
                     let max_title_w = right_w - (title_x - item_rect.x) - if e.is_gcal { 34.0 } else { 16.0 };
-                    text_renderer.draw_text_truncated(buf, &e.title, title_x, item_rect.y + 15.0, 9.5, max_title_w, Color::rgba(255, 255, 255, 0.98 * opacity), false);
+                    text_renderer.draw_text_truncated(buf, &e.title, title_x, item_rect.y + 15.0, 9.5, max_title_w, palette.primary_fg, false);
 
                     if e.is_gcal {
                         let gcal_tag = "GCal";
@@ -2295,24 +2570,23 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Status Text: Google Calendar Sync / Offline status with vector dot
         let dot_color = if state.calendar.gcal_url.is_empty() {
-            Color::rgba(148, 163, 184, 0.85 * opacity)
+            palette.secondary_fg
         } else if state.calendar.is_syncing {
             Color::rgba(234, 163, 0, 0.95 * opacity)
         } else {
             Color::rgba(34, 197, 94, 0.95 * opacity)
         };
-        draw_circle(buf, right_x + 4.0, 127.5, 2.5, dot_color);
+        draw_circle(buf, right_x + 4.0, y + 126.5, 2.5, dot_color);
         let status_text = if state.calendar.gcal_url.is_empty() {
             "Local (set Google link in calendar_sync.txt)"
         } else {
             &state.calendar.sync_status
         };
-        text_renderer.draw_text(buf, status_text, right_x + 11.0, 131.0, 8.5, Color::rgba(148, 163, 184, 0.80 * opacity), false);
+        text_renderer.draw_text(buf, status_text, right_x + 11.0, y + 130.0, 8.5, palette.muted_fg, false);
 
-        // Bottom Page Indicator Dots (• • • — • • •) (active index 3 of 7)
-        let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 3, 8, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 8);
+        // Bottom Interactive Navigation Dock (GNOME Isle Style)
+        let indicator_y = y + 152.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 3, opacity, cursor_pos, is_light);
     }
 
     /// Mode 7: Focus Timer & Stopwatch (Page 3)
@@ -2321,43 +2595,52 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         _h: f32,
         state: &IslandState,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
     ) {
         let center_x = x + w * 0.5;
+        let palette = SemanticPalette::new(is_light, opacity);
 
         // Top Header Row (y: 18.0) - Consistent with Shelf and TodoList
-        let cy = 18.0;
-        text_renderer.draw_text(buf, "Focus", x + 16.0, cy + 5.0, 13.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        let cy = y + 18.0;
+        text_renderer.draw_text(buf, "Focus", x + 16.0, cy + 5.0, 13.0, palette.primary_fg, true);
 
         // Center Time & Battery
-        draw_battery_circle_ring(buf, center_x - 72.0, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity);
+        draw_battery_circle_ring_adaptive(buf, center_x - 72.0, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity, is_light);
         let header_time = get_formatted_header_time();
-        text_renderer.draw_text(buf, &header_time, center_x - 58.0, cy + 4.0, 11.5, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, &header_time, center_x - 58.0, cy + 4.0, 11.5, palette.primary_fg, true);
 
         // Right side: Live sound wave if media is playing
         if state.media_info.is_playing {
-            draw_monochrome_sound_wave(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity);
+            draw_monochrome_sound_wave_ex(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity, is_light);
         }
 
         // Nav Arrow: < back to Tools
-        let prev_btn_rect = Rect { x: x + 10.0, y: 56.0, w: 22.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 10.0, y: y + 56.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + 20.0, 68.0, 10.5, false, prev_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + 20.0, y + 68.0, 10.5, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
-        // Mode Selectors Pills (y: 38.0)
+        // Nav Arrow: > forward to Assistant (Groq AI)
+        let next_btn_rect = Rect { x: x + w - 32.0, y: y + 56.0, w: 22.0, h: 24.0 };
+        let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
+        draw_nav_arrow_button_ex(buf, x + w - 21.0, y + 68.0, 10.5, true, next_hover, opacity, is_light);
+        self.click_targets.push((next_btn_rect, ClickAction::NextPage));
+
+        // Mode Selectors Pills (y: 34.0)
         let modes = [
             ("Focus", crate::system::timer::TimerMode::Focus, 52.0),
             ("Break", crate::system::timer::TimerMode::ShortBreak, 50.0),
             ("Stopwatch", crate::system::timer::TimerMode::Stopwatch, 74.0),
         ];
         let mut pill_x = x + 30.0;
-        let pill_y = 38.0;
-        let pill_h = 22.0;
+        let pill_y = y + 34.0;
+        let pill_h = 20.0;
 
         for (label, mode, pill_w) in modes {
             let is_selected = state.focus_timer.mode == mode;
@@ -2365,32 +2648,32 @@ fn wrap_lyric_line<'a>(
             let p_hover = cursor_pos.map(|(px, py)| p_rect.contains(px, py)).unwrap_or(false);
 
             let bg = if is_selected {
-                Color::rgba(255, 255, 255, 0.24 * opacity)
+                palette.btn_active_bg
             } else if p_hover {
-                Color::rgba(255, 255, 255, 0.12 * opacity)
+                palette.btn_hover_bg
             } else {
-                Color::rgba(255, 255, 255, 0.05 * opacity)
+                palette.btn_bg
             };
-            draw_rounded_rect(buf, pill_x, pill_y, pill_w, pill_h, 11.0, bg);
+            draw_rounded_rect(buf, pill_x, pill_y, pill_w, pill_h, 10.0, bg);
 
             let text_color = if is_selected {
-                Color::rgba(255, 255, 255, 0.98 * opacity)
+                palette.primary_fg
             } else {
-                Color::rgba(148, 163, 184, 0.85 * opacity)
+                palette.secondary_fg
             };
-            let (tw, _) = text_renderer.measure_text(label, 11.0, is_selected);
-            text_renderer.draw_text(buf, label, pill_x + (pill_w - tw) * 0.5, pill_y + 15.0, 11.0, text_color, is_selected);
+            let (tw, _) = text_renderer.measure_text(label, 10.5, is_selected);
+            text_renderer.draw_text(buf, label, pill_x + (pill_w - tw) * 0.5, pill_y + 14.0, 10.5, text_color, is_selected);
 
             self.click_targets.push((p_rect, ClickAction::SetTimerMode(mode)));
             pill_x += pill_w + 6.0;
         }
 
-        // Center Area: Large Time Display (y: 68.0 to 100.0)
+        // Center Area: Large Time Display (y: 76.0)
         let (time_str, sub_time) = state.focus_timer.formatted_time();
-        text_renderer.draw_text(buf, &time_str, x + 32.0, 96.0, 32.0, Color::rgba(255, 255, 255, 0.98 * opacity), true);
+        text_renderer.draw_text(buf, &time_str, x + 32.0, y + 76.0, 28.0, palette.primary_fg, true);
         if !sub_time.is_empty() {
-            let (tw, _) = text_renderer.measure_text(&time_str, 32.0, true);
-            text_renderer.draw_text(buf, &sub_time, x + 34.0 + tw, 96.0, 16.0, Color::rgba(148, 163, 184, 0.90 * opacity), true);
+            let (tw, _) = text_renderer.measure_text(&time_str, 28.0, true);
+            text_renderer.draw_text(buf, &sub_time, x + 34.0 + tw, y + 76.0, 14.0, palette.secondary_fg, true);
         }
 
         // Subtitle / Status text
@@ -2407,12 +2690,12 @@ fn wrap_lyric_line<'a>(
                 format!("{} • Ready to focus", state.focus_timer.mode.display_name())
             }
         };
-        text_renderer.draw_text(buf, &status_text, x + 34.0, 110.0, 10.5, Color::rgba(148, 163, 184, 0.85 * opacity), false);
+        text_renderer.draw_text(buf, &status_text, x + 34.0, y + 90.0, 10.0, palette.muted_fg, false);
 
-        // Circular Progress Ring Meter on Right (center: x + w - 68.0, y: 88.0, radius: 24.0)
+        // Circular Progress Ring Meter on Right (center: x + w - 68.0, y: 72.0, radius: 20.0)
         let ring_cx = x + w - 68.0;
-        let ring_cy = 88.0;
-        let ring_r = 22.0;
+        let ring_cy = y + 72.0;
+        let ring_r = 20.0;
         let prog = state.focus_timer.progress();
 
         // Background ring
@@ -2420,18 +2703,23 @@ fn wrap_lyric_line<'a>(
         let r_max_x = (ring_cx + ring_r + 2.0).ceil().min(buf.width as f32 - 1.0) as usize;
         let r_min_y = (ring_cy - ring_r - 2.0).floor().max(0.0) as usize;
         let r_max_y = (ring_cy + ring_r + 2.0).ceil().min(buf.height as f32 - 1.0) as usize;
+        let (ring_r_ch, ring_g_ch, ring_b_ch) = if is_light { (15, 23, 42) } else { (255, 255, 255) };
         for py in r_min_y..=r_max_y {
             for px in r_min_x..=r_max_x {
                 let d = ((px as f32 + 0.5 - ring_cx).hypot(py as f32 + 0.5 - ring_cy) - ring_r).abs();
                 if d < 1.2 {
-                    buf.blend_pixel(px, py, 255, 255, 255, (1.2 - d) * 0.16 * opacity);
+                    buf.blend_pixel(px, py, ring_r_ch, ring_g_ch, ring_b_ch, (1.2 - d) * 0.16 * opacity);
                 }
             }
         }
         // Active progress arc
         if prog > 0.005 {
             let steps = (prog * 60.0).ceil() as usize;
-            let arc_color = Color::rgba(255, 255, 255, 0.95 * opacity);
+            let arc_color = if is_light {
+                Color::rgba(15, 23, 42, 0.95 * opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.95 * opacity)
+            };
             for i in 0..=steps {
                 let t = i as f32 / 60.0;
                 let angle = -0.5 * std::f32::consts::PI + t * 2.0 * std::f32::consts::PI;
@@ -2441,59 +2729,58 @@ fn wrap_lyric_line<'a>(
             }
         }
         // Center icon
-        draw_timer_icon(buf, ring_cx, ring_cy, 15.0, Color::rgba(255, 255, 255, 0.92 * opacity));
+        draw_timer_icon(buf, ring_cx, ring_cy, 14.0, palette.primary_fg);
 
-        // Bottom Controls Row (y: 124.0)
-        let ctrl_y = 124.0;
+        // Bottom Controls Row (ctrl_y: 108.0)
+        let ctrl_y = y + 108.0;
 
         // [-5m] and [+5m]
         if state.focus_timer.mode != crate::system::timer::TimerMode::Stopwatch {
             let m5_rect = Rect { x: x + 30.0, y: ctrl_y - 10.0, w: 32.0, h: 20.0 };
             let m5_hover = cursor_pos.map(|(px, py)| m5_rect.contains(px, py)).unwrap_or(false);
-            let m5_bg = if m5_hover { Color::rgba(255, 255, 255, 0.18 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+            let m5_bg = if m5_hover { palette.btn_hover_bg } else { palette.btn_bg };
             draw_rounded_rect(buf, m5_rect.x, m5_rect.y, m5_rect.w, m5_rect.h, 10.0, m5_bg);
-            text_renderer.draw_text(buf, "-5m", m5_rect.x + 5.0, ctrl_y + 4.0, 10.5, Color::rgba(203, 213, 225, 0.9 * opacity), false);
+            text_renderer.draw_text(buf, "-5m", m5_rect.x + 5.0, ctrl_y + 4.0, 10.5, palette.secondary_fg, false);
             self.click_targets.push((m5_rect, ClickAction::AdjustTimerMins(-5)));
 
             let p5_rect = Rect { x: x + 68.0, y: ctrl_y - 10.0, w: 32.0, h: 20.0 };
             let p5_hover = cursor_pos.map(|(px, py)| p5_rect.contains(px, py)).unwrap_or(false);
-            let p5_bg = if p5_hover { Color::rgba(255, 255, 255, 0.18 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+            let p5_bg = if p5_hover { palette.btn_hover_bg } else { palette.btn_bg };
             draw_rounded_rect(buf, p5_rect.x, p5_rect.y, p5_rect.w, p5_rect.h, 10.0, p5_bg);
-            text_renderer.draw_text(buf, "+5m", p5_rect.x + 5.0, ctrl_y + 4.0, 10.5, Color::rgba(203, 213, 225, 0.9 * opacity), false);
+            text_renderer.draw_text(buf, "+5m", p5_rect.x + 5.0, ctrl_y + 4.0, 10.5, palette.secondary_fg, false);
             self.click_targets.push((p5_rect, ClickAction::AdjustTimerMins(5)));
         }
 
         // Center: Start / Pause Action Button
         let play_w = 78.0;
-        let play_h = 22.0;
+        let play_h = 20.0;
         let play_x = x + 110.0;
-        let play_rect = Rect { x: play_x, y: ctrl_y - 11.0, w: play_w, h: play_h };
+        let play_rect = Rect { x: play_x, y: ctrl_y - 10.0, w: play_w, h: play_h };
         let play_hover = cursor_pos.map(|(px, py)| play_rect.contains(px, py)).unwrap_or(false);
         let play_bg = if state.focus_timer.is_running {
-            if play_hover { Color::rgba(255, 255, 255, 0.22 * opacity) } else { Color::rgba(255, 255, 255, 0.14 * opacity) }
+            if play_hover { palette.btn_hover_bg } else { palette.btn_bg }
         } else {
-            if play_hover { Color::rgba(255, 255, 255, 0.35 * opacity) } else { Color::rgba(255, 255, 255, 0.24 * opacity) }
+            if play_hover { palette.btn_active_bg } else { if is_light { Color::rgba(0, 0, 0, 0.16 * opacity) } else { Color::rgba(255, 255, 255, 0.24 * opacity) } }
         };
-        draw_rounded_rect(buf, play_rect.x, play_rect.y, play_w, play_h, 11.0, play_bg);
+        draw_rounded_rect(buf, play_rect.x, play_rect.y, play_w, play_h, 10.0, play_bg);
         let play_text = if state.focus_timer.is_running { "Pause" } else { "Start" };
-        let (pt_w, _) = text_renderer.measure_text(play_text, 11.5, true);
-        text_renderer.draw_text(buf, play_text, play_x + (play_w - pt_w) * 0.5, ctrl_y + 4.0, 11.5, Color::rgba(255, 255, 255, 0.98 * opacity), true);
+        let (pt_w, _) = text_renderer.measure_text(play_text, 11.0, true);
+        text_renderer.draw_text(buf, play_text, play_x + (play_w - pt_w) * 0.5, ctrl_y + 4.0, 11.0, palette.primary_fg, true);
         self.click_targets.push((play_rect, ClickAction::ToggleTimer));
 
         // Reset Button
         let rst_w = 54.0;
         let rst_x = play_x + play_w + 8.0;
-        let rst_rect = Rect { x: rst_x, y: ctrl_y - 11.0, w: rst_w, h: play_h };
+        let rst_rect = Rect { x: rst_x, y: ctrl_y - 10.0, w: rst_w, h: play_h };
         let rst_hover = cursor_pos.map(|(px, py)| rst_rect.contains(px, py)).unwrap_or(false);
-        let rst_bg = if rst_hover { Color::rgba(255, 255, 255, 0.18 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
-        draw_rounded_rect(buf, rst_rect.x, rst_rect.y, rst_w, play_h, 11.0, rst_bg);
-        text_renderer.draw_text(buf, "Reset", rst_x + 12.0, ctrl_y + 4.0, 11.0, Color::rgba(203, 213, 225, 0.90 * opacity), false);
+        let rst_bg = if rst_hover { palette.btn_hover_bg } else { palette.btn_bg };
+        draw_rounded_rect(buf, rst_rect.x, rst_rect.y, rst_w, play_h, 10.0, rst_bg);
+        text_renderer.draw_text(buf, "Reset", rst_x + 12.0, ctrl_y + 4.0, 10.5, palette.secondary_fg, false);
         self.click_targets.push((rst_rect, ClickAction::ResetTimer));
 
-        // Bottom Page Indicator Dots (• • • • • • —) (active index 6 of 7)
-        let indicator_y = 138.0;
-        draw_page_indicators(buf, center_x, indicator_y, 6, 8, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 8);
+        // Bottom Interactive Navigation Dock (GNOME Isle Style)
+        let indicator_y = y + 140.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 6, opacity, cursor_pos, is_light);
     }
 
     /// Mode 8: Tools & Utilities (Page 4 / 5th Page) - Apple Control Center cards for Eyedropper, Screen Snip, and Mic Mute
@@ -2502,28 +2789,31 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         _h: f32,
         state: &IslandState,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
     ) {
         let center_x = x + w * 0.5;
+        let palette = SemanticPalette::new(is_light, opacity);
 
-        // Top Header Row (y: 18.0) - Consistent with Music, Shelf, Todo, and Focus Timer
-        let cy = 18.0;
+        // Top Header Row - Consistent with Music, Shelf, Todo, and Focus Timer
+        let cy = y + 18.0;
         text_renderer.draw_text(
             buf,
             "Tools",
             x + 16.0,
             cy + 5.0,
             13.0,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            palette.primary_fg,
             true,
         );
 
         // Center Time & Battery
-        draw_battery_circle_ring(
+        draw_battery_circle_ring_adaptive(
             buf,
             center_x - 72.0,
             cy,
@@ -2532,6 +2822,7 @@ fn wrap_lyric_line<'a>(
             state.is_charging,
             state.is_energy_saver,
             opacity,
+            is_light,
         );
         let header_time = get_formatted_header_time();
         text_renderer.draw_text(
@@ -2540,13 +2831,13 @@ fn wrap_lyric_line<'a>(
             center_x - 58.0,
             cy + 4.0,
             11.5,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            palette.primary_fg,
             true,
         );
 
         // Right side: Live sound wave if media is playing
         if state.media_info.is_playing {
-            draw_monochrome_sound_wave(
+            draw_monochrome_sound_wave_ex(
                 buf,
                 x + w - 38.0,
                 cy - 6.0,
@@ -2555,19 +2846,20 @@ fn wrap_lyric_line<'a>(
                 true,
                 state.anim_time,
                 opacity,
+                is_light,
             );
         }
 
         // Nav Arrow (<) back to ToDo
-        let prev_btn_rect = Rect { x: x + 10.0, y: 56.0, w: 22.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 10.0, y: y + 56.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + 21.0, 68.0, 10.5, false, prev_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + 21.0, y + 68.0, 10.5, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
         // Nav Arrow (>) forward to Focus Timer
-        let next_btn_rect = Rect { x: x + w - 32.0, y: 56.0, w: 22.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 32.0, y: y + 56.0, w: 22.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + w - 21.0, 68.0, 10.5, true, next_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + w - 21.0, y + 68.0, 10.5, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // 3 Apple Control Center Utility Cards
@@ -2576,7 +2868,7 @@ fn wrap_lyric_line<'a>(
         let card_h = 74.0;
         let gap = 8.0;
         let start_x = x + 43.0;
-        let card_y = 38.0;
+        let card_y = y + 38.0;
 
         // Card 1: Eyedropper (Color Picker)
         {
@@ -2585,15 +2877,11 @@ fn wrap_lyric_line<'a>(
             let is_hover = cursor_pos.map(|(px, py)| c_rect.contains(px, py)).unwrap_or(false);
 
             let bg = if is_hover {
-                Color::rgba(255, 255, 255, 0.12 * opacity)
+                palette.btn_hover_bg
             } else {
-                Color::rgba(255, 255, 255, 0.055 * opacity)
+                palette.card_bg
             };
-            let stroke = if is_hover {
-                Color::rgba(255, 255, 255, 0.22 * opacity)
-            } else {
-                Color::rgba(255, 255, 255, 0.09 * opacity)
-            };
+            let stroke = palette.card_stroke;
             draw_rounded_rect(buf, c_x, card_y, card_w, card_h, 12.0, bg);
             draw_rounded_rect_stroke(buf, c_x, card_y, card_w, card_h, 12.0, 1.0, stroke);
 
@@ -2601,12 +2889,12 @@ fn wrap_lyric_line<'a>(
             let badge_cx = c_x + 22.0;
             let badge_cy = card_y + 22.0;
             let badge_bg = if is_hover {
-                Color::rgba(255, 255, 255, 0.20 * opacity)
+                palette.btn_active_bg
             } else {
-                Color::rgba(255, 255, 255, 0.10 * opacity)
+                palette.btn_bg
             };
             draw_circle(buf, badge_cx, badge_cy, 12.0, badge_bg);
-            draw_eyedropper_icon(buf, badge_cx, badge_cy, 13.0, Color::rgba(255, 255, 255, 0.95 * opacity));
+            draw_eyedropper_icon(buf, badge_cx, badge_cy, 13.0, palette.icon_col);
 
             // Labels
             text_renderer.draw_text(
@@ -2615,7 +2903,7 @@ fn wrap_lyric_line<'a>(
                 c_x + 12.0,
                 card_y + 51.0,
                 11.0,
-                Color::rgba(255, 255, 255, 0.98 * opacity),
+                palette.primary_fg,
                 true,
             );
             text_renderer.draw_text(
@@ -2624,7 +2912,7 @@ fn wrap_lyric_line<'a>(
                 c_x + 12.0,
                 card_y + 64.0,
                 9.0,
-                Color::rgba(148, 163, 184, 0.85 * opacity),
+                palette.secondary_fg,
                 false,
             );
 
@@ -2638,15 +2926,11 @@ fn wrap_lyric_line<'a>(
             let is_hover = cursor_pos.map(|(px, py)| c_rect.contains(px, py)).unwrap_or(false);
 
             let bg = if is_hover {
-                Color::rgba(255, 255, 255, 0.12 * opacity)
+                palette.btn_hover_bg
             } else {
-                Color::rgba(255, 255, 255, 0.055 * opacity)
+                palette.card_bg
             };
-            let stroke = if is_hover {
-                Color::rgba(255, 255, 255, 0.22 * opacity)
-            } else {
-                Color::rgba(255, 255, 255, 0.09 * opacity)
-            };
+            let stroke = palette.card_stroke;
             draw_rounded_rect(buf, c_x, card_y, card_w, card_h, 12.0, bg);
             draw_rounded_rect_stroke(buf, c_x, card_y, card_w, card_h, 12.0, 1.0, stroke);
 
@@ -2654,12 +2938,12 @@ fn wrap_lyric_line<'a>(
             let badge_cx = c_x + 22.0;
             let badge_cy = card_y + 22.0;
             let badge_bg = if is_hover {
-                Color::rgba(255, 255, 255, 0.20 * opacity)
+                palette.btn_active_bg
             } else {
-                Color::rgba(255, 255, 255, 0.10 * opacity)
+                palette.btn_bg
             };
             draw_circle(buf, badge_cx, badge_cy, 12.0, badge_bg);
-            draw_snip_icon(buf, badge_cx, badge_cy, 12.5, Color::rgba(255, 255, 255, 0.95 * opacity));
+            draw_snip_icon(buf, badge_cx, badge_cy, 12.5, palette.icon_col);
 
             // Labels
             text_renderer.draw_text(
@@ -2668,7 +2952,7 @@ fn wrap_lyric_line<'a>(
                 c_x + 12.0,
                 card_y + 51.0,
                 11.0,
-                Color::rgba(255, 255, 255, 0.98 * opacity),
+                palette.primary_fg,
                 true,
             );
             text_renderer.draw_text(
@@ -2677,7 +2961,7 @@ fn wrap_lyric_line<'a>(
                 c_x + 12.0,
                 card_y + 64.0,
                 9.0,
-                Color::rgba(148, 163, 184, 0.85 * opacity),
+                palette.secondary_fg,
                 false,
             );
 
@@ -2691,15 +2975,11 @@ fn wrap_lyric_line<'a>(
             let is_hover = cursor_pos.map(|(px, py)| c_rect.contains(px, py)).unwrap_or(false);
 
             let bg = if is_hover {
-                Color::rgba(255, 255, 255, 0.12 * opacity)
+                palette.btn_hover_bg
             } else {
-                Color::rgba(255, 255, 255, 0.055 * opacity)
+                palette.card_bg
             };
-            let stroke = if is_hover {
-                Color::rgba(255, 255, 255, 0.22 * opacity)
-            } else {
-                Color::rgba(255, 255, 255, 0.09 * opacity)
-            };
+            let stroke = palette.card_stroke;
             draw_rounded_rect(buf, c_x, card_y, card_w, card_h, 12.0, bg);
             draw_rounded_rect_stroke(buf, c_x, card_y, card_w, card_h, 12.0, 1.0, stroke);
 
@@ -2708,12 +2988,12 @@ fn wrap_lyric_line<'a>(
             let badge_cy = card_y + 22.0;
             let is_muted = state.privacy.mic_muted;
             let badge_bg = if is_hover {
-                Color::rgba(255, 255, 255, 0.20 * opacity)
+                palette.btn_active_bg
             } else {
-                Color::rgba(255, 255, 255, 0.10 * opacity)
+                palette.btn_bg
             };
             draw_circle(buf, badge_cx, badge_cy, 12.0, badge_bg);
-            draw_microphone_icon(buf, badge_cx, badge_cy, 12.5, is_muted, Color::rgba(255, 255, 255, 0.95 * opacity));
+            draw_microphone_icon(buf, badge_cx, badge_cy, 12.5, is_muted, palette.icon_col);
 
             // Labels
             text_renderer.draw_text(
@@ -2722,13 +3002,13 @@ fn wrap_lyric_line<'a>(
                 c_x + 12.0,
                 card_y + 51.0,
                 11.0,
-                Color::rgba(255, 255, 255, 0.98 * opacity),
+                palette.primary_fg,
                 true,
             );
-            let (sub_text, sub_color) = if is_muted {
-                ("Muted", Color::rgba(203, 213, 225, 0.85 * opacity))
+            let sub_text = if is_muted {
+                "Muted"
             } else {
-                ("Active / Live", Color::rgba(148, 163, 184, 0.85 * opacity))
+                "Active / Live"
             };
             text_renderer.draw_text(
                 buf,
@@ -2736,17 +3016,16 @@ fn wrap_lyric_line<'a>(
                 c_x + 12.0,
                 card_y + 64.0,
                 9.0,
-                sub_color,
+                palette.secondary_fg,
                 false,
             );
 
             self.click_targets.push((c_rect, ClickAction::ToggleMicMute));
         }
 
-        // Bottom Page Indicator Dots (• • • • • — •) (active index 5 of 7)
-        let indicator_y = 134.0;
-        draw_page_indicators(buf, center_x, indicator_y, 5, 8, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 8);
+        // Bottom Interactive Navigation Dock (GNOME Isle Style)
+        let indicator_y = y + 134.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 5, opacity, cursor_pos, is_light);
     }
 
     /// Helper function to wrap text within max_w and at most max_lines
@@ -2960,7 +3239,7 @@ fn wrap_lyric_line<'a>(
     /// Exact text start X position for To-Do text input given island X
     #[inline]
     pub fn todo_input_text_start_x(cur_x: f32) -> f32 {
-        cur_x + 52.0
+        cur_x + 296.0
     }
 
     /// Exact visible width for Calendar event text input given island width
@@ -2981,24 +3260,26 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         state: &IslandState,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
     ) {
         let center_x = x + w * 0.5;
-        let is_light = state.glass_theme == GlassTheme::FrostedLight;
+        let palette = SemanticPalette::new(is_light, opacity);
 
         // Apple Intelligence Glow halo stroke while thinking
         if state.assistant.is_thinking {
             let glow_phase = state.anim_time * 4.0;
             let glow_alpha = (0.35 + 0.20 * glow_phase.sin()).max(0.1) * opacity;
-            draw_rounded_rect_stroke(buf, x + 1.0, 1.0, w - 2.0, h - 2.0, 23.0, 2.0, Color::rgba(96, 165, 250, glow_alpha));
+            draw_rounded_rect_stroke(buf, x + 1.0, y + 1.0, w - 2.0, h - 2.0, 23.0, 2.0, Color::rgba(96, 165, 250, glow_alpha));
         }
 
-        // Top Header Row (cy = 18.0)
-        let cy = 18.0;
+        // Top Header Row
+        let cy = y + 18.0;
         let header_title = if state.assistant.is_groq {
             "Groq AI"
         } else {
@@ -3010,12 +3291,12 @@ fn wrap_lyric_line<'a>(
             x + 16.0,
             cy + 5.0,
             13.0,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            palette.primary_fg,
             true,
         );
 
         // Center Time & Battery
-        draw_battery_circle_ring(
+        draw_battery_circle_ring_adaptive(
             buf,
             center_x - 72.0,
             cy,
@@ -3024,6 +3305,7 @@ fn wrap_lyric_line<'a>(
             state.is_charging,
             state.is_energy_saver,
             opacity,
+            is_light,
         );
         let header_time = get_formatted_header_time();
         text_renderer.draw_text(
@@ -3032,45 +3314,32 @@ fn wrap_lyric_line<'a>(
             center_x - 58.0,
             cy + 4.0,
             11.5,
-            Color::rgba(255, 255, 255, 0.90 * opacity),
+            palette.primary_fg,
             true,
         );
 
         // Glass Theme Toggle (top right, x + w - 52.0, w: 38.0, h: 18.0 for smooth, non-stick kinetic slide)
-        let theme_rect = Rect { x: x + w - 52.0, y: 9.0, w: 38.0, h: 18.0 };
+        let theme_rect = Rect { x: x + w - 52.0, y: y + 9.0, w: 38.0, h: 18.0 };
         let theme_hover = cursor_pos.map(|(px, py)| theme_rect.contains(px, py)).unwrap_or(false);
         draw_theme_toggle_animated(buf, theme_rect.x, theme_rect.y, theme_rect.w, theme_rect.h, state.theme_spring.current, theme_hover, opacity);
         self.click_targets.push((theme_rect, ClickAction::ToggleGlassTheme));
 
-        // Navigation Arrows (vertically centered next to card at y = 80.0)
-        let arrow_y = 80.0;
+        // Navigation Arrow: < back to Focus Timer (Assistant is the final page)
+        let arrow_y = y + 80.0;
         let prev_btn_rect = Rect { x: x + 10.0, y: arrow_y - 12.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + 21.0, arrow_y, 10.5, false, prev_hover, opacity);
+        draw_nav_arrow_button_ex(buf, x + 21.0, arrow_y, 10.5, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
-        let next_btn_rect = Rect { x: x + w - 32.0, y: arrow_y - 12.0, w: 22.0, h: 24.0 };
-        let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + w - 21.0, arrow_y, 10.5, true, next_hover, opacity);
-        self.click_targets.push((next_btn_rect, ClickAction::NextPage));
-
         // Content Area:
-        // Response / Chat Card: x + 44.0, y: 34.0, w: w - 88.0, h: 92.0
+        // Response / Chat Card
         let card_x = x + 44.0;
         let card_w = w - 88.0;
-        let card_y = 34.0;
-        let card_h = 92.0;
+        let card_y = y + 34.0;
+        let card_h = 84.0;
 
-        let card_bg = if is_light {
-            Color::rgba(0, 0, 0, 0.05 * opacity)
-        } else {
-            Color::rgba(255, 255, 255, 0.07 * opacity)
-        };
-        let card_stroke = if is_light {
-            Color::rgba(0, 0, 0, 0.10 * opacity)
-        } else {
-            Color::rgba(255, 255, 255, 0.12 * opacity)
-        };
+        let card_bg = palette.card_bg;
+        let card_stroke = palette.card_stroke;
         draw_rounded_rect(buf, card_x, card_y, card_w, card_h, 10.0, card_bg);
         draw_rounded_rect_stroke(buf, card_x, card_y, card_w, card_h, 10.0, 1.0, card_stroke);
 
@@ -3087,7 +3356,7 @@ fn wrap_lyric_line<'a>(
         } else if state.assistant.is_groq {
             Color::rgba(249, 115, 22, 0.95 * opacity)
         } else {
-            Color::rgba(148, 163, 184, 0.85 * opacity)
+            palette.secondary_fg
         };
         draw_gemini_sparkle(buf, card_x + 14.0, card_y + 11.0, 4.0, badge_color);
         text_renderer.draw_text(buf, badge_text, card_x + 22.0, card_y + 14.0, 9.0, badge_color, true);
@@ -3098,18 +3367,18 @@ fn wrap_lyric_line<'a>(
             let clear_btn_x = card_x + card_w - clear_btn_w - 48.0;
             let clear_btn_rect = Rect { x: clear_btn_x, y: card_y + 5.0, w: clear_btn_w, h: 17.0 };
             let clear_hover = cursor_pos.map(|(px, py)| clear_btn_rect.contains(px, py)).unwrap_or(false);
-            let clear_bg = if clear_hover { Color::rgba(255, 255, 255, 0.16 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+            let clear_bg = if clear_hover { palette.btn_hover_bg } else { palette.btn_bg };
             draw_rounded_rect(buf, clear_btn_rect.x, clear_btn_rect.y, clear_btn_w, 17.0, 4.0, clear_bg);
-            text_renderer.draw_text(buf, "Clear", clear_btn_x + 7.0, card_y + 16.5, 9.0, Color::rgba(203, 213, 225, 0.90 * opacity), true);
+            text_renderer.draw_text(buf, "Clear", clear_btn_x + 7.0, card_y + 16.5, 9.0, palette.secondary_fg, true);
             self.click_targets.push((clear_btn_rect, ClickAction::AssistantClear));
 
             let copy_btn_w = 40.0;
             let copy_btn_x = card_x + card_w - copy_btn_w - 6.0;
             let copy_btn_rect = Rect { x: copy_btn_x, y: card_y + 5.0, w: copy_btn_w, h: 17.0 };
             let copy_hover = cursor_pos.map(|(px, py)| copy_btn_rect.contains(px, py)).unwrap_or(false);
-            let copy_bg = if copy_hover { Color::rgba(255, 255, 255, 0.16 * opacity) } else { Color::rgba(255, 255, 255, 0.08 * opacity) };
+            let copy_bg = if copy_hover { palette.btn_hover_bg } else { palette.btn_bg };
             draw_rounded_rect(buf, copy_btn_rect.x, copy_btn_rect.y, copy_btn_w, 17.0, 4.0, copy_bg);
-            text_renderer.draw_text(buf, "Copy", copy_btn_x + 7.0, card_y + 16.5, 9.0, Color::rgba(226, 232, 240, 0.90 * opacity), true);
+            text_renderer.draw_text(buf, "Copy", copy_btn_x + 7.0, card_y + 16.5, 9.0, palette.secondary_fg, true);
             self.click_targets.push((copy_btn_rect, ClickAction::AssistantCopyResponse));
         }
 
@@ -3124,7 +3393,7 @@ fn wrap_lyric_line<'a>(
                 _ => "   ",
             };
             let thinking_msg = format!("Sedang memproses{}", dots);
-            text_renderer.draw_text(buf, &thinking_msg, card_x + 12.0, card_y + 38.0, 11.0, Color::rgba(255, 255, 255, 0.95 * opacity), false);
+            text_renderer.draw_text(buf, &thinking_msg, card_x + 12.0, card_y + 38.0, 11.0, palette.primary_fg, false);
         } else if !state.assistant.last_response.is_empty() {
             let all_lines = Self::wrap_text_lines(&state.assistant.last_response, max_text_w, text_renderer, 10.0, 120);
             let visible_count = 4;
@@ -3136,7 +3405,7 @@ fn wrap_lyric_line<'a>(
             let start_baseline = card_y + 33.0;
             for (i, line) in visible_slice.iter().enumerate() {
                 let line_y = start_baseline + (i as f32) * 14.0;
-                text_renderer.draw_text(buf, line, card_x + 12.0, line_y, 10.0, Color::rgba(255, 255, 255, 0.92 * opacity), false);
+                text_renderer.draw_text(buf, line, card_x + 12.0, line_y, 10.0, palette.primary_fg, false);
             }
 
             // Scroll indicator if text exceeds 4 lines
@@ -3148,7 +3417,7 @@ fn wrap_lyric_line<'a>(
                     card_x + card_w - 56.0,
                     card_y + card_h - 7.0,
                     8.5,
-                    Color::rgba(148, 163, 184, 0.75 * opacity),
+                    palette.muted_fg,
                     false,
                 );
             }
@@ -3158,26 +3427,26 @@ fn wrap_lyric_line<'a>(
             } else {
                 "Tanyakan apa saja ke Gemini AI..."
             };
-            text_renderer.draw_text(buf, placeholder_intro, card_x + 12.0, card_y + 36.0, 10.5, Color::rgba(226, 232, 240, 0.85 * opacity), false);
-            text_renderer.draw_text(buf, "Contoh: \"tambahin to-do beli susu\", \"pasang timer 25 menit\", \"matiin mic\", \"cuaca\"", card_x + 12.0, card_y + 54.0, 9.0, Color::rgba(148, 163, 184, 0.70 * opacity), false);
+            text_renderer.draw_text(buf, placeholder_intro, card_x + 12.0, card_y + 36.0, 10.5, palette.secondary_fg, false);
+            text_renderer.draw_text(buf, "Contoh: \"tambahin to-do beli susu\", \"pasang timer 25 menit\", \"matiin mic\", \"cuaca\"", card_x + 12.0, card_y + 54.0, 9.0, palette.muted_fg, false);
         }
 
-        // Prompt Input Field Bar: card_x, y: 132.0, w: card_w, h: 28.0
-        let input_y = 132.0;
-        let input_h = 28.0;
+        // Prompt Input Field Bar: card_x, y + 124.0, w: card_w, h: 26.0
+        let input_y = y + 124.0;
+        let input_h = 26.0;
         let input_rect = Rect { x: card_x, y: input_y, w: card_w, h: input_h };
         let input_hover = cursor_pos.map(|(px, py)| input_rect.contains(px, py)).unwrap_or(false);
         let input_bg = if state.assistant.is_input_active {
-            Color::rgba(255, 255, 255, 0.12 * opacity)
+            if is_light { Color::rgba(0, 0, 0, 0.08 * opacity) } else { Color::rgba(255, 255, 255, 0.12 * opacity) }
         } else if input_hover {
-            Color::rgba(255, 255, 255, 0.09 * opacity)
+            if is_light { Color::rgba(0, 0, 0, 0.05 * opacity) } else { Color::rgba(255, 255, 255, 0.09 * opacity) }
         } else {
-            Color::rgba(255, 255, 255, 0.06 * opacity)
+            palette.btn_bg
         };
         let input_stroke = if state.assistant.is_input_active {
             Color::rgba(59, 130, 246, 0.85 * opacity)
         } else {
-            Color::rgba(255, 255, 255, 0.10 * opacity)
+            palette.card_stroke
         };
         draw_rounded_rect(buf, card_x, input_y, card_w, input_h, 8.0, input_bg);
         draw_rounded_rect_stroke(buf, card_x, input_y, card_w, input_h, 8.0, 1.0, input_stroke);
@@ -3197,7 +3466,7 @@ fn wrap_lyric_line<'a>(
             card_w - 32.0,
             input_h,
             10.5,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            palette.primary_fg,
             placeholder_text,
             state.assistant.is_input_active,
             false,
@@ -3211,36 +3480,48 @@ fn wrap_lyric_line<'a>(
         let send_btn_x = card_x + card_w - send_btn_w - 2.0;
         let send_btn_rect = Rect { x: send_btn_x, y: input_y + 2.0, w: send_btn_w, h: send_btn_h };
         let send_hover = cursor_pos.map(|(px, py)| send_btn_rect.contains(px, py)).unwrap_or(false);
-        let send_bg = if send_hover { Color::rgba(59, 130, 246, 0.85 * opacity) } else { Color::rgba(59, 130, 246, 0.55 * opacity) };
+        let send_bg = if send_hover { Color::rgba(59, 130, 246, 0.90 * opacity) } else { Color::rgba(59, 130, 246, 0.65 * opacity) };
         draw_rounded_rect(buf, send_btn_rect.x, send_btn_rect.y, send_btn_w, send_btn_h, 6.0, send_bg);
         let arrow_cx = send_btn_x + send_btn_w * 0.5;
         let arrow_cy = send_btn_rect.y + send_btn_h * 0.5;
         draw_send_arrow(buf, arrow_cx, arrow_cy, 9.0, Color::rgba(255, 255, 255, 0.98 * opacity));
         self.click_targets.push((send_btn_rect, ClickAction::AssistantSubmitPrompt));
 
-        // Bottom Page Indicator Dots (• • • • • • • —) (active index 7 of 8)
-        let indicator_y = 171.0;
-        draw_page_indicators(buf, center_x, indicator_y, 7, 8, opacity);
-        self.register_page_dot_targets(center_x, indicator_y, 8);
+        // Bottom Interactive Navigation Dock (GNOME Isle Style)
+        let indicator_y = y + 171.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 7, opacity, cursor_pos, is_light);
     }
     fn render_charging(
         &self,
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         percent: u32,
         is_charging: bool,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
+        let cy = y + h * 0.5;
 
         let bat_cx = x + 24.0;
-        draw_battery_circle_ring(buf, bat_cx, cy, 10.0, percent, is_charging, false, opacity);
+        draw_battery_circle_ring_adaptive(buf, bat_cx, cy, 10.0, percent, is_charging, false, opacity, is_light);
 
         let title = if is_charging { "Charging" } else { "Battery" };
         let subtitle = if is_charging { "Charger connected" } else { "Charger disconnected" };
+
+        let title_color = if is_light {
+            Color::rgba(15, 23, 42, 0.98 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
+        let subtitle_color = if is_light {
+            Color::rgba(71, 85, 105, 0.90 * opacity)
+        } else {
+            Color::rgba(148, 163, 184, 0.85 * opacity)
+        };
 
         text_renderer.draw_text(
             buf,
@@ -3248,7 +3529,7 @@ fn wrap_lyric_line<'a>(
             x + 46.0,
             cy - 1.0,
             13.5,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
+            title_color,
             true,
         );
         text_renderer.draw_text(
@@ -3257,7 +3538,7 @@ fn wrap_lyric_line<'a>(
             x + 46.0,
             cy + 13.0,
             10.5,
-            Color::rgba(148, 163, 184, 0.85 * opacity),
+            subtitle_color,
             false,
         );
 
@@ -3268,7 +3549,7 @@ fn wrap_lyric_line<'a>(
             x + w - 58.0,
             cy + 7.0,
             17.0,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
+            title_color,
             true,
         );
     }
@@ -3279,20 +3560,33 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         level: u32,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
+        let cy = y + h * 0.5;
+
+        let fg_color = if is_light {
+            Color::rgba(15, 23, 42, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        };
 
         // Left Sun Icon
-        draw_sun_icon(buf, x + 24.0, cy, 8.5, Color::rgba(255, 255, 255, 0.95 * opacity));
+        draw_sun_icon(buf, x + 24.0, cy, 8.5, fg_color);
 
         // Center: Progress Bar
         let bar_x = x + 44.0;
         let bar_w = w - 100.0;
         let progress = (level as f32 / 100.0).clamp(0.0, 1.0);
+        let bar_bg = if is_light {
+            Color::rgba(0, 0, 0, 0.12 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.16 * opacity)
+        };
         draw_progress_bar(
             buf,
             bar_x,
@@ -3300,8 +3594,8 @@ fn wrap_lyric_line<'a>(
             bar_w,
             7.0,
             progress,
-            Color::rgba(255, 255, 255, 0.16 * opacity),
-            Color::rgba(255, 255, 255, 0.95 * opacity), // Apple monochrome white
+            bar_bg,
+            fg_color,
         );
 
         // Right: Percentage
@@ -3312,29 +3606,58 @@ fn wrap_lyric_line<'a>(
             bar_x + bar_w + 10.0,
             cy + 5.0,
             12.0,
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            fg_color,
             true,
         );
     }
 
     /// Notification 6: Windows Toast Notification Banner
     fn render_banner(
-        &self,
+        &mut self,
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         app_name: &str,
         title: &str,
         message: &str,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
+        let cy = y + h * 0.5;
+
+        let lower_app = app_name.to_lowercase();
+        let is_screenshot = lower_app.contains("snip")
+            || lower_app.contains("alat pemotong")
+            || lower_app.contains("screensketch")
+            || lower_app.contains("screenshot");
+
+        // Register clickable banner target to activate and bring application to foreground (except screenshot)
+        if !is_screenshot {
+            self.click_targets.push((
+                Rect { x, y, w, h },
+                ClickAction::ActivateApp {
+                    app_name: app_name.to_string(),
+                },
+            ));
+        }
+
+        let badge_bg = if is_light {
+            Color::rgba(0, 0, 0, 0.08 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.12 * opacity)
+        };
+        let bell_color = if is_light {
+            Color::rgba(15, 23, 42, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        };
 
         // Left Bell Icon in pill badge
-        draw_rounded_rect(buf, x + 14.0, cy - 14.0, 28.0, 28.0, 8.0, Color::rgba(255, 255, 255, 0.12 * opacity));
-        draw_bell_icon(buf, x + 28.0, cy, 14.0, Color::rgba(255, 255, 255, 0.95 * opacity));
+        draw_rounded_rect(buf, x + 14.0, cy - 14.0, 28.0, 28.0, 8.0, badge_bg);
+        draw_bell_icon(buf, x + 28.0, cy, 14.0, bell_color);
 
         // App Tag + Title
         let content_x = x + 50.0;
@@ -3342,6 +3665,11 @@ fn wrap_lyric_line<'a>(
 
         // Top line: App Name pill / label + Bold Title
         let app_label = if app_name.is_empty() { "Notification" } else { app_name };
+        let app_color = if is_light {
+            Color::rgba(2, 132, 199, 0.98 * opacity)
+        } else {
+            Color::rgba(56, 189, 248, 0.98 * opacity)
+        };
         text_renderer.draw_text_truncated(
             buf,
             app_label,
@@ -3349,10 +3677,15 @@ fn wrap_lyric_line<'a>(
             cy - 3.0,
             10.5,
             75.0,
-            Color::rgba(56, 189, 248, 0.98 * opacity), // Sky blue app tag
+            app_color,
             true,
         );
 
+        let title_color = if is_light {
+            Color::rgba(15, 23, 42, 0.98 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
         let title_x = content_x + (app_label.len() as f32 * 6.5).min(75.0) + 8.0;
         let title_max_w = (max_content_w - (title_x - content_x)).max(40.0);
         text_renderer.draw_text_truncated(
@@ -3362,11 +3695,16 @@ fn wrap_lyric_line<'a>(
             cy - 2.0,
             12.0,
             title_max_w,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
+            title_color,
             true,
         );
 
         // Bottom line: Message preview
+        let msg_color = if is_light {
+            Color::rgba(71, 85, 105, 0.90 * opacity)
+        } else {
+            Color::rgba(203, 213, 225, 0.85 * opacity)
+        };
         text_renderer.draw_text_truncated(
             buf,
             message,
@@ -3374,7 +3712,7 @@ fn wrap_lyric_line<'a>(
             cy + 13.0,
             10.5,
             max_content_w,
-            Color::rgba(203, 213, 225, 0.85 * opacity),
+            msg_color,
             false,
         );
     }
@@ -3385,25 +3723,33 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         name: &str,
         battery: u32,
         connected: bool,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
+        let cy = y + h * 0.5;
 
         let bt_cx = x + 24.0;
-        let outer_circle_color = if connected {
+        let outer_circle_color = if is_light {
+            Color::rgba(0, 0, 0, 0.08 * opacity)
+        } else if connected {
             Color::rgba(30, 41, 59, 0.8 * opacity)
         } else {
             Color::rgba(45, 25, 25, 0.85 * opacity)
         };
         let dot_color = if connected {
-            Color::rgba(56, 189, 248, 0.95 * opacity) // Sky blue for connected
+            if is_light {
+                Color::rgba(2, 132, 199, 0.98 * opacity)
+            } else {
+                Color::rgba(56, 189, 248, 0.95 * opacity)
+            }
         } else {
-            Color::rgba(248, 113, 113, 0.95 * opacity) // Coral red for disconnected
+            Color::rgba(248, 113, 113, 0.95 * opacity)
         };
 
         super::super::render::draw_circle(buf, bt_cx, cy, 10.0, outer_circle_color);
@@ -3432,10 +3778,17 @@ fn wrap_lyric_line<'a>(
             "Disconnected".to_string()
         };
 
-        let sub_color = if connected {
-            Color::rgba(148, 163, 184, 0.85 * opacity)
+        let title_color = if is_light {
+            Color::rgba(15, 23, 42, 0.98 * opacity)
         } else {
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
+        let sub_color = if !connected {
             Color::rgba(248, 113, 113, 0.90 * opacity)
+        } else if is_light {
+            Color::rgba(71, 85, 105, 0.90 * opacity)
+        } else {
+            Color::rgba(148, 163, 184, 0.85 * opacity)
         };
 
         text_renderer.draw_text(
@@ -3444,7 +3797,7 @@ fn wrap_lyric_line<'a>(
             x + 46.0,
             cy - 1.0,
             13.0,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
+            title_color,
             true,
         );
         text_renderer.draw_text(
@@ -3466,23 +3819,35 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         level: u32,
         muted: bool,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
+        let cy = y + h * 0.5;
+        let fg_color = if is_light {
+            Color::rgba(15, 23, 42, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        };
         let spk_color = if muted {
             Color::rgba(239, 68, 68, 0.95 * opacity)
         } else {
-            Color::rgba(255, 255, 255, 0.95 * opacity)
+            fg_color
         };
         draw_speaker_icon(buf, x + 16.0, cy - 8.0, 16.0, muted, spk_color);
 
         let bar_x = x + 44.0;
         let bar_w = w - 100.0;
         let prog = if muted { 0.0 } else { level as f32 / 100.0 };
+        let bar_bg = if is_light {
+            Color::rgba(0, 0, 0, 0.12 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.16 * opacity)
+        };
         draw_progress_bar(
             buf,
             bar_x,
@@ -3490,12 +3855,12 @@ fn wrap_lyric_line<'a>(
             bar_w,
             7.0,
             prog,
-            Color::rgba(255, 255, 255, 0.16 * opacity),
-            Color::rgba(255, 255, 255, 0.95 * opacity),
+            bar_bg,
+            fg_color,
         );
 
         let text = if muted { "Mute".to_string() } else { format!("{}%", level) };
-        text_renderer.draw_text(buf, &text, bar_x + bar_w + 10.0, cy + 5.0, 12.0, Color::rgba(255, 255, 255, 0.95 * opacity), true);
+        text_renderer.draw_text(buf, &text, bar_x + bar_w + 10.0, cy + 5.0, 12.0, fg_color, true);
     }
 
     /// Notification 4: Caps Lock
@@ -3504,18 +3869,37 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         _w: f32,
         h: f32,
         enabled: bool,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
-        let badge_bg = if enabled { Color::rgba(34, 197, 94, 0.3 * opacity) } else { Color::rgba(255, 255, 255, 0.12 * opacity) };
+        let cy = y + h * 0.5;
+        let badge_bg = if enabled {
+            Color::rgba(34, 197, 94, 0.3 * opacity)
+        } else if is_light {
+            Color::rgba(0, 0, 0, 0.08 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.12 * opacity)
+        };
+        let letter_color = if is_light {
+            Color::rgba(15, 23, 42, 0.98 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
         draw_rounded_rect(buf, x + 16.0, cy - 11.0, 22.0, 22.0, 6.0, badge_bg);
-        text_renderer.draw_text(buf, "A", x + 23.0, cy + 6.0, 13.0, Color::rgba(255, 255, 255, 0.98 * opacity), true);
+        text_renderer.draw_text(buf, "A", x + 23.0, cy + 6.0, 13.0, letter_color, true);
 
         let status = if enabled { "Caps Lock ON" } else { "Caps Lock OFF" };
-        let color = if enabled { Color::rgba(34, 197, 94, 0.98 * opacity) } else { Color::rgba(255, 255, 255, 0.85 * opacity) };
+        let color = if enabled {
+            if is_light { Color::rgba(22, 163, 74, 0.98 * opacity) } else { Color::rgba(34, 197, 94, 0.98 * opacity) }
+        } else if is_light {
+            Color::rgba(71, 85, 105, 0.90 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.85 * opacity)
+        };
         text_renderer.draw_text(buf, status, x + 48.0, cy + 5.0, 12.5, color, true);
     }
 
@@ -3525,13 +3909,15 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         hex: &str,
         rgb: &str,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
+        let cy = y + h * 0.5;
         let color = if hex.starts_with('#') && hex.len() == 7 {
             let r = u8::from_str_radix(&hex[1..3], 16).unwrap_or(255);
             let g = u8::from_str_radix(&hex[3..5], 16).unwrap_or(255);
@@ -3543,31 +3929,51 @@ fn wrap_lyric_line<'a>(
 
         // Left Color Swatch Circle with border
         draw_circle(buf, x + 24.0, cy, 9.0, color);
-        draw_circle(buf, x + 24.0, cy, 10.0, Color::rgba(255, 255, 255, 0.4 * opacity));
+        let swatch_border = if is_light {
+            Color::rgba(0, 0, 0, 0.25 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.4 * opacity)
+        };
+        draw_circle(buf, x + 24.0, cy, 10.0, swatch_border);
 
         // Center: Hex code
+        let hex_color = if is_light {
+            Color::rgba(15, 23, 42, 0.98 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
         text_renderer.draw_text(
             buf,
             hex,
             x + 44.0,
             cy - 1.0,
             13.5,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
+            hex_color,
             true,
         );
 
         // Subtitle: Copied to clipboard
+        let subtitle_color = if is_light {
+            Color::rgba(71, 85, 105, 0.90 * opacity)
+        } else {
+            Color::rgba(148, 163, 184, 0.90 * opacity)
+        };
         text_renderer.draw_text(
             buf,
             "Copied to clipboard",
             x + 44.0,
             cy + 13.0,
             10.0,
-            Color::rgba(148, 163, 184, 0.90 * opacity),
+            subtitle_color,
             false,
         );
 
         // Right: RGB values
+        let rgb_color = if is_light {
+            Color::rgba(71, 85, 105, 0.90 * opacity)
+        } else {
+            Color::rgba(203, 213, 225, 0.85 * opacity)
+        };
         let (rgb_w, _) = text_renderer.measure_text(rgb, 10.5, false);
         text_renderer.draw_text(
             buf,
@@ -3575,7 +3981,7 @@ fn wrap_lyric_line<'a>(
             x + w - 16.0 - rgb_w,
             cy + 4.5,
             10.5,
-            Color::rgba(203, 213, 225, 0.85 * opacity),
+            rgb_color,
             false,
         );
     }
@@ -3586,29 +3992,62 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         h: f32,
         is_camera: bool,
         app_name: &str,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
-        if is_camera {
-            draw_camera_icon(buf, x + 24.0, cy, 18.0, Color::rgba(34, 197, 94, 0.98 * opacity));
-            text_renderer.draw_text(buf, "Camera in use", x + 44.0, cy - 1.0, 12.5, Color::rgba(255, 255, 255, 0.98 * opacity), true);
-            text_renderer.draw_text(buf, app_name, x + 44.0, cy + 13.0, 10.5, Color::rgba(148, 163, 184, 0.90 * opacity), false);
+        let cy = y + h * 0.5;
+        let title_color = if is_light {
+            Color::rgba(15, 23, 42, 0.98 * opacity)
         } else {
-            draw_microphone_icon(buf, x + 24.0, cy, 18.0, false, Color::rgba(249, 115, 22, 0.98 * opacity));
-            text_renderer.draw_text(buf, "Microphone in use", x + 44.0, cy - 1.0, 12.5, Color::rgba(255, 255, 255, 0.98 * opacity), true);
-            text_renderer.draw_text(buf, app_name, x + 44.0, cy + 13.0, 10.5, Color::rgba(148, 163, 184, 0.90 * opacity), false);
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
+        let app_color = if is_light {
+            Color::rgba(71, 85, 105, 0.90 * opacity)
+        } else {
+            Color::rgba(148, 163, 184, 0.90 * opacity)
+        };
+
+        if is_camera {
+            let icon_color = if is_light {
+                Color::rgba(22, 163, 74, 0.98 * opacity)
+            } else {
+                Color::rgba(34, 197, 94, 0.98 * opacity)
+            };
+            draw_camera_icon(buf, x + 24.0, cy, 18.0, icon_color);
+            text_renderer.draw_text(buf, "Camera in use", x + 44.0, cy - 1.0, 12.5, title_color, true);
+            text_renderer.draw_text(buf, app_name, x + 44.0, cy + 13.0, 10.5, app_color, false);
+        } else {
+            let icon_color = if is_light {
+                Color::rgba(234, 88, 12, 0.98 * opacity)
+            } else {
+                Color::rgba(249, 115, 22, 0.98 * opacity)
+            };
+            draw_microphone_icon(buf, x + 24.0, cy, 18.0, false, icon_color);
+            text_renderer.draw_text(buf, "Microphone in use", x + 44.0, cy - 1.0, 12.5, title_color, true);
+            text_renderer.draw_text(buf, app_name, x + 44.0, cy + 13.0, 10.5, app_color, false);
 
             // Right Quick Mute Pill
             let mute_w = 56.0;
             let mute_h = 24.0;
             let mute_x = x + w - 16.0 - mute_w;
             let mute_rect = Rect { x: mute_x, y: cy - mute_h * 0.5, w: mute_w, h: mute_h };
-            draw_rounded_rect(buf, mute_x, cy - mute_h * 0.5, mute_w, mute_h, 12.0, Color::rgba(239, 68, 68, 0.28 * opacity));
-            text_renderer.draw_text(buf, "Mute", mute_x + 14.0, cy + 4.5, 11.0, Color::rgba(255, 255, 255, 0.98 * opacity), true);
+            let mute_bg = if is_light {
+                Color::rgba(239, 68, 68, 0.16 * opacity)
+            } else {
+                Color::rgba(239, 68, 68, 0.28 * opacity)
+            };
+            let mute_text = if is_light {
+                Color::rgba(220, 38, 38, 0.98 * opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.98 * opacity)
+            };
+            draw_rounded_rect(buf, mute_x, cy - mute_h * 0.5, mute_w, mute_h, 12.0, mute_bg);
+            text_renderer.draw_text(buf, "Mute", mute_x + 14.0, cy + 4.5, 11.0, mute_text, true);
             self.click_targets.push((mute_rect, ClickAction::ToggleMicMute));
         }
     }
@@ -3619,15 +4058,32 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         _w: f32,
         h: f32,
         message: &str,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
-        draw_timer_icon(buf, x + 24.0, cy, 18.0, Color::rgba(251, 191, 36, 0.98 * opacity));
-        text_renderer.draw_text(buf, "Focus Session Complete", x + 44.0, cy - 1.0, 12.5, Color::rgba(255, 255, 255, 0.98 * opacity), true);
-        text_renderer.draw_text(buf, message, x + 44.0, cy + 13.0, 10.5, Color::rgba(148, 163, 184, 0.90 * opacity), false);
+        let cy = y + h * 0.5;
+        let icon_color = if is_light {
+            Color::rgba(217, 119, 6, 0.98 * opacity)
+        } else {
+            Color::rgba(251, 191, 36, 0.98 * opacity)
+        };
+        let title_color = if is_light {
+            Color::rgba(15, 23, 42, 0.98 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
+        let msg_color = if is_light {
+            Color::rgba(71, 85, 105, 0.90 * opacity)
+        } else {
+            Color::rgba(148, 163, 184, 0.90 * opacity)
+        };
+        draw_timer_icon(buf, x + 24.0, cy, 18.0, icon_color);
+        text_renderer.draw_text(buf, "Focus Session Complete", x + 44.0, cy - 1.0, 12.5, title_color, true);
+        text_renderer.draw_text(buf, message, x + 44.0, cy + 13.0, 10.5, msg_color, false);
     }
 
     /// Notification: Smart Clipboard Pulse Toast
@@ -3636,21 +4092,36 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         _w: f32,
         h: f32,
         preview: &str,
         item_count: usize,
         is_file: bool,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = h * 0.5;
+        let cy = y + h * 0.5;
 
         // Left Icon badge in sleek frosted glass container
-        let badge_bg = Color::rgba(255, 255, 255, 0.10 * opacity);
+        let badge_bg = if is_light {
+            Color::rgba(0, 0, 0, 0.08 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.10 * opacity)
+        };
+        let badge_stroke = if is_light {
+            Color::rgba(0, 0, 0, 0.12 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.15 * opacity)
+        };
         draw_rounded_rect(buf, x + 14.0, cy - 13.0, 26.0, 26.0, 7.0, badge_bg);
-        draw_rounded_rect_stroke(buf, x + 14.0, cy - 13.0, 26.0, 26.0, 7.0, 0.75, Color::rgba(255, 255, 255, 0.15 * opacity));
+        draw_rounded_rect_stroke(buf, x + 14.0, cy - 13.0, 26.0, 26.0, 7.0, 0.75, badge_stroke);
 
-        let icon_color = Color::rgba(255, 255, 255, 0.95 * opacity);
+        let icon_color = if is_light {
+            Color::rgba(15, 23, 42, 0.95 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        };
 
         if is_file {
             draw_file_icon(buf, x + 19.5, cy - 8.0, 16.0, icon_color);
@@ -3669,13 +4140,18 @@ fn wrap_lyric_line<'a>(
             "Copied to Clipboard".to_string()
         };
 
+        let title_color = if is_light {
+            Color::rgba(15, 23, 42, 0.98 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.98 * opacity)
+        };
         text_renderer.draw_text(
             buf,
             &title,
             x + 48.0,
             cy - 1.0,
             12.0,
-            Color::rgba(255, 255, 255, 0.98 * opacity),
+            title_color,
             true,
         );
 
@@ -3688,15 +4164,236 @@ fn wrap_lyric_line<'a>(
             preview.to_string()
         };
 
+        let subtitle_color = if is_light {
+            Color::rgba(71, 85, 105, 0.90 * opacity)
+        } else {
+            Color::rgba(200, 205, 215, 0.75 * opacity)
+        };
         text_renderer.draw_text(
             buf,
             &display_preview,
             x + 48.0,
             cy + 13.0,
             10.5,
-            Color::rgba(200, 205, 215, 0.75 * opacity),
+            subtitle_color,
             false,
         );
+    }
+
+    /// Floating pill sub-notification displayed underneath expanded island when user is interacting
+    fn render_sub_notification(
+        &mut self,
+        buf: &mut PixelBuffer,
+        text_renderer: &TextRenderer,
+        target_y: f32,
+        sub: &crate::ui::state::SubNotification,
+        progress: f32,
+        opacity: f32,
+        cursor_pos: Option<(f32, f32)>,
+        theme_progress: f32,
+        backdrop: Option<&BackdropBlur>,
+    ) {
+        if progress <= 0.01 && sub.is_dismissing {
+            return;
+        }
+
+        let p = progress.clamp(0.0, 1.05);
+        let sub_w = 340.0 + (400.0 - 340.0) * p.min(1.0);
+        let sub_h = 44.0;
+        let sub_r = 22.0;
+        let sub_x = (buf.width as f32 - sub_w) * 0.5;
+        // Slide-down entrance animation: emerges smoothly from behind the bottom border of the dynamic island
+        let sub_y = target_y - (1.0 - p.min(1.0)) * 18.0;
+        let sub_opacity = opacity * p.clamp(0.0, 1.0);
+
+        if sub_opacity <= 0.01 {
+            return;
+        }
+
+        // Draw Liquid Glass Pill underneath
+        if let Some(bd) = backdrop {
+            draw_floating_pill_liquid_glass_with_backdrop(
+                buf,
+                sub_x,
+                sub_y,
+                sub_w,
+                sub_h,
+                sub_r,
+                sub_opacity,
+                theme_progress,
+                bd,
+            );
+        } else {
+            draw_floating_pill_liquid_glass_interpolated(
+                buf,
+                sub_x,
+                sub_y,
+                sub_w,
+                sub_h,
+                sub_r,
+                sub_opacity,
+                theme_progress,
+            );
+        }
+
+        let cy = sub_y + sub_h * 0.5;
+        let pill_rect = Rect { x: sub_x, y: sub_y, w: sub_w, h: sub_h };
+        let is_hover = cursor_pos.map(|(mx, my)| pill_rect.contains(mx, my)).unwrap_or(false);
+        let sub_lum = backdrop.map(|bd| bd.get_region_luminance(sub_x, sub_y, sub_w, sub_h)).unwrap_or(0.0);
+        let is_sub_light = if backdrop.is_some() {
+            sub_lum > 135.0
+        } else {
+            theme_progress < 0.5
+        };
+
+        let badge_bg = if is_sub_light {
+            if is_hover {
+                Color::rgba(0, 0, 0, 0.12 * sub_opacity)
+            } else {
+                Color::rgba(0, 0, 0, 0.06 * sub_opacity)
+            }
+        } else {
+            if is_hover {
+                Color::rgba(255, 255, 255, 0.22 * sub_opacity)
+            } else {
+                Color::rgba(255, 255, 255, 0.12 * sub_opacity)
+            }
+        };
+
+        let sub_icon_color = if is_sub_light {
+            Color::rgba(15, 23, 42, 0.95 * sub_opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.95 * sub_opacity)
+        };
+
+        let sub_title_color = if is_sub_light {
+            Color::rgba(15, 23, 42, 0.98 * sub_opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.98 * sub_opacity)
+        };
+
+        let sub_message_color = if is_sub_light {
+            Color::rgba(71, 85, 105, 0.90 * sub_opacity)
+        } else {
+            Color::rgba(203, 213, 225, 0.88 * sub_opacity)
+        };
+
+        match &sub.kind {
+            NotificationKind::Banner { app_name, title, message } => {
+                draw_circle(buf, sub_x + 24.0, cy, 13.0, badge_bg);
+                draw_bell_icon(buf, sub_x + 24.0, cy, 12.0, sub_icon_color);
+
+                let content_x = sub_x + 46.0;
+                let app_label = if app_name.is_empty() { "Notification" } else { app_name.as_str() };
+                let app_color = if is_sub_light {
+                    Color::rgba(2, 132, 199, 0.98 * sub_opacity)
+                } else {
+                    Color::rgba(56, 189, 248, 0.98 * sub_opacity)
+                };
+                text_renderer.draw_text_truncated(
+                    buf,
+                    app_label,
+                    content_x,
+                    cy - 3.0,
+                    9.5,
+                    70.0,
+                    app_color,
+                    true,
+                );
+
+                let title_x = content_x + (app_label.len() as f32 * 6.2).min(70.0) + 8.0;
+                let title_max_w = (sub_w - 60.0 - (title_x - sub_x)).max(40.0);
+                text_renderer.draw_text_truncated(
+                    buf,
+                    title,
+                    title_x,
+                    cy - 3.0,
+                    11.0,
+                    title_max_w,
+                    sub_title_color,
+                    true,
+                );
+
+                text_renderer.draw_text_truncated(
+                    buf,
+                    message,
+                    content_x,
+                    cy + 12.0,
+                    9.5,
+                    sub_w - 60.0,
+                    sub_message_color,
+                    false,
+                );
+
+                let lower_app = app_name.to_lowercase();
+                let is_screenshot = lower_app.contains("snip")
+                    || lower_app.contains("alat pemotong")
+                    || lower_app.contains("screensketch")
+                    || lower_app.contains("screenshot");
+
+                if p > 0.4 && !sub.is_dismissing && !is_screenshot {
+                    self.click_targets.push((pill_rect, ClickAction::ActivateApp { app_name: app_name.clone() }));
+                }
+            }
+            NotificationKind::PrivacyAlert { is_camera, app_name } => {
+                draw_circle(buf, sub_x + 24.0, cy, 13.0, badge_bg);
+                if *is_camera {
+                    draw_camera_icon(buf, sub_x + 24.0, cy, 12.0, sub_icon_color);
+                } else {
+                    draw_microphone_icon(buf, sub_x + 24.0, cy, 12.0, false, sub_icon_color);
+                }
+
+                let content_x = sub_x + 46.0;
+                let priv_tag_color = if is_sub_light {
+                    Color::rgba(225, 29, 72, 0.98 * sub_opacity)
+                } else {
+                    Color::rgba(244, 63, 94, 0.98 * sub_opacity)
+                };
+                text_renderer.draw_text_truncated(buf, "Privacy Alert", content_x, cy - 3.0, 10.5, 90.0, priv_tag_color, true);
+                let desc = format!("{} sedang mengakses {}", app_name, if *is_camera { "Kamera" } else { "Mikrofon" });
+                text_renderer.draw_text_truncated(buf, &desc, content_x, cy + 12.0, 9.5, sub_w - 60.0, sub_message_color, false);
+
+                let lower_app = app_name.to_lowercase();
+                let is_screenshot = lower_app.contains("snip")
+                    || lower_app.contains("alat pemotong")
+                    || lower_app.contains("screensketch")
+                    || lower_app.contains("screenshot");
+
+                if p > 0.4 && !sub.is_dismissing && !is_screenshot {
+                    self.click_targets.push((pill_rect, ClickAction::ActivateApp { app_name: app_name.clone() }));
+                }
+            }
+            NotificationKind::TimerCompleted { message } => {
+                draw_circle(buf, sub_x + 24.0, cy, 13.0, badge_bg);
+                draw_timer_icon(buf, sub_x + 24.0, cy, 12.0, sub_icon_color);
+                let content_x = sub_x + 46.0;
+                let timer_tag_color = if is_sub_light {
+                    Color::rgba(22, 163, 74, 0.98 * sub_opacity)
+                } else {
+                    Color::rgba(34, 197, 94, 0.98 * sub_opacity)
+                };
+                text_renderer.draw_text_truncated(buf, "Focus Timer", content_x, cy - 3.0, 10.5, 90.0, timer_tag_color, true);
+                text_renderer.draw_text_truncated(buf, message, content_x, cy + 12.0, 9.5, sub_w - 60.0, sub_message_color, false);
+            }
+            NotificationKind::ClipboardCopied { preview, item_count, is_file } => {
+                draw_circle(buf, sub_x + 24.0, cy, 13.0, badge_bg);
+                draw_clipboard_icon(buf, sub_x + 24.0, cy, 12.0, sub_icon_color);
+                let content_x = sub_x + 46.0;
+                let tag = if *is_file { format!("Disalin ({} file)", item_count) } else { "Disalin ke Clipboard".to_string() };
+                let tag_color = if is_sub_light {
+                    Color::rgba(2, 132, 199, 0.98 * sub_opacity)
+                } else {
+                    Color::rgba(56, 189, 248, 0.98 * sub_opacity)
+                };
+                text_renderer.draw_text_truncated(buf, &tag, content_x, cy - 3.0, 10.0, 120.0, tag_color, true);
+                text_renderer.draw_text_truncated(buf, preview, content_x, cy + 12.0, 9.5, sub_w - 60.0, sub_message_color, false);
+            }
+            _ => {
+                draw_circle(buf, sub_x + 24.0, cy, 13.0, badge_bg);
+                draw_bell_icon(buf, sub_x + 24.0, cy, 12.0, sub_icon_color);
+                text_renderer.draw_text(buf, "Notification", sub_x + 46.0, cy + 4.0, 11.0, sub_title_color, true);
+            }
+        }
     }
 
     fn render_header_bar(
@@ -3704,15 +4401,21 @@ fn wrap_lyric_line<'a>(
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
+        y: f32,
         w: f32,
         state: &IslandState,
         opacity: f32,
+        is_light: bool,
     ) {
-        let cy = 18.0;
+        let cy = y + 18.0;
         let bat_cx = x + w * 0.5 - 72.0;
-        draw_battery_circle_ring(buf, bat_cx, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity);
+        draw_battery_circle_ring_adaptive(buf, bat_cx, cy, 6.0, state.battery_percent, state.is_charging, state.is_energy_saver, opacity, is_light);
 
-        let header_time_color = Color::rgba(255, 255, 255, 0.95 * opacity);
+        let header_time_color = if is_light {
+            Color::rgba(15, 23, 42, 0.96 * opacity)
+        } else {
+            Color::rgba(255, 255, 255, 0.95 * opacity)
+        };
 
         let header_time = get_formatted_header_time();
         text_renderer.draw_text(
@@ -3726,15 +4429,74 @@ fn wrap_lyric_line<'a>(
         );
 
         let wave_x = x + w - 38.0;
-        draw_monochrome_sound_wave(buf, wave_x, cy - 6.0, 22.0, 12.0, state.media_info.is_playing, state.anim_time, opacity);
+        draw_monochrome_sound_wave_ex(buf, wave_x, cy - 6.0, 22.0, 12.0, state.media_info.is_playing, state.anim_time, opacity, is_light);
     }
 
-    fn register_page_dot_targets(&mut self, cx: f32, cy: f32, total: usize) {
-        let dot_spacing = 14.0;
-        let start_x = cx - (total as f32 * dot_spacing) * 0.5;
-        for i in 0..total {
-            let px = start_x + (i as f32) * dot_spacing;
-            let rect = Rect { x: px - 8.0, y: cy - 8.0, w: 16.0, h: 16.0 };
+    fn render_bottom_navigation_dock(
+        &mut self,
+        buf: &mut PixelBuffer,
+        text_renderer: &TextRenderer,
+        cx: f32,
+        cy: f32,
+        active_idx: usize,
+        opacity: f32,
+        cursor_pos: Option<(f32, f32)>,
+        is_light: bool,
+    ) {
+        const TITLES: [&str; 8] = [
+            "Music",
+            "Weather",
+            "Shelf",
+            "Calendar",
+            "To-Do",
+            "Tools",
+            "Timer",
+            "Assistant",
+        ];
+
+        let active_title = TITLES.get(active_idx).copied().unwrap_or("Active");
+        let (tw, _) = text_renderer.measure_text(active_title, 9.0, true);
+        let active_w = (tw + 26.0).max(52.0);
+        let inactive_w = 19.0;
+        let item_gap = 2.0;
+        let total_items = 8;
+        let dock_h = 20.0;
+        let dock_r = 10.0;
+
+        let total_dock_w = (total_items - 1) as f32 * (inactive_w + item_gap) + active_w + 8.0;
+        let dock_x = cx - total_dock_w * 0.5;
+        let dock_y = cy - dock_h * 0.5;
+
+        // Semantic Dock styling: Dark charcoal & slate on Frosted Light, Crisp white on Dark Obsidian
+        let (dock_bg, dock_stroke, pill_bg, pill_stroke, active_fg, hover_bg, hover_fg, normal_fg) = if is_light {
+            (
+                Color::rgba(0, 0, 0, 0.06 * opacity),
+                Color::rgba(0, 0, 0, 0.09 * opacity),
+                Color::rgba(0, 0, 0, 0.12 * opacity),
+                Color::rgba(0, 0, 0, 0.18 * opacity),
+                Color::rgba(15, 23, 42, 0.98 * opacity),
+                Color::rgba(0, 0, 0, 0.08 * opacity),
+                Color::rgba(15, 23, 42, 0.92 * opacity),
+                Color::rgba(71, 85, 105, 0.65 * opacity),
+            )
+        } else {
+            (
+                Color::rgba(255, 255, 255, 0.07 * opacity),
+                Color::rgba(255, 255, 255, 0.12 * opacity),
+                Color::rgba(255, 255, 255, 0.22 * opacity),
+                Color::rgba(255, 255, 255, 0.35 * opacity),
+                Color::rgba(255, 255, 255, 0.98 * opacity),
+                Color::rgba(255, 255, 255, 0.12 * opacity),
+                Color::rgba(255, 255, 255, 0.95 * opacity),
+                Color::rgba(255, 255, 255, 0.40 * opacity),
+            )
+        };
+
+        draw_rounded_rect(buf, dock_x, dock_y, total_dock_w, dock_h, dock_r, dock_bg);
+        draw_rounded_rect_stroke(buf, dock_x, dock_y, total_dock_w, dock_h, dock_r, 1.0, dock_stroke);
+
+        let mut cur_x = dock_x + 4.0;
+        for i in 0..total_items {
             let page = match i {
                 0 => ExpandedPage::Music,
                 1 => ExpandedPage::Weather,
@@ -3745,7 +4507,54 @@ fn wrap_lyric_line<'a>(
                 6 => ExpandedPage::Timer,
                 _ => ExpandedPage::Assistant,
             };
-            self.click_targets.push((rect, ClickAction::SelectPage(page)));
+
+            if i == active_idx {
+                let pill_w = active_w;
+                let pill_rect = Rect {
+                    x: cur_x,
+                    y: dock_y + 2.0,
+                    w: pill_w,
+                    h: dock_h - 4.0,
+                };
+
+                // Active capsule pill background & border
+                draw_rounded_rect(buf, pill_rect.x, pill_rect.y, pill_rect.w, pill_rect.h, 8.0, pill_bg);
+                draw_rounded_rect_stroke(buf, pill_rect.x, pill_rect.y, pill_rect.w, pill_rect.h, 8.0, 1.0, pill_stroke);
+
+                // Active micro-icon
+                let icon_cx = cur_x + 10.0;
+                draw_dock_icon(buf, i, icon_cx, cy, active_fg);
+
+                // Active page label
+                let text_x = cur_x + 19.0;
+                text_renderer.draw_text(buf, active_title, text_x, cy + 3.5, 9.0, active_fg, true);
+
+                self.click_targets.push((pill_rect, ClickAction::SelectPage(page)));
+                cur_x += pill_w + item_gap;
+            } else {
+                let item_rect = Rect {
+                    x: cur_x,
+                    y: dock_y + 2.0,
+                    w: inactive_w,
+                    h: dock_h - 4.0,
+                };
+
+                let is_hover = cursor_pos
+                    .map(|(px, py)| item_rect.contains(px, py))
+                    .unwrap_or(false);
+
+                let icon_color = if is_hover {
+                    draw_rounded_rect(buf, item_rect.x, item_rect.y, item_rect.w, item_rect.h, 8.0, hover_bg);
+                    hover_fg
+                } else {
+                    normal_fg
+                };
+
+                draw_dock_icon(buf, i, cur_x + inactive_w * 0.5, cy, icon_color);
+
+                self.click_targets.push((item_rect, ClickAction::SelectPage(page)));
+                cur_x += inactive_w + item_gap;
+            }
         }
     }
 
@@ -3756,6 +4565,55 @@ fn wrap_lyric_line<'a>(
             }
         }
         None
+    }
+}
+
+fn draw_dock_icon(buf: &mut PixelBuffer, page_idx: usize, cx: f32, cy: f32, color: Color) {
+    match page_idx {
+        0 => {
+            // Music: Clean musical eighth note
+            draw_circle(buf, cx - 1.8, cy + 2.2, 1.8, color);
+            draw_rounded_rect(buf, cx - 0.7, cy - 3.5, 1.2, 5.5, 0.6, color);
+            draw_circle(buf, cx + 0.8, cy - 2.8, 0.65, color);
+            draw_circle(buf, cx + 1.8, cy - 1.6, 0.65, color);
+        }
+        1 => {
+            // Weather: Sun
+            draw_sun_icon(buf, cx, cy, 3.2, color);
+        }
+        2 => {
+            // Shelf: Folder / File
+            draw_file_icon(buf, cx - 3.5, cy - 4.0, 7.5, color);
+        }
+        3 => {
+            // Calendar: Clean calendar icon
+            draw_rounded_rect_stroke(buf, cx - 4.5, cy - 3.5, 9.0, 8.5, 1.5, 0.9, color);
+            draw_rounded_rect(buf, cx - 3.5, cy - 1.5, 7.0, 1.0, 0.5, color);
+            draw_circle(buf, cx - 2.0, cy - 4.2, 0.6, color);
+            draw_circle(buf, cx + 2.0, cy - 4.2, 0.6, color);
+            draw_circle(buf, cx - 1.8, cy + 1.5, 0.6, color);
+            draw_circle(buf, cx + 1.8, cy + 1.5, 0.6, color);
+        }
+        4 => {
+            // To-Do: Checklist checkbox with checkmark
+            draw_todo_checkbox(buf, cx, cy, 4.2, true, false, color.a);
+        }
+        5 => {
+            // Tools: Settings / Sliders
+            draw_rounded_rect(buf, cx - 4.5, cy - 2.6, 9.0, 1.0, 0.5, color);
+            draw_rounded_rect(buf, cx - 4.5, cy + 1.8, 9.0, 1.0, 0.5, color);
+            draw_circle(buf, cx - 1.5, cy - 2.2, 1.3, color);
+            draw_circle(buf, cx + 1.8, cy + 2.2, 1.3, color);
+        }
+        6 => {
+            // Timer: Stopwatch
+            draw_timer_icon(buf, cx, cy, 7.5, color);
+        }
+        7 => {
+            // Assistant: Gemini sparkle
+            draw_gemini_sparkle(buf, cx, cy, 3.8, color);
+        }
+        _ => {}
     }
 }
 
@@ -3874,80 +4732,34 @@ fn format_seconds(secs: u32) -> String {
     format!("{:02}:{:02}", m, s)
 }
 
+const DAYS: [&str; 7] = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTHS: [&str; 12] = [
+    "Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec",
+];
+
 fn get_formatted_date_parts() -> (String, String) {
     unsafe {
         let st = windows::Win32::System::SystemInformation::GetLocalTime();
-        let day_str = match st.wDayOfWeek {
-            0 => "Sun",
-            1 => "Mon",
-            2 => "Tue",
-            3 => "Wed",
-            4 => "Thu",
-            5 => "Fri",
-            _ => "Sat",
-        };
-        let mon_str = match st.wMonth {
-            1 => "Jan",
-            2 => "Feb",
-            3 => "Mar",
-            4 => "Apr",
-            5 => "May",
-            6 => "Jun",
-            7 => "Jul",
-            8 => "Aug",
-            9 => "Sep",
-            10 => "Oct",
-            11 => "Nov",
-            _ => "Dec",
-        };
+        let day_str = DAYS.get(st.wDayOfWeek as usize).copied().unwrap_or("Sun");
+        let mon_str = MONTHS
+            .get(st.wMonth.saturating_sub(1) as usize)
+            .copied()
+            .unwrap_or("Jan");
         let date_part = format!("{} {} {} {}", day_str, st.wDay, mon_str, st.wYear);
         let time_part = format!("{:02}:{:02}", st.wHour, st.wMinute);
         (date_part, time_part)
     }
 }
 
-#[allow(dead_code)]
-fn get_formatted_time_short() -> String {
-    unsafe {
-        let st = windows::Win32::System::SystemInformation::GetLocalTime();
-        format!("{:02}:{:02}", st.wHour, st.wMinute)
-    }
-}
-
-#[allow(dead_code)]
 fn get_formatted_header_time() -> String {
-    unsafe {
-        let st = windows::Win32::System::SystemInformation::GetLocalTime();
-        let day_str = match st.wDayOfWeek {
-            0 => "Sun",
-            1 => "Mon",
-            2 => "Tue",
-            3 => "Wed",
-            4 => "Thu",
-            5 => "Fri",
-            _ => "Sat",
-        };
-        let mon_str = match st.wMonth {
-            1 => "Jan",
-            2 => "Feb",
-            3 => "Mar",
-            4 => "Apr",
-            5 => "May",
-            6 => "Jun",
-            7 => "Jul",
-            8 => "Aug",
-            9 => "Sep",
-            10 => "Oct",
-            11 => "Nov",
-            _ => "Dec",
-        };
-        format!("{} {} {} {} {:02}:{:02}", day_str, st.wDay, mon_str, st.wYear, st.wHour, st.wMinute)
-    }
+    let (d, t) = get_formatted_date_parts();
+    format!("{} {}", d, t)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ui::state::GlassTheme;
 
     #[test]
     fn test_target_geometry() {
@@ -3968,18 +4780,18 @@ mod tests {
 
         // 1. Music mode
         state.mode = IslandMode::Expanded(ExpandedPage::Music);
-        let (x, _, w, h, _) = lm.compute_target_geometry(820.0, &state);
+        let (x, y, w, h, _) = lm.compute_target_geometry(820.0, &state);
         lm.click_targets.clear();
-        lm.render_music(&mut buf, &tr, x, w, h, &state, 1.0, None);
+        lm.render_music(&mut buf, &tr, x, y, w, h, &state, 1.0, None, false);
         assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::SeekRelative(-5)));
         assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::SeekRelative(5)));
 
         // 2. Lyrics mode
         state.mode = IslandMode::Lyrics;
-        let (x, _, w, h, _) = lm.compute_target_geometry(820.0, &state);
+        let (x, y, w, h, _) = lm.compute_target_geometry(820.0, &state);
         lm.click_targets.clear();
         let lyrics = SyncedLyrics::default();
-        lm.render_lyrics(&mut buf, &tr, x, w, h, &state, &lyrics, 1.0, None);
+        lm.render_lyrics(&mut buf, &tr, x, y, w, h, &state, &lyrics, 1.0, None, false);
         assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::SeekRelative(-5)));
         assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::SeekRelative(5)));
     }
@@ -4269,6 +5081,9 @@ mod tests {
             let lyrics = SyncedLyrics::default();
             lm.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             save_bmp(&buf, &format!(r"{}\render_timer.bmp", scratch_dir));
+
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
+            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage), "Timer must have NextPage arrow forward to Assistant");
         }
 
         // 7. Resting Notch with Active Privacy Indicators + Network Speed
@@ -4399,7 +5214,7 @@ mod tests {
             state.mode = IslandMode::Expanded(ExpandedPage::Weather);
             state.weather.temperature = 26.0;
             state.weather.apparent_temperature = 33.0;
-            state.weather.city = "Ciruas".to_string();
+            state.weather.city = "Tokyo".to_string();
             state.weather.weather_code = 3; // Overcast
             state.weather.is_day = false;
             state.weather.temp_max = 29.0;
@@ -4445,7 +5260,7 @@ mod tests {
             save_bmp(&buf, &format!(r"{}\render_assistant.bmp", scratch_dir));
 
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage));
-            assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage));
+            assert!(!lm.click_targets.iter().any(|(_, a)| *a == ClickAction::NextPage), "Assistant is final page, must not have NextPage");
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleGlassTheme));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::AssistantFocusInput));
             assert!(lm.click_targets.iter().any(|(_, a)| *a == ClickAction::AssistantSubmitPrompt));
@@ -4585,7 +5400,7 @@ mod tests {
             state.media_info.has_media = true;
             state.media_info.title = "Romance".to_string();
             let mut lm_test = LayoutManager::new();
-            lm_test.render_lyrics(&mut buf, &tr, 110.0, 600.0, 150.0, &state, &lyrics, 1.0, None);
+            lm_test.render_lyrics(&mut buf, &tr, 110.0, 0.0, 600.0, 150.0, &state, &lyrics, 1.0, None, false);
             assert!(lm_test.click_targets.iter().any(|(_, a)| *a == ClickAction::ToggleRomaji));
         }
 
@@ -4594,11 +5409,11 @@ mod tests {
             let mut buf = PixelBuffer::new(820, 200);
             let mut state = IslandState::new();
             state.mode = IslandMode::Expanded(ExpandedPage::ToDo);
-            let (tx, _ty, tw, th, _tr_val) = lm.compute_target_geometry(820.0, &state);
+            let (tx, ty, tw, th, _tr_val) = lm.compute_target_geometry(820.0, &state);
             assert_eq!(tw, 480.0);
 
             let mut lm_todo = LayoutManager::new();
-            lm_todo.render_todo(&mut buf, &tr, tx, tw, th, &state, 1.0, None);
+            lm_todo.render_todo(&mut buf, &tr, tx, ty, tw, th, &state, 1.0, None, false);
 
             // Must have PrevPage and NextPage click targets
             let has_prev = lm_todo.click_targets.iter().any(|(_, a)| *a == ClickAction::PrevPage);
@@ -4617,10 +5432,10 @@ mod tests {
             let mut state = IslandState::new();
             state.glass_theme = GlassTheme::DarkObsidian;
             state.mode = IslandMode::Expanded(ExpandedPage::Music);
-            let (tx, _ty, tw, th, _tr_val) = lm.compute_target_geometry(820.0, &state);
+            let (tx, ty, tw, th, _tr_val) = lm.compute_target_geometry(820.0, &state);
 
             let mut lm_music = LayoutManager::new();
-            lm_music.render_music(&mut buf, &tr, tx, tw, th, &state, 1.0, None);
+            lm_music.render_music(&mut buf, &tr, tx, ty, tw, th, &state, 1.0, None, false);
 
             // ToggleGlassTheme target must be registered at the top-left
             let theme_target = lm_music
@@ -4630,7 +5445,7 @@ mod tests {
             assert!(theme_target.is_some(), "Music mode must register ToggleGlassTheme");
             let (rect, _) = theme_target.unwrap();
             assert_eq!(rect.x, tx + 16.0);
-            assert_eq!(rect.y, 9.0);
+            assert_eq!(rect.y, ty + 9.0);
             assert_eq!(rect.w, 38.0);
             assert_eq!(rect.h, 18.0);
 
@@ -4683,15 +5498,59 @@ mod tests {
                     done: false,
                 },
             ];
-            let (tx, _ty, tw, th, _tr_val) = lm.compute_target_geometry(820.0, &state);
+            let (tx, ty, tw, th, _tr_val) = lm.compute_target_geometry(820.0, &state);
             assert_eq!(th, 160.0);
 
             let mut lm_todo = LayoutManager::new();
-            lm_todo.render_todo(&mut buf, &tr, tx, tw, th, &state, 1.0, None);
+            lm_todo.render_todo(&mut buf, &tr, tx, ty, tw, th, &state, 1.0, None, false);
 
             // Find item target and verify its height expanded beyond 24px
             let item_target = lm_todo.click_targets.iter().find(|(_, a)| *a == ClickAction::ToggleTodo(1)).unwrap();
             assert!(item_target.0.h >= 38.0, "Multi-line task must expand downwards");
+        }
+
+        // 18. IslandShape: TopNotch vs FloatingPill Target Geometry
+        {
+            let mut state = IslandState::new();
+            state.shape = IslandShape::TopNotch;
+            let (_, ty_notch, _, _, _) = lm.compute_target_geometry(820.0, &state);
+            assert_eq!(ty_notch, 0.0);
+
+            state.shape = IslandShape::FloatingPill;
+            let (_, ty_pill, _, _, _) = lm.compute_target_geometry(820.0, &state);
+            assert_eq!(ty_pill, 8.0);
+        }
+
+        // 19. Screenshot Notifications are non-clickable
+        {
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Notification(NotificationKind::Banner {
+                app_name: "Snipping Tool".to_string(),
+                title: "Screenshot captured".to_string(),
+                message: "Select here to markup and share".to_string(),
+            });
+            let mut lm_snip = LayoutManager::new();
+            let springs = SpringRect::new(200.0, 0.0, 300.0, 48.0, 20.0);
+            let lyrics = SyncedLyrics::default();
+            lm_snip.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
+            assert!(
+                !lm_snip.click_targets.iter().any(|(_, a)| matches!(a, ClickAction::ActivateApp { .. })),
+                "Screenshot notifications must not be clickable"
+            );
+
+            // Regular app notification (e.g. WhatsApp) MUST be clickable
+            state.mode = IslandMode::Notification(NotificationKind::Banner {
+                app_name: "WhatsApp".to_string(),
+                title: "John".to_string(),
+                message: "Hello".to_string(),
+            });
+            let mut lm_wa = LayoutManager::new();
+            lm_wa.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
+            assert!(
+                lm_wa.click_targets.iter().any(|(_, a)| matches!(a, ClickAction::ActivateApp { app_name } if app_name == "WhatsApp")),
+                "WhatsApp notification must be clickable"
+            );
         }
     }
 }

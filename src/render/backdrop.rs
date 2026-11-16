@@ -207,6 +207,42 @@ impl BackdropBlur {
             (px & 0xFF) as u8,
         )
     }
+
+    /// Computes the average perceived luminance (ITU-R BT.601) of the desktop backdrop in the given bounding box.
+    /// Returns 0.0 to 255.0. Luminance > 135.0 indicates bright background requiring dark charcoal text.
+    pub fn get_region_luminance(&self, x: f32, y: f32, w: f32, h: f32) -> f32 {
+        if self.width == 0 || self.height == 0 || w <= 0.0 || h <= 0.0 {
+            return 0.0;
+        }
+
+        let start_x = (x + 8.0).max(0.0) as usize;
+        let end_x = (x + w - 8.0).max(start_x as f32) as usize;
+        let start_y = (y + 4.0).max(0.0) as usize;
+        let end_y = (y + h - 4.0).max(start_y as f32) as usize;
+
+        let span_x = end_x.saturating_sub(start_x);
+        let span_y = end_y.saturating_sub(start_y);
+        let step_x = (span_x / 16).max(2);
+        let step_y = (span_y / 4).max(1);
+
+        let mut total_lum = 0.0f32;
+        let mut count = 0usize;
+
+        for sy in (start_y..=end_y).step_by(step_y) {
+            for sx in (start_x..=end_x).step_by(step_x) {
+                let (r, g, b) = self.get_blurred_pixel(sx, sy);
+                let lum = 0.299 * (r as f32) + 0.587 * (g as f32) + 0.114 * (b as f32);
+                total_lum += lum;
+                count += 1;
+            }
+        }
+
+        if count > 0 {
+            total_lum / (count as f32)
+        } else {
+            0.0
+        }
+    }
 }
 
 #[cfg(test)]
@@ -337,6 +373,22 @@ mod tests {
             }
         }
         save_bmp(&out_dir.join("compare_dark_WITH_blur.bmp").to_string_lossy(), &img_dark_blur);
+    }
+
+    #[test]
+    fn test_get_region_luminance() {
+        let mut bd = BackdropBlur::new(200, 100);
+        // Fill raw_buffer with pure white (0xFFFFFFFF)
+        bd.raw_buffer.fill(0xFFFFFFFF);
+        bd.apply_optical_blur(2);
+        let lum_white = bd.get_region_luminance(10.0, 10.0, 80.0, 30.0);
+        assert!(lum_white > 250.0, "White luminance must be near 255, got {}", lum_white);
+
+        // Fill raw_buffer with pure black (0xFF000000)
+        bd.raw_buffer.fill(0xFF000000);
+        bd.apply_optical_blur(2);
+        let lum_black = bd.get_region_luminance(10.0, 10.0, 80.0, 30.0);
+        assert!(lum_black < 5.0, "Black luminance must be near 0, got {}", lum_black);
     }
 }
 

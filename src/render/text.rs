@@ -15,11 +15,16 @@ pub struct TextRenderer {
 
 impl TextRenderer {
     pub fn new() -> Self {
-        let regular = Self::load_font("C:\\Windows\\Fonts\\segoeui.ttf");
-        let bold = Self::load_font("C:\\Windows\\Fonts\\segoeuib.ttf");
-        let korean = Self::load_font("C:\\Windows\\Fonts\\malgun.ttf");
-        let cjk = Self::load_font("C:\\Windows\\Fonts\\msyh.ttc")
-            .or_else(|| Self::load_font("C:\\Windows\\Fonts\\meiryo.ttc"));
+        let system_root = std::env::var("SystemRoot")
+            .or_else(|_| std::env::var("windir"))
+            .unwrap_or_else(|_| "C:\\Windows".to_string());
+        let fonts_dir = std::path::Path::new(&system_root).join("Fonts");
+
+        let regular = Self::load_font(&fonts_dir.join("segoeui.ttf"));
+        let bold = Self::load_font(&fonts_dir.join("segoeuib.ttf"));
+        let korean = Self::load_font(&fonts_dir.join("malgun.ttf"));
+        let cjk = Self::load_font(&fonts_dir.join("msyh.ttc"))
+            .or_else(|| Self::load_font(&fonts_dir.join("meiryo.ttc")));
 
         Self {
             regular,
@@ -29,7 +34,7 @@ impl TextRenderer {
         }
     }
 
-    fn load_font(path: &str) -> Option<Font> {
+    fn load_font(path: &std::path::Path) -> Option<Font> {
         let data = fs::read(path).ok()?;
         Font::from_bytes(data, FontSettings::default()).ok()
     }

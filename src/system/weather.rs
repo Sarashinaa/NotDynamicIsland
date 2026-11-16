@@ -523,19 +523,19 @@ mod tests {
             wind_speed: 3.5,
             temp_max: 33.0,
             temp_min: 24.0,
-            city: "Ciruas".to_string(),
+            city: "Tokyo".to_string(),
             is_offline: false,
             is_loaded: true,
             last_updated: Instant::now(),
         };
 
-        save_cache_to_disk(-6.12, 106.23, "Ciruas", &info);
+        save_cache_to_disk(35.68, 139.69, "Tokyo", &info);
         let loaded = load_cache_from_disk();
         assert!(loaded.is_some());
         let (lat, lon, city, cached) = loaded.unwrap();
-        assert_eq!(city, "Ciruas");
-        assert_eq!(lat, -6.12);
-        assert_eq!(lon, 106.23);
+        assert_eq!(city, "Tokyo");
+        assert_eq!(lat, 35.68);
+        assert_eq!(lon, 139.69);
         assert_eq!(cached.temperature, 26.5);
         assert_eq!(cached.weather_code, 3);
         assert_eq!(cached.is_loaded, true);
