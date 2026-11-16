@@ -46,7 +46,9 @@ The result is a desktop companion that feels organic, responds instantaneously, 
 <video src="https://github.com/user-attachments/assets/4ed3fc64-fa09-4ff1-8c94-700b6b47ce00" width="100%" autoplay loop muted playsinline style="border-radius: 12px; box-shadow: 0 10px 30px rgba(0,0,0,0.35);">
 </video>
 
-video by: [@rachmankirin](https://github.com/rachmankirin)  
+<sub>Video by [@rachmankirin](https://github.com/rachmankirin)</sub>
+
+</div>
 
 <br />
 
