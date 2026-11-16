@@ -23,12 +23,14 @@ mod window;
 use physics::SpringRect;
 use render::{BackdropBlur, PixelBuffer, TextRenderer};
 use system::{
-    enable_eco_qos, trim_working_set, AssistantManager, BrightnessListener, KeyboardHook, MediaController,
-    NetworkListener, NotificationListener, PowerListener, PrivacyListener, ToastNotificationPayload, VolumeListener,
-    WeatherManager,
-    WM_APP_ASSISTANT_REPLY, WM_APP_BRIGHTNESS_CHANGED, WM_APP_CALENDAR_UPDATED, WM_APP_CAPSLOCK_CHANGED, WM_APP_MEDIA_CHANGED,
-    WM_APP_NETWORK_CHANGED, WM_APP_NOTIFICATION_ARRIVED, WM_APP_POWER_CHANGED, WM_APP_PRIVACY_CHANGED,
-    WM_APP_TIME_TICK, WM_APP_TODO_UPDATED, WM_APP_VOLUME_CHANGED, WM_APP_WEATHER_UPDATED,
+    enable_eco_qos, trim_working_set, AssistantManager, BrightnessListener, DisplayManager,
+    DisplayTarget, KeyboardHook, MediaController, NetworkListener, NotificationListener,
+    PowerListener, PrivacyListener, ToastNotificationPayload, VolumeListener, WeatherManager,
+    clear_transition_pending, update_display_hook, WM_APP_ASSISTANT_REPLY, WM_APP_BRIGHTNESS_CHANGED,
+    WM_APP_CALENDAR_UPDATED, WM_APP_CAPSLOCK_CHANGED, WM_APP_DISPLAY_CURSOR_MOVED,
+    WM_APP_MEDIA_CHANGED, WM_APP_NETWORK_CHANGED, WM_APP_NOTIFICATION_ARRIVED,
+    WM_APP_POWER_CHANGED, WM_APP_PRIVACY_CHANGED, WM_APP_TIME_TICK, WM_APP_TODO_UPDATED,
+    WM_APP_VOLUME_CHANGED, WM_APP_WEATHER_UPDATED,
 };
 use ui::{ClickAction, ExpandedPage, IslandMode, IslandState, LayoutManager, Rect};
 use window::{Win32LayeredWindow, CANVAS_H, CANVAS_W, TIMER_ANIMATION_ID};
@@ -103,6 +105,7 @@ struct App {
     _network_listener: Option<system::network::NetworkListener>,
     weather_manager: Option<WeatherManager>,
     assistant_manager: AssistantManager,
+    pub display_manager: DisplayManager,
     is_animating: bool,
     last_tick: Instant,
     settled_since: Option<Instant>,
@@ -482,6 +485,19 @@ pub unsafe extern "system" fn window_proc(
                     let cur_fg = unsafe { windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow() };
                     if cur_fg != app.last_foreground_hwnd {
                         app.last_foreground_hwnd = cur_fg;
+
+                        // In FollowCursor mode: if user focused an app on another monitor, relocate island immediately
+                        if app.display_manager.target == DisplayTarget::FollowCursor {
+                            let mut cursor_pt = POINT::default();
+                            let _ = unsafe { GetCursorPos(&mut cursor_pt) };
+                            if let Some(rect) = app.display_manager.get_target_rect(Some(cursor_pt)) {
+                                let monitor_w = rect.right - rect.left;
+                                let target_x = rect.left + (monitor_w - CANVAS_W as i32) / 2;
+                                let target_y = rect.top;
+                                app.window.move_to(target_x, target_y);
+                            }
+                        }
+
                         app.backdrop.capture(app.window.win_x, app.window.win_y);
                         app.last_backdrop_capture = Instant::now();
                         wake_animation(hwnd, app);
@@ -638,7 +654,7 @@ pub unsafe extern "system" fn window_proc(
                     // 3. If ToDo is in input mode and user clicks outside input pill, commit task
                     if app.island_state.todo.is_input_active {
                         let left_x = cur_x + 44.0;
-                        let input_rect = Rect { x: left_x, y: 92.0, w: 140.0, h: 26.0 };
+                        let input_rect = Rect { x: left_x, y: 98.0, w: 140.0, h: 26.0 };
                         if !input_rect.contains(cx, cy) {
                             app.island_state.todo.commit_input();
                             wake_animation(hwnd, app);
@@ -1194,6 +1210,34 @@ pub unsafe extern "system" fn window_proc(
                             let _ = AppendMenuW(hmenu, MF_POPUP, h_tools.0 as usize, windows::core::w!("⚡  Quick Tools"));
                         }
 
+                        // Submenu: Universal Multi-Monitor Target
+                        if let Ok(h_display) = CreatePopupMenu() {
+                            let (target, monitors) = if let Ok(lock) = APP.lock() {
+                                if let Some(app) = lock.as_ref() {
+                                    (app.display_manager.target, app.display_manager.monitors.clone())
+                                } else {
+                                    (DisplayTarget::FollowCursor, Vec::new())
+                                }
+                            } else {
+                                (DisplayTarget::FollowCursor, Vec::new())
+                            };
+
+                            let is_follow = target == DisplayTarget::FollowCursor;
+                            let follow_str = if is_follow { "●  Follow Active Cursor" } else { "    Follow Active Cursor" };
+                            let follow_w: Vec<u16> = follow_str.encode_utf16().chain(std::iter::once(0)).collect();
+                            let _ = AppendMenuW(h_display, MF_STRING, 2000, windows::core::PCWSTR(follow_w.as_ptr()));
+                            let _ = AppendMenuW(h_display, MF_SEPARATOR, 0, None);
+
+                            for mon in &monitors {
+                                let is_selected = target == DisplayTarget::Specific(mon.index);
+                                let check = if is_selected { "●  " } else { "    " };
+                                let item_str = format!("{}{}", check, mon.name);
+                                let item_w: Vec<u16> = item_str.encode_utf16().chain(std::iter::once(0)).collect();
+                                let _ = AppendMenuW(h_display, MF_STRING, 2000 + mon.index, windows::core::PCWSTR(item_w.as_ptr()));
+                            }
+                            let _ = AppendMenuW(hmenu, MF_POPUP, h_display.0 as usize, windows::core::w!("🖥️  Display Target"));
+                        }
+
                         // Theme Switcher
                         let is_dark = if let Ok(lock) = APP.lock() {
                             lock.as_ref()
@@ -1312,6 +1356,33 @@ pub unsafe extern "system" fn window_proc(
                                                     "Refreshing Weather".to_string(),
                                                     "Fetching live forecast for current location...".to_string(),
                                                 );
+                                            }
+                                        }
+                                        2000 => {
+                                            app.display_manager.set_target(DisplayTarget::FollowCursor);
+                                            update_display_hook(hwnd, true);
+                                            let mut cursor_pt = POINT::default();
+                                            let _ = GetCursorPos(&mut cursor_pt);
+                                            if let Some(rect) = app.display_manager.get_target_rect(Some(cursor_pt)) {
+                                                let monitor_w = rect.right - rect.left;
+                                                let target_x = rect.left + (monitor_w - CANVAS_W as i32) / 2;
+                                                let target_y = rect.top;
+                                                app.window.move_to(target_x, target_y);
+                                                app.backdrop.capture(target_x, target_y);
+                                                app.last_backdrop_capture = Instant::now();
+                                            }
+                                        }
+                                        val if val > 2000 && val <= 2099 => {
+                                            let target_idx = (val - 2000) as usize;
+                                            app.display_manager.set_target(DisplayTarget::Specific(target_idx));
+                                            update_display_hook(hwnd, false);
+                                            if let Some(rect) = app.display_manager.get_target_rect(None) {
+                                                let monitor_w = rect.right - rect.left;
+                                                let target_x = rect.left + (monitor_w - CANVAS_W as i32) / 2;
+                                                let target_y = rect.top;
+                                                app.window.move_to(target_x, target_y);
+                                                app.backdrop.capture(target_x, target_y);
+                                                app.last_backdrop_capture = Instant::now();
                                             }
                                         }
                                         _ => {}
@@ -2177,6 +2248,114 @@ pub unsafe extern "system" fn window_proc(
             LRESULT(0)
         }
 
+        WM_APP_DISPLAY_CURSOR_MOVED => {
+            let mut cursor_pt = POINT::default();
+            let _ = unsafe { GetCursorPos(&mut cursor_pt) };
+            let mut move_coords: Option<(i32, i32)> = None;
+
+            if let Ok(mut lock) = APP.lock() {
+                if let Some(app) = lock.as_mut() {
+                    if app.display_manager.target == DisplayTarget::FollowCursor {
+                        if let Some(rect) = app.display_manager.get_target_rect(Some(cursor_pt)) {
+                            let monitor_w = rect.right - rect.left;
+                            let target_x = rect.left + (monitor_w - CANVAS_W as i32) / 2;
+                            let target_y = rect.top;
+
+                            if app.window.win_x != target_x || app.window.win_y != target_y {
+                                app.window.win_x = target_x;
+                                app.window.win_y = target_y;
+                                move_coords = Some((target_x, target_y));
+                            }
+                        }
+                    }
+                }
+            }
+            clear_transition_pending();
+
+            if let Some((target_x, target_y)) = move_coords {
+                // Relocate window OUTSIDE the lock to prevent re-entrant deadlock with WM_DPICHANGED
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowPos(
+                        hwnd,
+                        windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST,
+                        target_x,
+                        target_y,
+                        CANVAS_W as i32,
+                        CANVAS_H as i32,
+                        windows::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE
+                            | windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE,
+                    );
+                }
+
+                if let Ok(mut lock) = APP.lock() {
+                    if let Some(app) = lock.as_mut() {
+                        app.backdrop.capture(target_x, target_y);
+                        app.last_backdrop_capture = Instant::now();
+                        wake_animation(hwnd, app);
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+
+        windows::Win32::UI::WindowsAndMessaging::WM_DISPLAYCHANGE => {
+            let mut cursor_pt = POINT::default();
+            let _ = unsafe { GetCursorPos(&mut cursor_pt) };
+            let mut move_coords: Option<(i32, i32)> = None;
+
+            if let Ok(mut lock) = APP.try_lock() {
+                if let Some(app) = lock.as_mut() {
+                    app.display_manager.refresh();
+                    if let Some(rect) = app.display_manager.get_target_rect(Some(cursor_pt)) {
+                        let monitor_w = rect.right - rect.left;
+                        let target_x = rect.left + (monitor_w - CANVAS_W as i32) / 2;
+                        let target_y = rect.top;
+                        if app.window.win_x != target_x || app.window.win_y != target_y {
+                            app.window.win_x = target_x;
+                            app.window.win_y = target_y;
+                            move_coords = Some((target_x, target_y));
+                        }
+                    }
+                }
+            }
+
+            if let Some((target_x, target_y)) = move_coords {
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowPos(
+                        hwnd,
+                        windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST,
+                        target_x,
+                        target_y,
+                        CANVAS_W as i32,
+                        CANVAS_H as i32,
+                        windows::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE
+                            | windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE,
+                    );
+                }
+
+                if let Ok(mut lock) = APP.try_lock() {
+                    if let Some(app) = lock.as_mut() {
+                        app.backdrop.capture(target_x, target_y);
+                        app.last_backdrop_capture = Instant::now();
+                        wake_animation(hwnd, app);
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+
+        windows::Win32::UI::WindowsAndMessaging::WM_DPICHANGED => {
+            // Must use try_lock to safely avoid deadlocks when SetWindowPos triggers WM_DPICHANGED synchronously
+            if let Ok(mut lock) = APP.try_lock() {
+                if let Some(app) = lock.as_mut() {
+                    app.backdrop.capture(app.window.win_x, app.window.win_y);
+                    app.last_backdrop_capture = Instant::now();
+                    wake_animation(hwnd, app);
+                }
+            }
+            LRESULT(0)
+        }
+
         WM_TIMER => {
             if wparam.0 == TIMER_ANIMATION_ID {
                 if let Ok(mut lock) = APP.lock() {
@@ -2370,6 +2549,7 @@ pub unsafe extern "system" fn window_proc(
         }
 
         WM_DESTROY => {
+            update_display_hook(HWND::default(), false);
             unsafe {
                 let _ = RemoveClipboardFormatListener(hwnd);
                 PostQuitMessage(0);
@@ -2425,8 +2605,21 @@ fn main() {
         let _ = windows::Win32::System::Ole::OleInitialize(None);
     }
 
-    // 3. Create Win32 TopMost Layered ToolWindow anchored to the top bezel
-    let window = match Win32LayeredWindow::create("Project Nova - Dynamic Island", window_proc) {
+    // 3. Create Win32 TopMost Layered ToolWindow anchored to target monitor top bezel
+    let mut display_manager = DisplayManager::new();
+    let mut init_pt = POINT::default();
+    let _ = unsafe { GetCursorPos(&mut init_pt) };
+    let target_rect = display_manager.get_target_rect(Some(init_pt)).unwrap_or(windows::Win32::Foundation::RECT {
+        left: 0,
+        top: 0,
+        right: 1920,
+        bottom: 1080,
+    });
+    let monitor_w = target_rect.right - target_rect.left;
+    let initial_win_x = target_rect.left + (monitor_w - CANVAS_W as i32) / 2;
+    let initial_win_y = target_rect.top;
+
+    let window = match Win32LayeredWindow::create("Project Nova - Dynamic Island", window_proc, initial_win_x, initial_win_y) {
         Ok(w) => w,
         Err(e) => {
             eprintln!("[Fatal] Failed to create window: {:?}", e);
@@ -2436,6 +2629,7 @@ fn main() {
 
     let hwnd = window.hwnd;
     enable_dark_popup_menus(hwnd);
+    update_display_hook(hwnd, display_manager.target == DisplayTarget::FollowCursor);
 
     // Register clipboard listener to automatically capture copied files into File Shelf
     unsafe {
@@ -2517,6 +2711,7 @@ fn main() {
             _network_listener: Some(network_listener),
             weather_manager: Some(weather_manager),
             assistant_manager,
+            display_manager,
             is_animating: true,
             last_tick: Instant::now(),
             settled_since: None,

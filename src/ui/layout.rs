@@ -182,8 +182,8 @@ impl LayoutManager {
             IslandMode::Expanded(ExpandedPage::Shelf) => (426.0, 146.0, 24.0),
             // Calendar & Agenda: Dual-pane month grid + daily agenda (456x152)
             IslandMode::Expanded(ExpandedPage::Calendar) => (456.0, 152.0, 24.0),
-            // To-do: Increased width to 480px for navigation arrows and breathing room
-            IslandMode::Expanded(ExpandedPage::ToDo) => (480.0, 148.0, 24.0),
+            // To-do: 480x160 with dynamic multi-line task boxes and navigation arrows
+            IslandMode::Expanded(ExpandedPage::ToDo) => (480.0, 160.0, 24.0),
             // Tools & Control Center: 3 Apple-style utility cards (420x148)
             IslandMode::Expanded(ExpandedPage::Tools) => (420.0, 148.0, 24.0),
             // Timer & Focus: Spacious 400x150, matches design aesthetic
@@ -1790,15 +1790,15 @@ fn wrap_lyric_line<'a>(
         }
 
         // Prev Arrow Button (<) to cycle to Shelf
-        let prev_btn_rect = Rect { x: x + 12.0, y: 56.0, w: 24.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 12.0, y: 62.0, w: 24.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + 24.0, 68.0, 11.0, false, prev_hover, opacity);
+        draw_nav_arrow_button(buf, x + 24.0, 74.0, 11.0, false, prev_hover, opacity);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
         // Next Arrow Button (>) to cycle to Calendar
-        let next_btn_rect = Rect { x: x + w - 36.0, y: 56.0, w: 24.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 36.0, y: 62.0, w: 24.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button(buf, x + w - 24.0, 68.0, 11.0, true, next_hover, opacity);
+        draw_nav_arrow_button(buf, x + w - 24.0, 74.0, 11.0, true, next_hover, opacity);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // Left Column: Statistics "X/Y Task Done Today" with clean vertical spacing
@@ -1806,12 +1806,11 @@ fn wrap_lyric_line<'a>(
         let (done_cnt, total_cnt) = state.todo.counts();
         let score_str = format!("{}/{}", done_cnt, total_cnt);
 
-        // Fixed spacing from image 2: score at y = 54.0, subtitle at y = 74.0
         text_renderer.draw_text(
             buf,
             &score_str,
             left_x,
-            54.0,
+            56.0,
             20.0,
             Color::rgba(255, 255, 255, 0.98 * opacity),
             true,
@@ -1820,7 +1819,7 @@ fn wrap_lyric_line<'a>(
             buf,
             "Task Done Today",
             left_x,
-            74.0,
+            78.0,
             10.5,
             Color::rgba(148, 163, 184, 0.85 * opacity),
             false,
@@ -1828,7 +1827,7 @@ fn wrap_lyric_line<'a>(
 
         // Interactive Task Input Mode or Action Buttons (+ Add Task & ✎ Clear)
         if state.todo.is_input_active {
-            let input_rect = Rect { x: left_x, y: 92.0, w: 140.0, h: 26.0 };
+            let input_rect = Rect { x: left_x, y: 98.0, w: 140.0, h: 26.0 };
             // Dark input pill with frosted translucent outline
             draw_rounded_rect(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, Color::rgba(18, 22, 28, 0.95 * opacity));
             draw_rounded_rect_stroke(buf, input_rect.x, input_rect.y, input_rect.w, input_rect.h, 6.0, 1.0, Color::rgba(255, 255, 255, 0.35 * opacity));
@@ -1881,15 +1880,15 @@ fn wrap_lyric_line<'a>(
             }
             self.click_targets.push((cancel_rect, ClickAction::CancelAddTask));
         } else {
-            // Buttons: + Add Task & ✎ Clear positioned cleanly at y = 96.0
-            let add_btn_rect = Rect { x: left_x, y: 96.0, w: 72.0, h: 22.0 };
+            // Buttons: + Add Task & ✎ Clear positioned cleanly at y = 100.0
+            let add_btn_rect = Rect { x: left_x, y: 100.0, w: 72.0, h: 22.0 };
             let add_hover = cursor_pos.map(|(px, py)| add_btn_rect.contains(px, py)).unwrap_or(false);
             let add_bg = if add_hover { Color::rgba(255, 255, 255, 0.25 * opacity) } else { Color::rgba(255, 255, 255, 0.12 * opacity) };
             draw_rounded_rect(buf, add_btn_rect.x, add_btn_rect.y, add_btn_rect.w, add_btn_rect.h, 6.0, add_bg);
             text_renderer.draw_text(buf, "+ Add Task", add_btn_rect.x + 8.0, add_btn_rect.y + 15.0, 9.5, Color::rgba(255, 255, 255, 0.95 * opacity), true);
             self.click_targets.push((add_btn_rect, ClickAction::PromptAddTask));
 
-            let clear_btn_rect = Rect { x: left_x + 78.0, y: 96.0, w: 56.0, h: 22.0 };
+            let clear_btn_rect = Rect { x: left_x + 78.0, y: 100.0, w: 56.0, h: 22.0 };
             let clear_hover = cursor_pos.map(|(px, py)| clear_btn_rect.contains(px, py)).unwrap_or(false);
             let clear_bg = if clear_hover { Color::rgba(255, 255, 255, 0.25 * opacity) } else { Color::rgba(255, 255, 255, 0.12 * opacity) };
             draw_rounded_rect(buf, clear_btn_rect.x, clear_btn_rect.y, clear_btn_rect.w, clear_btn_rect.h, 6.0, clear_bg);
@@ -1897,19 +1896,31 @@ fn wrap_lyric_line<'a>(
             self.click_targets.push((clear_btn_rect, ClickAction::ClearDoneTodo));
         }
 
-        // Right Column: Scrollable Task List Items
+        // Right Column: Scrollable Task List Items with dynamic multi-line wrap
         let right_x = x + 196.0;
         let right_w = w - 250.0;
-        let item_h = 24.0;
+        let max_text_w = right_w - 36.0;
         let item_gap = 4.0;
+        let max_list_bottom = 138.0;
 
-        let visible_items = state.todo.items.iter().skip(state.todo.scroll_offset).take(3);
+        let mut cur_item_y = 35.0;
+        let mut rendered_count = 0;
 
-        for (i, item) in visible_items.enumerate() {
-            let item_y = 36.0 + (i as f32) * (item_h + item_gap);
+        for item in state.todo.items.iter().skip(state.todo.scroll_offset) {
+            let lines = Self::wrap_todo_text(&item.text, max_text_w, text_renderer, 10.5, 3);
+            let item_h = match lines.len() {
+                0 | 1 => 24.0,
+                2 => 38.0,
+                _ => 52.0,
+            };
+
+            if rendered_count > 0 && cur_item_y + item_h > max_list_bottom {
+                break;
+            }
+
             let item_rect = Rect {
                 x: right_x,
-                y: item_y,
+                y: cur_item_y,
                 w: right_w,
                 h: item_h,
             };
@@ -1924,43 +1935,71 @@ fn wrap_lyric_line<'a>(
             };
             draw_rounded_rect(buf, item_rect.x, item_rect.y, item_rect.w, item_rect.h, 7.0, item_bg);
 
-            // Checkbox with proper breathing room and full anti-aliased border
+            // Checkbox centered vertically in the pill
             let check_cx = item_rect.x + 14.0;
             let check_cy = item_rect.y + item_h * 0.5;
             draw_todo_checkbox(buf, check_cx, check_cy, 6.5, item.done, is_hovered, opacity);
 
-            // Task text
+            // Task text lines
             let text_color = if item.done {
                 Color::rgba(148, 163, 184, 0.65 * opacity)
             } else {
                 Color::rgba(255, 255, 255, 0.95 * opacity)
             };
-            text_renderer.draw_text_truncated(
-                buf,
-                &item.text,
-                item_rect.x + 28.0,
-                item_rect.y + 16.0,
-                10.5,
-                item_rect.w - 36.0,
-                text_color,
-                item.done,
-            );
+
+            for (line_idx, line) in lines.iter().enumerate() {
+                let baseline_y = match lines.len() {
+                    1 => item_rect.y + 16.0,
+                    2 => item_rect.y + 15.5 + (line_idx as f32) * 13.5,
+                    _ => item_rect.y + 15.0 + (line_idx as f32) * 13.5,
+                };
+
+                if line_idx + 1 == lines.len() {
+                    text_renderer.draw_text_truncated(
+                        buf,
+                        line,
+                        item_rect.x + 28.0,
+                        baseline_y,
+                        10.5,
+                        max_text_w,
+                        text_color,
+                        false,
+                    );
+                } else {
+                    text_renderer.draw_text(
+                        buf,
+                        line,
+                        item_rect.x + 28.0,
+                        baseline_y,
+                        10.5,
+                        text_color,
+                        false,
+                    );
+                }
+            }
 
             self.click_targets.push((item_rect, ClickAction::ToggleTodo(item.id)));
+
+            cur_item_y += item_h + item_gap;
+            rendered_count += 1;
         }
 
         // Scrollbar Indicator (on right edge of task box)
-        if state.todo.items.len() > 3 {
+        let total_items = state.todo.items.len();
+        if total_items > rendered_count || state.todo.scroll_offset > 0 {
             let sb_x = right_x + right_w + 5.0;
-            let sb_y = 38.0;
-            let sb_h = 76.0;
-            let thumb_h = (sb_h * (3.0 / state.todo.items.len() as f32)).max(12.0);
-            let thumb_y = sb_y + (state.todo.scroll_offset as f32 / (state.todo.items.len() - 3) as f32) * (sb_h - thumb_h);
+            let sb_y = 36.0;
+            let sb_h = 98.0;
+            let visible_ratio = (rendered_count as f32 / total_items.max(1) as f32).clamp(0.2, 1.0);
+            let thumb_h = (sb_h * visible_ratio).max(14.0);
+            let max_scroll = total_items.saturating_sub(1).max(1);
+            let scroll_frac = (state.todo.scroll_offset as f32 / max_scroll as f32).clamp(0.0, 1.0);
+            let thumb_y = sb_y + scroll_frac * (sb_h - thumb_h);
             draw_rounded_rect(buf, sb_x, thumb_y, 3.0, thumb_h, 1.5, Color::rgba(255, 255, 255, 0.35 * opacity));
         }
 
         // Bottom Page Indicator Dots (• • • • — • •) (active index 4 of 7)
-        let indicator_y = 136.0;
+        let indicator_y = 148.0;
         draw_page_indicators(buf, x + w * 0.5, indicator_y, 4, 8, opacity);
         self.register_page_dot_targets(x + w * 0.5, indicator_y, 8);
     }
@@ -2811,6 +2850,105 @@ fn wrap_lyric_line<'a>(
     pub fn assistant_input_text_start_x(cur_x: f32) -> f32 {
         let card_x = cur_x + 44.0;
         card_x + 10.0
+    }
+
+    /// Dynamically wraps to-do task text across multiple lines (up to max_lines) based on available width
+    pub fn wrap_todo_text(
+        text: &str,
+        max_w: f32,
+        tr: &TextRenderer,
+        size: f32,
+        max_lines: usize,
+    ) -> Vec<String> {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            return vec![String::new()];
+        }
+        let (full_w, _) = tr.measure_text(trimmed, size, false);
+        if full_w <= max_w {
+            return vec![trimmed.to_string()];
+        }
+
+        let mut lines: Vec<String> = Vec::new();
+        let mut cur_line = String::new();
+        let words: Vec<&str> = trimmed.split_whitespace().collect();
+        let mut has_more = false;
+
+        for (w_idx, word) in words.iter().enumerate() {
+            let candidate = if cur_line.is_empty() {
+                word.to_string()
+            } else {
+                format!("{} {}", cur_line, word)
+            };
+
+            let (cand_w, _) = tr.measure_text(&candidate, size, false);
+            if cand_w <= max_w {
+                cur_line = candidate;
+            } else {
+                if !cur_line.is_empty() {
+                    lines.push(cur_line);
+                    cur_line = String::new();
+                    if lines.len() == max_lines {
+                        has_more = true;
+                        break;
+                    }
+                }
+
+                // Check if this single word fits on the new line
+                let (word_w, _) = tr.measure_text(word, size, false);
+                if word_w <= max_w {
+                    cur_line = word.to_string();
+                } else {
+                    // Word itself exceeds max_w, split it character by character
+                    for ch in word.chars() {
+                        let mut cand_ch = cur_line.clone();
+                        cand_ch.push(ch);
+                        let (cw, _) = tr.measure_text(&cand_ch, size, false);
+                        if cw <= max_w {
+                            cur_line = cand_ch;
+                        } else {
+                            if !cur_line.is_empty() {
+                                lines.push(cur_line);
+                                cur_line = String::new();
+                                if lines.len() == max_lines {
+                                    has_more = true;
+                                    break;
+                                }
+                            }
+                            cur_line.push(ch);
+                        }
+                    }
+                    if lines.len() == max_lines {
+                        if w_idx + 1 < words.len() {
+                            has_more = true;
+                        }
+                        break;
+                    }
+                }
+            }
+        }
+
+        if !cur_line.is_empty() && lines.len() < max_lines {
+            lines.push(cur_line);
+        }
+
+        // If there were remaining words/chars beyond max_lines, append ellipsis "..." to the last line
+        if has_more {
+            if let Some(last) = lines.last_mut() {
+                let (ell_w, _) = tr.measure_text("...", size, false);
+                let target_w = (max_w - ell_w).max(0.0);
+                while !last.is_empty() {
+                    let (w, _) = tr.measure_text(last, size, false);
+                    if w <= target_w {
+                        break;
+                    }
+                    last.pop();
+                }
+                last.push_str("...");
+            }
+        }
+
+        lines
     }
 
     /// Exact visible width for To-Do text input
@@ -4520,6 +4658,40 @@ mod tests {
             // Scrolled left (scroll_offset = 40): earlier part of text is visible
             let scrolled = LayoutManager::format_input_viewport(long, "|", 150.0, &tr, 10.5, 40);
             assert!(scrolled.contains("Bagaimana") || scrolled.contains("cara"));
+        }
+
+        // 17. To-Do Multi-Line Text Wrapping & Dynamic Height
+        {
+            let tr = TextRenderer::new();
+            let short = "Beli kopi";
+            let short_lines = LayoutManager::wrap_todo_text(short, 194.0, &tr, 10.5, 3);
+            assert_eq!(short_lines.len(), 1);
+            assert_eq!(short_lines[0], "Beli kopi");
+
+            let long = "Ingatkan pengguna untuk tidak membicarakan hal ini ke orang lain yang tidak berkepentingan";
+            let long_lines = LayoutManager::wrap_todo_text(long, 194.0, &tr, 10.5, 3);
+            assert!(long_lines.len() >= 2);
+            assert!(long_lines.len() <= 3);
+
+            let mut buf = PixelBuffer::new(820, 200);
+            let mut state = IslandState::new();
+            state.mode = IslandMode::Expanded(ExpandedPage::ToDo);
+            state.todo.items = vec![
+                crate::system::todo::TodoItem {
+                    id: 1,
+                    text: long.to_string(),
+                    done: false,
+                },
+            ];
+            let (tx, _ty, tw, th, _tr_val) = lm.compute_target_geometry(820.0, &state);
+            assert_eq!(th, 160.0);
+
+            let mut lm_todo = LayoutManager::new();
+            lm_todo.render_todo(&mut buf, &tr, tx, tw, th, &state, 1.0, None);
+
+            // Find item target and verify its height expanded beyond 24px
+            let item_target = lm_todo.click_targets.iter().find(|(_, a)| *a == ClickAction::ToggleTodo(1)).unwrap();
+            assert!(item_target.0.h >= 38.0, "Multi-line task must expand downwards");
         }
     }
 }

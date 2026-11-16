@@ -184,7 +184,7 @@ impl TodoList {
     }
 
     pub fn scroll_down(&mut self) {
-        if self.scroll_offset + 3 < self.items.len() {
+        if self.scroll_offset + 1 < self.items.len() {
             self.scroll_offset += 1;
         }
     }
@@ -286,5 +286,38 @@ mod tests {
         assert_eq!(reloaded_after_clear.items.len(), remaining);
 
         let _ = fs::remove_file(&test_path);
+    }
+
+    #[test]
+    fn test_todo_scrolling() {
+        let mut list = TodoList {
+            items: vec![
+                TodoItem { id: 1, text: "Task 1".to_string(), done: false },
+                TodoItem { id: 2, text: "Task 2".to_string(), done: false },
+                TodoItem { id: 3, text: "Task 3".to_string(), done: false },
+            ],
+            next_id: 4,
+            scroll_offset: 0,
+            is_input_active: false,
+            input: crate::ui::TextInput::new(50),
+            file_path: std::env::temp_dir().join("test_scroll.json"),
+        };
+
+        // Scroll down step by step
+        list.scroll_down();
+        assert_eq!(list.scroll_offset, 1);
+        list.scroll_down();
+        assert_eq!(list.scroll_offset, 2);
+        // At end: cannot scroll past last item
+        list.scroll_down();
+        assert_eq!(list.scroll_offset, 2);
+
+        // Scroll back up
+        list.scroll_up();
+        assert_eq!(list.scroll_offset, 1);
+        list.scroll_up();
+        assert_eq!(list.scroll_offset, 0);
+        list.scroll_up();
+        assert_eq!(list.scroll_offset, 0);
     }
 }

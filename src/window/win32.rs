@@ -14,8 +14,8 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::Ole::{RegisterDragDrop, RevokeDragDrop, IDropTarget};
 use windows::Win32::UI::Shell::DragAcceptFiles;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, GetSystemMetrics, RegisterClassExW,
-    SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST, SM_CXSCREEN,
+    CreateWindowExW, DestroyWindow, RegisterClassExW,
+    SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST,
     SWP_NOACTIVATE, SW_SHOW, ULW_ALPHA, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_POPUP,
 };
@@ -40,7 +40,7 @@ unsafe impl Send for Win32LayeredWindow {}
 pub type WndProcFn = unsafe extern "system" fn(HWND, u32, WPARAM, LPARAM) -> LRESULT;
 
 impl Win32LayeredWindow {
-    pub fn create(title: &str, wnd_proc: WndProcFn) -> Result<Self, windows::core::Error> {
+    pub fn create(title: &str, wnd_proc: WndProcFn, win_x: i32, win_y: i32) -> Result<Self, windows::core::Error> {
         let title_w: Vec<u16> = std::ffi::OsStr::new(title)
             .encode_wide()
             .chain(std::iter::once(0))
@@ -60,10 +60,6 @@ impl Win32LayeredWindow {
             };
 
             RegisterClassExW(&wnd_class);
-
-            let screen_w = GetSystemMetrics(SM_CXSCREEN);
-            let win_x = (screen_w - CANVAS_W as i32) / 2;
-            let win_y = 0; // Anchored flush to the top of the screen!
 
             let ex_style = WS_EX_TOPMOST | WS_EX_LAYERED | WS_EX_TOOLWINDOW;
             let style = WS_POPUP;
@@ -141,6 +137,26 @@ impl Win32LayeredWindow {
                 win_x,
                 win_y,
             })
+        }
+    }
+
+    /// Repositions the layered window to new screen coordinates (e.g. across multiple monitors)
+    pub fn move_to(&mut self, new_x: i32, new_y: i32) {
+        if self.win_x != new_x || self.win_y != new_y {
+            self.win_x = new_x;
+            self.win_y = new_y;
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::SetWindowPos(
+                    self.hwnd,
+                    windows::Win32::UI::WindowsAndMessaging::HWND_TOPMOST,
+                    new_x,
+                    new_y,
+                    CANVAS_W as i32,
+                    CANVAS_H as i32,
+                    windows::Win32::UI::WindowsAndMessaging::SWP_NOACTIVATE
+                        | windows::Win32::UI::WindowsAndMessaging::SWP_NOSIZE,
+                );
+            }
         }
     }
 
