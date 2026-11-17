@@ -138,12 +138,12 @@ pub struct WeatherManager {
 
 impl WeatherManager {
     pub fn new(hwnd: HWND) -> Self {
-        // 1. Instantly load persistent disk cache if available
-        let (initial_info, init_lat, init_lon, init_city, init_geo) =
+        // 1. Instantly load persistent disk cache if available for 0ms startup display
+        let (initial_info, init_lat, init_lon, init_city) =
             if let Some((lat, lon, city, cached)) = load_cache_from_disk() {
-                (cached, lat, lon, city, true)
+                (cached, lat, lon, city)
             } else {
-                (WeatherInfo::default(), -6.2, 106.8, "Jakarta".to_string(), false)
+                (WeatherInfo::default(), -6.2, 106.8, "Jakarta".to_string())
             };
 
         let info = Arc::new(RwLock::new(initial_info));
@@ -168,10 +168,11 @@ impl WeatherManager {
                 let mut cached_lat = init_lat;
                 let mut cached_lon = init_lon;
                 let mut cached_city = init_city;
-                let mut geo_resolved = init_geo;
+                // Always re-resolve live geolocation on startup so location is accurate and never stale!
+                let mut geo_resolved = false;
 
                 while running_clone.load(Ordering::Relaxed) {
-                    // 1. Geolocation lookup if not yet resolved
+                    // 1. Geolocation lookup if not yet resolved or if refresh requested
                     if !geo_resolved {
                         if let Ok(ip_json) = fetch_url_native("http://ip-api.com/json") {
                             if let (Some(lat), Some(lon)) = (
@@ -240,6 +241,7 @@ impl WeatherManager {
                                 return;
                             }
                             if refresh_requested_clone.swap(false, Ordering::SeqCst) {
+                                geo_resolved = false;
                                 break;
                             }
                             thread::park_timeout(Duration::from_secs(1));
@@ -251,6 +253,7 @@ impl WeatherManager {
                                 return;
                             }
                             if refresh_requested_clone.swap(false, Ordering::SeqCst) {
+                                geo_resolved = false;
                                 break;
                             }
                             thread::park_timeout(Duration::from_secs(10));
@@ -306,29 +309,32 @@ fn get_cache_file_path() -> Option<PathBuf> {
     Some(island_dir.join("weather_cache.txt"))
 }
 
+fn save_cache_to_path(path: &std::path::Path, lat: f32, lon: f32, city: &str, info: &WeatherInfo) {
+    let content = format!(
+        "city={}\nlat={}\nlon={}\ntemperature={}\napparent_temperature={}\nweather_code={}\nis_day={}\nrelative_humidity={}\nwind_speed={}\ntemp_max={}\ntemp_min={}\n",
+        city,
+        lat,
+        lon,
+        info.temperature,
+        info.apparent_temperature,
+        info.weather_code,
+        if info.is_day { 1 } else { 0 },
+        info.relative_humidity,
+        info.wind_speed,
+        info.temp_max,
+        info.temp_min,
+    );
+    let _ = std::fs::write(path, content);
+}
+
 fn save_cache_to_disk(lat: f32, lon: f32, city: &str, info: &WeatherInfo) {
     if let Some(path) = get_cache_file_path() {
-        let content = format!(
-            "city={}\nlat={}\nlon={}\ntemperature={}\napparent_temperature={}\nweather_code={}\nis_day={}\nrelative_humidity={}\nwind_speed={}\ntemp_max={}\ntemp_min={}\n",
-            city,
-            lat,
-            lon,
-            info.temperature,
-            info.apparent_temperature,
-            info.weather_code,
-            if info.is_day { 1 } else { 0 },
-            info.relative_humidity,
-            info.wind_speed,
-            info.temp_max,
-            info.temp_min,
-        );
-        let _ = std::fs::write(path, content);
+        save_cache_to_path(&path, lat, lon, city, info);
     }
 }
 
-fn load_cache_from_disk() -> Option<(f32, f32, String, WeatherInfo)> {
-    let path = get_cache_file_path()?;
-    let content = std::fs::read_to_string(&path).ok()?;
+fn load_cache_from_path(path: &std::path::Path) -> Option<(f32, f32, String, WeatherInfo)> {
+    let content = std::fs::read_to_string(path).ok()?;
     let mut city = "Current Location".to_string();
     let mut lat = -6.2;
     let mut lon = 106.8;
@@ -361,7 +367,7 @@ fn load_cache_from_disk() -> Option<(f32, f32, String, WeatherInfo)> {
         }
     }
 
-    let modified_time = std::fs::metadata(&path)
+    let modified_time = std::fs::metadata(path)
         .and_then(|m| m.modified())
         .ok();
     let is_stale = modified_time
@@ -391,6 +397,11 @@ fn load_cache_from_disk() -> Option<(f32, f32, String, WeatherInfo)> {
     };
 
     Some((lat, lon, city, info))
+}
+
+fn load_cache_from_disk() -> Option<(f32, f32, String, WeatherInfo)> {
+    let path = get_cache_file_path()?;
+    load_cache_from_path(&path)
 }
 
 /// Zero-dependency, ultra-lightweight JSON numeric parser
@@ -529,8 +540,10 @@ mod tests {
             last_updated: Instant::now(),
         };
 
-        save_cache_to_disk(35.68, 139.69, "Tokyo", &info);
-        let loaded = load_cache_from_disk();
+        let temp_test_file = std::env::temp_dir().join("ndi_weather_cache_unit_test.txt");
+        save_cache_to_path(&temp_test_file, 35.68, 139.69, "Tokyo", &info);
+        let loaded = load_cache_from_path(&temp_test_file);
+        let _ = std::fs::remove_file(&temp_test_file);
         assert!(loaded.is_some());
         let (lat, lon, city, cached) = loaded.unwrap();
         assert_eq!(city, "Tokyo");
