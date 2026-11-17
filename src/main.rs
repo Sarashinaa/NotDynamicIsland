@@ -271,6 +271,21 @@ fn extract_timer_intent(lower: &str) -> Option<u32> {
 }
 
 fn handle_assistant_local_command(prompt: &str, _hwnd: HWND, app: &mut App) -> bool {
+    if handle_assistant_local_command_inner(prompt, app) {
+        if !app.island_state.assistant.last_response.is_empty() {
+            app.island_state.assistant.messages.push(system::assistant::ChatMessage {
+                is_user: false,
+                text: app.island_state.assistant.last_response.clone(),
+                timestamp: Instant::now(),
+            });
+        }
+        true
+    } else {
+        false
+    }
+}
+
+fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
     let lower = prompt.trim().to_lowercase();
     if lower == "clear" || lower == "bersihkan" || lower == "hapus chat" {
         app.island_state.assistant.clear();
@@ -1277,7 +1292,15 @@ pub unsafe extern "system" fn window_proc(
                         Some(ClickAction::AssistantSubmitPrompt) => {
                             if let Some(prompt) = app.island_state.assistant.commit_prompt() {
                                 if !handle_assistant_local_command(&prompt, hwnd, app) {
-                                    app.assistant_manager.submit_prompt(prompt, hwnd);
+                                    let history: Vec<system::assistant::ChatMessage> = if app.island_state.assistant.messages.len() > 1 {
+                                        let all = &app.island_state.assistant.messages;
+                                        let count = all.len() - 1;
+                                        let start = count.saturating_sub(6);
+                                        all[start..count].to_vec()
+                                    } else {
+                                        Vec::new()
+                                    };
+                                    app.assistant_manager.submit_prompt(prompt, history, hwnd);
                                 }
                             }
                             wake_animation(hwnd, app);
@@ -1752,7 +1775,15 @@ pub unsafe extern "system" fn window_proc(
                             // Enter: commit prompt
                             if let Some(prompt) = app.island_state.assistant.commit_prompt() {
                                 if !handle_assistant_local_command(&prompt, hwnd, app) {
-                                    app.assistant_manager.submit_prompt(prompt, hwnd);
+                                    let history: Vec<system::assistant::ChatMessage> = if app.island_state.assistant.messages.len() > 1 {
+                                        let all = &app.island_state.assistant.messages;
+                                        let count = all.len() - 1;
+                                        let start = count.saturating_sub(6);
+                                        all[start..count].to_vec()
+                                    } else {
+                                        Vec::new()
+                                    };
+                                    app.assistant_manager.submit_prompt(prompt, history, hwnd);
                                 }
                             }
                             wake_animation(hwnd, app);

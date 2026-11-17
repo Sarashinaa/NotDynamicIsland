@@ -102,12 +102,39 @@ const APP_ALIASES: &[(&[&str], AppAlias)] = &[
         },
     ),
     (
-        &["note", "notes", "catatan", "notepad", "noteped", "teks"],
+        &["notepad", "noteped"],
         AppAlias {
             search_keyword: "notepad",
             executable: "notepad.exe",
             uri_scheme: None,
             friendly_name: "Notepad",
+        },
+    ),
+    (
+        &["onenote", "one note", "ms onenote", "microsoft onenote"],
+        AppAlias {
+            search_keyword: "onenote",
+            executable: "onenote.exe",
+            uri_scheme: Some("onenote:"),
+            friendly_name: "Microsoft OneNote",
+        },
+    ),
+    (
+        &[
+            "stickynotes",
+            "sticky_notes",
+            "sticky note",
+            "sticky notes",
+            "stickynote",
+            "sticky",
+            "stiky note",
+            "stiky notes",
+        ],
+        AppAlias {
+            search_keyword: "sticky",
+            executable: "stikybl.exe",
+            uri_scheme: Some("ms-sticky-notes:"),
+            friendly_name: "Sticky Notes",
         },
     ),
     (
@@ -271,6 +298,19 @@ pub enum AppLaunchIntent {
     LockWorkstation,
 }
 
+/// Identifies generic or ambiguous app requests that should NOT be eagerly launched offline,
+/// but instead routed to Groq AI for conversational disambiguation (e.g. asking which note/browser app).
+pub fn is_ambiguous_app_target(target: &str) -> bool {
+    let lower = target.trim().to_lowercase();
+    match lower.as_str() {
+        "note" | "notes" | "catatan" | "teks" | "aplikasi catatan" | "app catatan" | "buku catatan" => true,
+        "browser" | "peramban" | "web" | "web browser" | "aplikasi browser" | "app browser" | "internet" => true,
+        "terminal" | "konsol" | "console" | "cli" | "command line" => true,
+        "office" | "ms office" | "microsoft office" => true,
+        _ => false,
+    }
+}
+
 /// Natural language extractor for offline 0ms execution of Windows commands
 pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
     let lower = prompt.trim().to_lowercase();
@@ -427,6 +467,12 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
     }
 
     // 5. Open App with typos / aliases
+    // Ambiguous targets (e.g. "note", "catatan", "browser", "terminal", "office")
+    // must NOT be eagerly launched. They require Groq AI clarification!
+    if is_ambiguous_app_target(&lower) {
+        return None;
+    }
+
     // Direct alias match without prefix: "wa", "dc", "spoti", "wrod", "eksel", "tele", "kalkulator"
     if let Some(alias) = resolve_app_alias(&lower) {
         return Some(AppLaunchIntent::OpenApp {
@@ -444,6 +490,8 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
         "launch ",
         "start ",
         "nyalakan ",
+        "bisa buka ",
+        "tolong jalankan ",
     ];
 
     for prefix in &prefixes {
@@ -458,6 +506,12 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
 
             if target.is_empty() {
                 continue;
+            }
+
+            // Ambiguous targets (e.g. "note", "catatan", "browser", "terminal", "office")
+            // must NOT be eagerly launched. Let Groq AI ask for clarification!
+            if is_ambiguous_app_target(target) {
+                return None;
             }
 
             // If target matches known alias or generic app
@@ -865,17 +919,36 @@ mod tests {
             "Kalkulator"
         );
         assert_eq!(
-            resolve_app_alias("note").unwrap().friendly_name,
+            resolve_app_alias("notepad").unwrap().friendly_name,
             "Notepad"
         );
         assert_eq!(
-            resolve_app_alias("notes").unwrap().friendly_name,
-            "Notepad"
+            resolve_app_alias("onenote").unwrap().friendly_name,
+            "Microsoft OneNote"
         );
         assert_eq!(
-            resolve_app_alias("catatan").unwrap().friendly_name,
-            "Notepad"
+            resolve_app_alias("sticky notes").unwrap().friendly_name,
+            "Sticky Notes"
         );
+    }
+
+    #[test]
+    fn test_is_ambiguous_app_target() {
+        assert!(is_ambiguous_app_target("note"));
+        assert!(is_ambiguous_app_target("notes"));
+        assert!(is_ambiguous_app_target("catatan"));
+        assert!(is_ambiguous_app_target("browser"));
+        assert!(is_ambiguous_app_target("peramban"));
+        assert!(is_ambiguous_app_target("terminal"));
+        assert!(is_ambiguous_app_target("office"));
+
+        assert!(!is_ambiguous_app_target("notepad"));
+        assert!(!is_ambiguous_app_target("onenote"));
+        assert!(!is_ambiguous_app_target("sticky notes"));
+        assert!(!is_ambiguous_app_target("chrome"));
+        assert!(!is_ambiguous_app_target("brave"));
+        assert!(!is_ambiguous_app_target("wa"));
+        assert!(!is_ambiguous_app_target("discord"));
     }
 
     #[test]
@@ -945,11 +1018,32 @@ mod tests {
             })
         );
 
+        // Ambiguous queries must return None so Groq AI asks for clarification
+        assert_eq!(extract_launch_intent("buka Note"), None);
+        assert_eq!(extract_launch_intent("tolong buka catatan dong"), None);
+        assert_eq!(extract_launch_intent("buka browser"), None);
+        assert_eq!(extract_launch_intent("buka terminal"), None);
+
+        // Specific queries must be handled fast offline
         assert_eq!(
-            extract_launch_intent("buka Note"),
+            extract_launch_intent("buka notepad"),
             Some(AppLaunchIntent::OpenApp {
-                name: "note".to_string(),
+                name: "notepad".to_string(),
                 friendly_name: "Notepad".to_string(),
+            })
+        );
+        assert_eq!(
+            extract_launch_intent("buka onenote"),
+            Some(AppLaunchIntent::OpenApp {
+                name: "onenote".to_string(),
+                friendly_name: "Microsoft OneNote".to_string(),
+            })
+        );
+        assert_eq!(
+            extract_launch_intent("buka sticky notes"),
+            Some(AppLaunchIntent::OpenApp {
+                name: "sticky notes".to_string(),
+                friendly_name: "Sticky Notes".to_string(),
             })
         );
 

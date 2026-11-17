@@ -161,7 +161,7 @@ impl AssistantManager {
         self.state.lock().map(|s| s.clone()).unwrap_or_default()
     }
 
-    pub fn submit_prompt(&self, prompt: String, hwnd: HWND) {
+    pub fn submit_prompt(&self, prompt: String, history: Vec<ChatMessage>, hwnd: HWND) {
         let trimmed = prompt.trim().to_string();
         if trimmed.is_empty() {
             return;
@@ -189,7 +189,7 @@ impl AssistantManager {
             .name("AssistantWorker".to_string())
             .spawn(move || {
                 let hwnd = HWND(hwnd_val as *mut _);
-                let (response, error) = execute_query(&trimmed);
+                let (response, error) = execute_query(&trimmed, &history);
 
                 if let Ok(mut p) = pending.lock() {
                     *p = Some((response, error));
@@ -262,10 +262,31 @@ pub fn load_groq_api_key() -> Option<String> {
     None
 }
 
+/// Helper to escape characters for valid JSON strings
+pub fn escape_json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len() + 16);
+    for c in s.chars() {
+        match c {
+            '\\' => out.push_str("\\\\"),
+            '"' => out.push_str("\\\""),
+            '\n' => out.push_str("\\n"),
+            '\r' => out.push_str("\\r"),
+            '\t' => out.push_str("\\t"),
+            '\u{08}' => out.push_str("\\b"),
+            '\u{0C}' => out.push_str("\\f"),
+            c if (c as u32) < 0x20 => {
+                out.push_str(&format!("\\u{:04x}", c as u32));
+            }
+            c => out.push(c),
+        }
+    }
+    out
+}
+
 /// Dispatches query to Groq (if key available) or falls back to Gemini CLI
-fn execute_query(prompt: &str) -> (String, Option<String>) {
+fn execute_query(prompt: &str, history: &[ChatMessage]) -> (String, Option<String>) {
     if let Some(groq_key) = load_groq_api_key() {
-        match execute_groq_query(&groq_key, prompt) {
+        match execute_groq_query(&groq_key, history, prompt) {
             Ok(resp) => return (clean_markdown_for_display(&resp), None),
             Err(e) => {
                 // If Groq fails, return friendly error
@@ -278,29 +299,54 @@ fn execute_query(prompt: &str) -> (String, Option<String>) {
     }
 
     // Fallback: Gemini CLI
-    let (resp, err) = execute_gemini_query(prompt);
+    let (resp, err) = execute_gemini_query(history, prompt);
     (clean_markdown_for_display(&resp), err)
 }
 
-/// Native WinHttp HTTPS POST to Groq Cloud API (Free Tier LPU)
-fn execute_groq_query(api_key: &str, prompt: &str) -> Result<String, String> {
+/// Native WinHttp HTTPS POST to Groq Cloud API (Free Tier LPU) with multi-turn history & disambiguation
+fn execute_groq_query(api_key: &str, history: &[ChatMessage], prompt: &str) -> Result<String, String> {
     let host = "api.groq.com";
     let path = "/openai/v1/chat/completions";
 
     let host_w: Vec<u16> = host.encode_utf16().chain(std::iter::once(0)).collect();
     let path_w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
-    // Escape prompt text for JSON body
-    let escaped_prompt = prompt
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('\n', "\\n")
-        .replace('\r', "\\r")
-        .replace('\t', "\\t");
+    let system_content = "Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 1-3 baris dalam Bahasa Indonesia. Pahami typo, singkatan, dan slang umum Windows (wa->whatsapp, dc->discord, wrod/word->winword, eksel->excel, spoti->spotify, tele->telegram, kalkulator->calc, krom->chrome, brv->brave, wt->terminal, cmd->cmd, pwsh->powershell).\\n\\n[KLARIFIKASI PENTING]: Jika pengguna meminta untuk membuka sesuatu yang tidak spesifik, ambigu, atau memiliki banyak alternatif di Windows (contoh: 'note' / 'catatan' bisa Notepad, OneNote, atau Sticky Notes; 'browser' bisa Chrome, Brave, atau Edge; 'terminal' bisa Windows Terminal, PowerShell, atau CMD; 'office' bisa Word, Excel, atau PowerPoint):\\nJANGAN langsung membuka dan JANGAN keluarkan tag aksi! Tanyakan klarifikasi dengan ramah dan sebutkan 2-3 pilihan aplikasi tersebut secara singkat (contoh: 'Ada beberapa aplikasi catatan: Notepad, OneNote, atau Sticky Notes. Yang mana yang ingin dibuka?').\\n\\n[EKSEKUSI AKSI]: Jika permintaan sudah jelas/spesifik atau pengguna telah memilih salah satu pilihan pada percakapan lanjutan, berikan konfirmasi singkat dan WAJIB sertakan SATU tag aksi di baris paling akhir:\\n[ACTION:OPEN:app_name]\\n[ACTION:BROWSER:browser:profile]\\n[ACTION:EXPLORER:folder]\\n[ACTION:FILE_NEW:folder:file]\\n[ACTION:LOCK]\\n[ACTION:TODO:teks]\\n[ACTION:TIMER:menit]\\n[ACTION:MUTE]\\n[ACTION:SNIP]\\n[ACTION:WEATHER]";
 
-    let json_body = format!(
-        r#"{{"model":"qwen/qwen3.8-27b","messages":[{{"role":"system","content":"Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 2-4 baris dalam Bahasa Indonesia. Pahami typo, singkatan, dan slang pengguna (contoh: wa -> whatsapp, dc -> discord, wrod/word -> winword, eksel -> excel, spoti -> spotify, tele -> telegram, catatan -> notepad, kalkulator -> calc, krom -> chrome, brv -> brave, kunci pc -> lock). Jika pengguna meminta tindakan, sertakan tag perintah di baris paling akhir: [ACTION:OPEN:app_name], [ACTION:BROWSER:browser:profile], [ACTION:EXPLORER:folder], [ACTION:FILE_NEW:folder:file], [ACTION:LOCK], [ACTION:TODO:teks], [ACTION:TIMER:menit], [ACTION:MUTE], [ACTION:SNIP], [ACTION:WEATHER]."}},{{"role":"user","content":"{}"}}],"max_tokens":350}}"#,
+    let mut messages_json = Vec::new();
+    messages_json.push(format!(
+        r#"{{"role":"system","content":"{}"}}"#,
+        system_content
+    ));
+
+    // Include up to 6 recent messages from history (multi-turn context)
+    let recent_history = if history.len() > 6 {
+        &history[history.len() - 6..]
+    } else {
+        history
+    };
+
+    for msg in recent_history {
+        let role = if msg.is_user { "user" } else { "assistant" };
+        let escaped = escape_json_str(&msg.text);
+        if !escaped.is_empty() {
+            messages_json.push(format!(
+                r#"{{"role":"{}","content":"{}"}}"#,
+                role, escaped
+            ));
+        }
+    }
+
+    let escaped_prompt = escape_json_str(prompt);
+    messages_json.push(format!(
+        r#"{{"role":"user","content":"{}"}}"#,
         escaped_prompt
+    ));
+
+    let messages_array = messages_json.join(",");
+    let json_body = format!(
+        r#"{{"model":"qwen/qwen3.8-27b","messages":[{}],"max_tokens":350}}"#,
+        messages_array
     );
     let body_bytes = json_body.as_bytes();
 
@@ -489,11 +535,29 @@ pub fn clean_markdown_for_display(text: &str) -> String {
 }
 
 /// Executes gemini headless query via CLI subprocess (fallback)
-fn execute_gemini_query(prompt: &str) -> (String, Option<String>) {
-    let concise_prompt = format!(
-        "Jawab pertanyaan berikut secara langsung, ringkas, dan to-the-point dalam 1-3 kalimat dalam Bahasa Indonesia. Pahami typo/singkatan aplikasi (wa->whatsapp, dc->discord, wrod->winword, eksel->excel). Jika ada aksi, sertakan tag di baris akhir: [ACTION:OPEN:app], [ACTION:BROWSER:browser:profile], [ACTION:EXPLORER:folder], [ACTION:FILE_NEW:folder:file], [ACTION:LOCK], [ACTION:TODO:teks], [ACTION:TIMER:menit]: {}",
-        prompt
-    );
+fn execute_gemini_query(history: &[ChatMessage], prompt: &str) -> (String, Option<String>) {
+    let mut history_context = String::new();
+    let recent_history = if history.len() > 6 {
+        &history[history.len() - 6..]
+    } else {
+        history
+    };
+    for msg in recent_history {
+        let sender = if msg.is_user { "Pengguna" } else { "Asisten" };
+        history_context.push_str(&format!("{}: {}\n", sender, msg.text));
+    }
+
+    let concise_prompt = if history_context.is_empty() {
+        format!(
+            "Jawab pertanyaan berikut secara langsung, ringkas, dan to-the-point dalam 1-3 kalimat dalam Bahasa Indonesia. Pahami typo/singkatan aplikasi (wa->whatsapp, dc->discord, wrod->winword, eksel->excel). Jika ambigu (contoh 'note', 'browser', 'terminal'), jangan buka dulu, tanyakan klarifikasi 2-3 pilihan. Jika jelas/memilih, sertakan tag di baris akhir: [ACTION:OPEN:app], [ACTION:BROWSER:browser:profile], [ACTION:EXPLORER:folder], [ACTION:FILE_NEW:folder:file], [ACTION:LOCK], [ACTION:TODO:teks], [ACTION:TIMER:menit]: {}",
+            prompt
+        )
+    } else {
+        format!(
+            "Riwayat percakapan:\n{}\nPengguna: {}\nJika ambigu, tanyakan klarifikasi. Jika jelas/memilih, sertakan tag aksi di baris akhir [ACTION:OPEN:app], dll. Jawab ringkas 1-3 kalimat Bahasa Indonesia:",
+            history_context, prompt
+        )
+    };
 
     let (tx, rx) = std::sync::mpsc::channel();
     let prompt_owned = concise_prompt;
@@ -670,9 +734,50 @@ mod tests {
     #[test]
     fn test_live_groq_winhttp_query() {
         if let Some(key) = load_groq_api_key() {
-            let res = execute_groq_query(&key, "halo");
+            let res = execute_groq_query(&key, &[], "halo");
             println!("Groq WinHttp live query result: {:?}", res);
             assert!(res.is_ok(), "Groq query failed: {:?}", res);
+        }
+    }
+
+    #[test]
+    fn test_groq_disambiguation_multi_turn() {
+        if let Some(key) = load_groq_api_key() {
+            // Turn 1: Ambiguous request
+            let turn1 = execute_groq_query(&key, &[], "tolong buka note");
+            assert!(turn1.is_ok());
+            let turn1_resp = turn1.unwrap();
+            println!("Turn 1 disambiguation response: {}", turn1_resp);
+            // Must ask clarification and NOT eagerly execute a blind action tag
+            let lower1 = turn1_resp.to_lowercase();
+            assert!(
+                lower1.contains("notepad") || lower1.contains("onenote") || lower1.contains("sticky") || lower1.contains("catatan"),
+                "Expected clarification question mentioning options, got: {}",
+                turn1_resp
+            );
+
+            // Turn 2: User responds with selection using multi-turn context
+            let history = [
+                ChatMessage {
+                    is_user: true,
+                    text: "tolong buka note".to_string(),
+                    timestamp: Instant::now(),
+                },
+                ChatMessage {
+                    is_user: false,
+                    text: turn1_resp,
+                    timestamp: Instant::now(),
+                },
+            ];
+            let turn2 = execute_groq_query(&key, &history, "yang pertama");
+            assert!(turn2.is_ok());
+            let turn2_resp = turn2.unwrap();
+            println!("Turn 2 selection response: {}", turn2_resp);
+            assert!(
+                turn2_resp.contains("[ACTION:OPEN:") || turn2_resp.to_lowercase().contains("notepad"),
+                "Expected action tag or confirmation for notepad, got: {}",
+                turn2_resp
+            );
         }
     }
 }
