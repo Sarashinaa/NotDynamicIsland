@@ -282,19 +282,28 @@ fn handle_assistant_local_command(prompt: &str, _hwnd: HWND, app: &mut App) -> b
         match intent {
             system::app_launcher::AppLaunchIntent::OpenApp { name, friendly_name } => {
                 system::app_launcher::launch_or_activate_app_async(name);
-                app.island_state.assistant.last_response = format!("🚀 Membuka {}...", friendly_name);
+                app.island_state.assistant.last_response = format!("Membuka {}...", friendly_name);
                 app.island_state.assistant.is_thinking = false;
                 return true;
             }
             system::app_launcher::AppLaunchIntent::OpenBrowserProfile { browser, profile } => {
                 system::app_launcher::launch_browser_profile_async(browser.clone(), profile.clone());
-                app.island_state.assistant.last_response = format!("🌐 Membuka {} dengan profil \"{}\"...", browser, profile);
+                app.island_state.assistant.last_response = format!("Membuka {} (Profil: \"{}\")...", browser, profile);
                 app.island_state.assistant.is_thinking = false;
                 return true;
             }
             system::app_launcher::AppLaunchIntent::OpenExplorer { path } => {
+                let friendly = match path.to_lowercase().as_str() {
+                    "downloads" | "download" | "unduhan" => "Downloads",
+                    "documents" | "dokumen" => "Documents",
+                    "desktop" => "Desktop",
+                    "pictures" | "gambar" => "Pictures",
+                    "videos" | "video" => "Videos",
+                    "music" | "musik" => "Music",
+                    _ => &path,
+                };
                 system::app_launcher::open_explorer_path_async(path.clone());
-                app.island_state.assistant.last_response = format!("📁 Membuka folder {}...", path);
+                app.island_state.assistant.last_response = format!("Membuka folder {}...", friendly);
                 app.island_state.assistant.is_thinking = false;
                 return true;
             }

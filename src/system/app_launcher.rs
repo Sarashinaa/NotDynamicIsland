@@ -66,7 +66,7 @@ const APP_ALIASES: &[(&[&str], AppAlias)] = &[
         },
     ),
     (
-        &["wrod", "wodr", "word", "ms word", "microsoft word", "winword"],
+        &["wrod", "wodr", "word", "words", "ms word", "microsoft word", "winword", "doc", "docs"],
         AppAlias {
             search_keyword: "word",
             executable: "winword.exe",
@@ -75,7 +75,7 @@ const APP_ALIASES: &[(&[&str], AppAlias)] = &[
         },
     ),
     (
-        &["eksel", "exel", "excel", "ms excel", "microsoft excel"],
+        &["eksel", "exel", "excel", "ms excel", "microsoft excel", "xls", "xlsx", "spreadsheet"],
         AppAlias {
             search_keyword: "excel",
             executable: "excel.exe",
@@ -84,7 +84,7 @@ const APP_ALIASES: &[(&[&str], AppAlias)] = &[
         },
     ),
     (
-        &["ppt", "powerpoint", "power point", "ms powerpoint"],
+        &["ppt", "pptx", "powerpoint", "power point", "ms powerpoint", "slides", "presentasi"],
         AppAlias {
             search_keyword: "powerpoint",
             executable: "powerpnt.exe",
@@ -102,7 +102,7 @@ const APP_ALIASES: &[(&[&str], AppAlias)] = &[
         },
     ),
     (
-        &["catatan", "notepad", "noteped", "teks"],
+        &["note", "notes", "catatan", "notepad", "noteped", "teks"],
         AppAlias {
             search_keyword: "notepad",
             executable: "notepad.exe",
@@ -354,29 +354,76 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
         });
     }
 
-    // 4. Open specific explorer folder ("buka downloads", "buka unduhan", "buka folder downloads", "buka dokumen")
-    if lower == "buka downloads"
-        || lower == "buka unduhan"
-        || lower == "buka folder downloads"
-        || lower == "buka documents"
-        || lower == "buka dokumen"
-        || lower == "buka folder documents"
-        || lower == "buka desktop"
-        || lower == "buka folder desktop"
-        || lower == "buka pictures"
-        || lower == "buka gambar"
-        || lower == "buka folder pictures"
-    {
-        let folder = if lower.contains("download") || lower.contains("unduhan") {
-            "downloads".to_string()
-        } else if lower.contains("document") || lower.contains("dokumen") {
-            "documents".to_string()
-        } else if lower.contains("picture") || lower.contains("gambar") {
-            "pictures".to_string()
-        } else {
-            "desktop".to_string()
-        };
-        return Some(AppLaunchIntent::OpenExplorer { path: folder });
+    // 4. Open specific explorer folder
+    // Check for explicit folder commands: "buka folder ...", "open folder ...", "tolong buka folder ..."
+    let folder_prefixes = [
+        "tolong buka folder ",
+        "buka folder ",
+        "open folder ",
+        "tolong buka direktori ",
+        "buka direktori ",
+    ];
+    for pfx in &folder_prefixes {
+        if lower.starts_with(pfx) {
+            let mut target = lower[pfx.len()..].trim();
+            for suffix in &[" dong", " ya", " please", " tolong", " sekarang"] {
+                if target.ends_with(suffix) {
+                    target = target[..target.len() - suffix.len()].trim();
+                }
+            }
+            if !target.is_empty() {
+                return Some(AppLaunchIntent::OpenExplorer {
+                    path: target.to_string(),
+                });
+            }
+        }
+    }
+
+    // Common system folders with or without "folder" keyword (e.g. "buka download", "buka downloads", "buka unduhan", "buka dokumen")
+    let is_open_cmd = lower.starts_with("buka ") || lower.starts_with("open ") || lower.starts_with("tolong buka ");
+    if is_open_cmd {
+        if lower.contains("download") || lower.contains("unduhan") {
+            return Some(AppLaunchIntent::OpenExplorer {
+                path: "downloads".to_string(),
+            });
+        }
+        if lower.contains("document") || lower.contains("dokumen") {
+            return Some(AppLaunchIntent::OpenExplorer {
+                path: "documents".to_string(),
+            });
+        }
+        if lower.contains("desktop") {
+            return Some(AppLaunchIntent::OpenExplorer {
+                path: "desktop".to_string(),
+            });
+        }
+        if lower.contains("picture") || lower.contains("gambar") || lower.contains("foto") {
+            return Some(AppLaunchIntent::OpenExplorer {
+                path: "pictures".to_string(),
+            });
+        }
+        if lower.contains("video") {
+            return Some(AppLaunchIntent::OpenExplorer {
+                path: "videos".to_string(),
+            });
+        }
+        if lower.contains("music") || lower.contains("musik") || lower.contains("lagu") {
+            return Some(AppLaunchIntent::OpenExplorer {
+                path: "music".to_string(),
+            });
+        }
+    }
+
+    // Direct folder names without prefix
+    if lower == "downloads" || lower == "download" || lower == "unduhan" {
+        return Some(AppLaunchIntent::OpenExplorer {
+            path: "downloads".to_string(),
+        });
+    }
+    if lower == "documents" || lower == "dokumen" {
+        return Some(AppLaunchIntent::OpenExplorer {
+            path: "documents".to_string(),
+        });
     }
 
     // 5. Open App with typos / aliases
@@ -431,22 +478,27 @@ pub fn resolve_folder_path(hint: &str) -> PathBuf {
     let user_profile = std::env::var("USERPROFILE").unwrap_or_default();
     let base = PathBuf::from(&user_profile);
 
-    match lower.as_str() {
-        "desktop" => base.join("Desktop"),
-        "downloads" | "unduhan" => base.join("Downloads"),
-        "documents" | "dokumen" => base.join("Documents"),
-        "pictures" | "gambar" => base.join("Pictures"),
-        "videos" | "video" => base.join("Videos"),
-        "music" | "musik" => base.join("Music"),
-        _ => {
-            let p = PathBuf::from(hint.trim());
-            if p.is_absolute() {
-                p
-            } else if !user_profile.is_empty() {
-                base.join(hint.trim())
-            } else {
-                p
-            }
+    if lower.contains("download") || lower.contains("unduhan") {
+        base.join("Downloads")
+    } else if lower.contains("document") || lower.contains("dokumen") {
+        base.join("Documents")
+    } else if lower.contains("desktop") {
+        base.join("Desktop")
+    } else if lower.contains("picture") || lower.contains("gambar") || lower.contains("foto") {
+        base.join("Pictures")
+    } else if lower.contains("video") {
+        base.join("Videos")
+    } else if lower.contains("music") || lower.contains("musik") || lower.contains("lagu") {
+        base.join("Music")
+    } else {
+        let clean = hint.trim();
+        let p = PathBuf::from(clean);
+        if p.is_absolute() {
+            p
+        } else if !user_profile.is_empty() {
+            base.join(clean)
+        } else {
+            p
         }
     }
 }
@@ -524,14 +576,28 @@ pub fn open_explorer_path(folder_or_path: &str) {
         .collect();
 
     unsafe {
-        let _ = ShellExecuteW(
+        // Direct shell open for folders
+        let res = ShellExecuteW(
             None,
             windows::core::w!("open"),
-            windows::core::w!("explorer.exe"),
             PCWSTR(wide_path.as_ptr()),
+            None,
             None,
             SW_SHOWNORMAL,
         );
+        if (res.0 as usize) <= 32 {
+            // Fallback: invoke explorer.exe with quoted path
+            let quoted = format!("\"{}\"", path_str);
+            let wide_param: Vec<u16> = quoted.encode_utf16().chain(std::iter::once(0)).collect();
+            let _ = ShellExecuteW(
+                None,
+                windows::core::w!("open"),
+                windows::core::w!("explorer.exe"),
+                PCWSTR(wide_param.as_ptr()),
+                None,
+                SW_SHOWNORMAL,
+            );
+        }
     }
 }
 
@@ -799,6 +865,14 @@ mod tests {
             "Kalkulator"
         );
         assert_eq!(
+            resolve_app_alias("note").unwrap().friendly_name,
+            "Notepad"
+        );
+        assert_eq!(
+            resolve_app_alias("notes").unwrap().friendly_name,
+            "Notepad"
+        );
+        assert_eq!(
             resolve_app_alias("catatan").unwrap().friendly_name,
             "Notepad"
         );
@@ -868,6 +942,28 @@ mod tests {
             Some(AppLaunchIntent::CreateNewFile {
                 folder: "a".to_string(),
                 filename: "Catatan_Baru.txt".to_string(),
+            })
+        );
+
+        assert_eq!(
+            extract_launch_intent("buka Note"),
+            Some(AppLaunchIntent::OpenApp {
+                name: "note".to_string(),
+                friendly_name: "Notepad".to_string(),
+            })
+        );
+
+        assert_eq!(
+            extract_launch_intent("buka folder download"),
+            Some(AppLaunchIntent::OpenExplorer {
+                path: "download".to_string(),
+            })
+        );
+
+        assert_eq!(
+            extract_launch_intent("buka download"),
+            Some(AppLaunchIntent::OpenExplorer {
+                path: "downloads".to_string(),
             })
         );
 
