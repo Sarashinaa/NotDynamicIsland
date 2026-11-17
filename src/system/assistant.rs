@@ -299,7 +299,7 @@ fn execute_groq_query(api_key: &str, prompt: &str) -> Result<String, String> {
         .replace('\t', "\\t");
 
     let json_body = format!(
-        r#"{{"model":"qwen/qwen3.8-27b","messages":[{{"role":"system","content":"Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 2-4 baris dalam Bahasa Indonesia. Jika pengguna meminta tindakan seperti menambah to-do list, menyetel timer, mute mic, atau screenshot, sertakan tag perintah di baris paling akhir: [ACTION:TODO:teks tugas], [ACTION:TIMER:jumlah_menit], [ACTION:MUTE], [ACTION:SNIP], [ACTION:WEATHER]."}},{{"role":"user","content":"{}"}}],"max_tokens":350}}"#,
+        r#"{{"model":"qwen/qwen3.8-27b","messages":[{{"role":"system","content":"Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 2-4 baris dalam Bahasa Indonesia. Pahami typo, singkatan, dan slang pengguna (contoh: wa -> whatsapp, dc -> discord, wrod/word -> winword, eksel -> excel, spoti -> spotify, tele -> telegram, catatan -> notepad, kalkulator -> calc, krom -> chrome, brv -> brave, kunci pc -> lock). Jika pengguna meminta tindakan, sertakan tag perintah di baris paling akhir: [ACTION:OPEN:app_name], [ACTION:BROWSER:browser:profile], [ACTION:EXPLORER:folder], [ACTION:FILE_NEW:folder:file], [ACTION:LOCK], [ACTION:TODO:teks], [ACTION:TIMER:menit], [ACTION:MUTE], [ACTION:SNIP], [ACTION:WEATHER]."}},{{"role":"user","content":"{}"}}],"max_tokens":350}}"#,
         escaped_prompt
     );
     let body_bytes = json_body.as_bytes();
@@ -491,7 +491,7 @@ pub fn clean_markdown_for_display(text: &str) -> String {
 /// Executes gemini headless query via CLI subprocess (fallback)
 fn execute_gemini_query(prompt: &str) -> (String, Option<String>) {
     let concise_prompt = format!(
-        "Jawab pertanyaan berikut secara langsung, ringkas, dan to-the-point dalam 1-3 kalimat dalam Bahasa Indonesia. Jika pengguna meminta tindakan seperti menambah to-do list atau timer, sertakan tag di baris akhir seperti [ACTION:TODO:teks] atau [ACTION:TIMER:menit]: {}",
+        "Jawab pertanyaan berikut secara langsung, ringkas, dan to-the-point dalam 1-3 kalimat dalam Bahasa Indonesia. Pahami typo/singkatan aplikasi (wa->whatsapp, dc->discord, wrod->winword, eksel->excel). Jika ada aksi, sertakan tag di baris akhir: [ACTION:OPEN:app], [ACTION:BROWSER:browser:profile], [ACTION:EXPLORER:folder], [ACTION:FILE_NEW:folder:file], [ACTION:LOCK], [ACTION:TODO:teks], [ACTION:TIMER:menit]: {}",
         prompt
     );
 

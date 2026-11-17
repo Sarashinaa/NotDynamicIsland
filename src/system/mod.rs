@@ -1,4 +1,5 @@
 pub mod assistant;
+pub mod app_launcher;
 pub mod artwork;
 pub mod audio;
 pub mod brightness;

@@ -36,7 +36,7 @@ use ui::{ClickAction, ExpandedPage, IslandMode, IslandState, LayoutManager, Rect
 use window::{Win32LayeredWindow, CANVAS_H, CANVAS_W, TIMER_ANIMATION_ID};
 
 use windows::Win32::Foundation::{
-    GetLastError, BOOL, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM,
+    GetLastError, ERROR_ALREADY_EXISTS, HWND, LPARAM, LRESULT, POINT, WPARAM,
 };
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::System::DataExchange::{
@@ -50,23 +50,24 @@ use windows::Win32::UI::HiDpi::{
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     ReleaseCapture, SetCapture, SetFocus, TrackMouseEvent, TME_LEAVE, TRACKMOUSEEVENT,
 };
-use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, ShellExecuteW, HDROP};
+use windows::Win32::UI::Shell::{DragFinish, DragQueryFileW, HDROP};
 use windows::Win32::UI::WindowsAndMessaging::{
     AppendMenuW, BringWindowToTop, CreatePopupMenu, DefWindowProcW, DestroyMenu, DestroyWindow, DispatchMessageW,
-    EnumWindows, FindWindowW, GetCursorPos, GetMessageW, GetWindowRect, GetWindowTextW, GetWindowThreadProcessId,
-    IsHungAppWindow, IsIconic, IsWindowVisible, PostQuitMessage, RegisterShellHookWindow, RegisterWindowMessageW,
+    FindWindowW, GetCursorPos, GetMessageW, IsIconic, PostQuitMessage, RegisterShellHookWindow, RegisterWindowMessageW,
     SetForegroundWindow, SetWindowPos, ShowWindow, SetTimer, TrackPopupMenu, TranslateMessage,
-    GWL_STYLE, HTCLIENT, HTTRANSPARENT, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, MF_POPUP, MF_SEPARATOR, MF_STRING,
-    MSG, SC_MINIMIZE, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_RESTORE, SW_SHOW, SW_SHOWNORMAL, SW_SHOWNOACTIVATE,
+    HTCLIENT, HTTRANSPARENT, HWND_BOTTOM, HWND_NOTOPMOST, HWND_TOPMOST, MF_POPUP, MF_SEPARATOR, MF_STRING,
+    MSG, SC_MINIMIZE, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNORMAL, SW_SHOWNOACTIVATE,
     TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOWPOS, WM_CHAR, WM_DESTROY, WM_DROPFILES,
     WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_POWERBROADCAST, WM_RBUTTONUP,
-    WM_SYSCOMMAND, WM_TIMER, WM_WINDOWPOSCHANGING, WS_CHILD,
+    WM_SYSCOMMAND, WM_TIMER, WM_WINDOWPOSCHANGING,
 };
 
 const WM_MOUSEWHEEL: u32 = 0x020A;
 const WM_MOUSEHWHEEL: u32 = 0x020E;
 const WM_MOUSELEAVE: u32 = 0x02A3;
 const WM_CLIPBOARDUPDATE: u32 = 0x031D;
+const WM_HOTKEY: u32 = 0x0312;
+const HOTKEY_AI_ASSISTANT_ID: i32 = 1001;
 
 #[link(name = "winmm")]
 unsafe extern "system" {
@@ -276,6 +277,48 @@ fn handle_assistant_local_command(prompt: &str, _hwnd: HWND, app: &mut App) -> b
         return true;
     }
 
+    // Fast 0ms offline Windows automation with smart typo & alias tolerance
+    if let Some(intent) = system::app_launcher::extract_launch_intent(prompt) {
+        match intent {
+            system::app_launcher::AppLaunchIntent::OpenApp { name, friendly_name } => {
+                system::app_launcher::launch_or_activate_app_async(name);
+                app.island_state.assistant.last_response = format!("🚀 Membuka {}...", friendly_name);
+                app.island_state.assistant.is_thinking = false;
+                return true;
+            }
+            system::app_launcher::AppLaunchIntent::OpenBrowserProfile { browser, profile } => {
+                system::app_launcher::launch_browser_profile_async(browser.clone(), profile.clone());
+                app.island_state.assistant.last_response = format!("🌐 Membuka {} dengan profil \"{}\"...", browser, profile);
+                app.island_state.assistant.is_thinking = false;
+                return true;
+            }
+            system::app_launcher::AppLaunchIntent::OpenExplorer { path } => {
+                system::app_launcher::open_explorer_path_async(path.clone());
+                app.island_state.assistant.last_response = format!("📁 Membuka folder {}...", path);
+                app.island_state.assistant.is_thinking = false;
+                return true;
+            }
+            system::app_launcher::AppLaunchIntent::CreateNewFile { folder, filename } => {
+                match system::app_launcher::create_and_open_new_text_file(&folder, Some(&filename)) {
+                    Ok(p) => {
+                        app.island_state.assistant.last_response = format!("📄 File baru dibuat dan dibuka di Notepad:\n\"{}\"", p.display());
+                    }
+                    Err(e) => {
+                        app.island_state.assistant.last_response = format!("⚠️ Gagal membuat file: {}", e);
+                    }
+                }
+                app.island_state.assistant.is_thinking = false;
+                return true;
+            }
+            system::app_launcher::AppLaunchIntent::LockWorkstation => {
+                system::app_launcher::lock_workstation();
+                app.island_state.assistant.last_response = "🔒 Mengunci workstation Windows...".to_string();
+                app.island_state.assistant.is_thinking = false;
+                return true;
+            }
+        }
+    }
+
     // Screenshot / Snip
     if lower == "snip"
         || lower == "screenshot"
@@ -415,6 +458,62 @@ fn process_assistant_actions(response: &str, app: &mut App) -> String {
         clean_text.replace_range(start..start + 16, "");
     }
 
+    // 6. [ACTION:OPEN:app_name]
+    if let Some(start) = clean_text.find("[ACTION:OPEN:") {
+        if let Some(end) = clean_text[start..].find(']') {
+            let target = clean_text[start + 13..start + end].trim().to_string();
+            if !target.is_empty() {
+                system::app_launcher::launch_or_activate_app_async(target);
+            }
+            clean_text.replace_range(start..start + end + 1, "");
+        }
+    }
+
+    // 7. [ACTION:BROWSER:browser:profile]
+    if let Some(start) = clean_text.find("[ACTION:BROWSER:") {
+        if let Some(end) = clean_text[start..].find(']') {
+            let inner = clean_text[start + 16..start + end].trim();
+            if let Some((browser, profile)) = inner.split_once(':') {
+                system::app_launcher::launch_browser_profile_async(browser.trim().to_string(), profile.trim().to_string());
+            } else {
+                system::app_launcher::launch_browser_profile_async("brave".to_string(), inner.to_string());
+            }
+            clean_text.replace_range(start..start + end + 1, "");
+        }
+    }
+
+    // 8. [ACTION:EXPLORER:folder_or_path]
+    if let Some(start) = clean_text.find("[ACTION:EXPLORER:") {
+        if let Some(end) = clean_text[start..].find(']') {
+            let path = clean_text[start + 17..start + end].trim().to_string();
+            if !path.is_empty() {
+                system::app_launcher::open_explorer_path_async(path);
+            }
+            clean_text.replace_range(start..start + end + 1, "");
+        }
+    }
+
+    // 9. [ACTION:FILE_NEW:folder:filename]
+    if let Some(start) = clean_text.find("[ACTION:FILE_NEW:") {
+        if let Some(end) = clean_text[start..].find(']') {
+            let inner = clean_text[start + 17..start + end].trim();
+            let (folder, filename) = if let Some((f, n)) = inner.split_once(':') {
+                (f.trim(), Some(n.trim()))
+            } else {
+                (inner, None)
+            };
+            let _ = system::app_launcher::create_and_open_new_text_file(folder, filename);
+            clean_text.replace_range(start..start + end + 1, "");
+        }
+    }
+
+    // 10. [ACTION:LOCK] or [ACTION:SYSTEM:LOCK]
+    if let Some(start) = clean_text.find("[ACTION:SYSTEM:LOCK]").or_else(|| clean_text.find("[ACTION:LOCK]")) {
+        let tag_len = if clean_text[start..].starts_with("[ACTION:SYSTEM:LOCK]") { 20 } else { 13 };
+        system::app_launcher::lock_workstation();
+        clean_text.replace_range(start..start + tag_len, "");
+    }
+
     clean_text.trim().to_string()
 }
 
@@ -453,168 +552,7 @@ fn read_clipboard_unicode_text(hwnd: HWND) -> Option<String> {
 /// This runs asynchronously on a background worker thread to completely decouple from the UI thread,
 /// preventing any re-entrant mutex deadlocks or Win32 message stalls.
 pub fn activate_application(app_name: &str) {
-    let clean = app_name.trim();
-    if clean.is_empty() {
-        return;
-    }
-    let target = clean.to_lowercase();
-    // Ignore internal app features/banners, and ignore screenshot/snipping tool notifications
-    if target == "notification"
-        || target == "system"
-        || target == "shelf"
-        || target == "weather"
-        || target == "eyedropper"
-        || target == "focus timer"
-        || target == "gemini assistant"
-        || target == "todolist"
-        || target == "to-do"
-        || target == "calendar"
-        || target.contains("snip")
-        || target.contains("alat pemotong")
-        || target.contains("screensketch")
-        || target.contains("screenshot")
-    {
-        return;
-    }
-
-    struct SearchContext {
-        target: String,
-        my_pid: u32,
-        found_hwnd: Option<HWND>,
-    }
-
-    let my_pid = unsafe { windows::Win32::System::Threading::GetCurrentProcessId() };
-
-    let mut ctx = SearchContext {
-        target,
-        my_pid,
-        found_hwnd: None,
-    };
-
-    unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-        let ctx = unsafe { &mut *(lparam.0 as *mut SearchContext) };
-
-        // Must be a visible window
-        if !unsafe { IsWindowVisible(hwnd).as_bool() } {
-            return BOOL(1);
-        }
-
-        // Exclude child windows
-        let style = unsafe { windows::Win32::UI::WindowsAndMessaging::GetWindowLongW(hwnd, GWL_STYLE) as u32 };
-        if (style & WS_CHILD.0) != 0 {
-            return BOOL(1);
-        }
-
-        // Never target our own process!
-        let mut pid = 0u32;
-        unsafe { GetWindowThreadProcessId(hwnd, Some(&mut pid)) };
-        if pid == 0 || pid == ctx.my_pid {
-            return BOOL(1);
-        }
-
-        // Skip hung windows to prevent hanging UI
-        if unsafe { IsHungAppWindow(hwnd).as_bool() } {
-            return BOOL(1);
-        }
-
-        // Check window rect: skip 0-size hidden or tool windows
-        let mut rect = RECT::default();
-        if unsafe { GetWindowRect(hwnd, &mut rect).is_ok() } {
-            if rect.right - rect.left <= 0 || rect.bottom - rect.top <= 0 {
-                return BOOL(1);
-            }
-        }
-
-        // 1. Check window text / title
-        let mut text_buf = [0u16; 512];
-        let len = unsafe { GetWindowTextW(hwnd, &mut text_buf) };
-        if len > 0 {
-            let title = String::from_utf16_lossy(&text_buf[..len as usize]).to_lowercase();
-            if title.contains(&ctx.target) {
-                ctx.found_hwnd = Some(hwnd);
-                return BOOL(0);
-            }
-        }
-
-        // 2. Check process executable name
-        if let Ok(h_proc) = unsafe {
-            windows::Win32::System::Threading::OpenProcess(
-                windows::Win32::System::Threading::PROCESS_QUERY_LIMITED_INFORMATION,
-                false,
-                pid,
-            )
-        } {
-            let mut img_buf = [0u16; 1024];
-            let mut size = img_buf.len() as u32;
-            if unsafe {
-                windows::Win32::System::Threading::QueryFullProcessImageNameW(
-                    h_proc,
-                    windows::Win32::System::Threading::PROCESS_NAME_FORMAT(0),
-                    windows::core::PWSTR(img_buf.as_mut_ptr()),
-                    &mut size,
-                )
-            }.is_ok() && size > 0 {
-                let path = String::from_utf16_lossy(&img_buf[..size as usize]).to_lowercase();
-                if path.contains(&ctx.target) {
-                    ctx.found_hwnd = Some(hwnd);
-                    let _ = unsafe { windows::Win32::Foundation::CloseHandle(h_proc) };
-                    return BOOL(0);
-                }
-            }
-            let _ = unsafe { windows::Win32::Foundation::CloseHandle(h_proc) };
-        }
-
-        BOOL(1)
-    }
-
-    unsafe {
-        let _ = EnumWindows(Some(enum_proc), LPARAM(&mut ctx as *mut _ as isize));
-    }
-
-    if let Some(hwnd) = ctx.found_hwnd {
-        unsafe {
-            if IsIconic(hwnd).as_bool() {
-                let _ = ShowWindow(hwnd, SW_RESTORE);
-            } else {
-                let _ = ShowWindow(hwnd, SW_SHOW);
-            }
-            let _ = BringWindowToTop(hwnd);
-            let _ = SetForegroundWindow(hwnd);
-            let _ = SetFocus(hwnd);
-        }
-    } else {
-        // Safe URI scheme fallback only for known applications
-        let uri = if ctx.target.contains("whatsapp") {
-            Some("whatsapp:")
-        } else if ctx.target.contains("spotify") {
-            Some("spotify:")
-        } else if ctx.target.contains("discord") {
-            Some("discord:")
-        } else if ctx.target.contains("telegram") || ctx.target.contains("tg") {
-            Some("tg:")
-        } else if ctx.target.contains("mail") || ctx.target.contains("outlook") {
-            Some("mailto:")
-        } else if ctx.target.contains("photo") || ctx.target.contains("foto") {
-            Some("ms-photos:")
-        } else if ctx.target.contains("calculator") || ctx.target.contains("kalkulator") {
-            Some("calculator:")
-        } else {
-            None
-        };
-        if let Some(uri_scheme) = uri {
-            let wide_uri: Vec<u16> = uri_scheme.encode_utf16().chain(std::iter::once(0)).collect();
-            unsafe {
-                let _ = ShellExecuteW(
-                    None,
-                    windows::core::w!("open"),
-                    windows::core::PCWSTR(wide_uri.as_ptr()),
-                    None,
-                    None,
-                    SW_SHOWNORMAL,
-                );
-            }
-        }
-    }
+    system::app_launcher::launch_or_activate_app(app_name);
 }
 
 pub unsafe extern "system" fn window_proc(
@@ -674,6 +612,34 @@ pub unsafe extern "system" fn window_proc(
     }
 
     match msg {
+        WM_HOTKEY => {
+            if (wparam.0 as i32) == HOTKEY_AI_ASSISTANT_ID {
+                if let Ok(mut lock) = APP.lock() {
+                    if let Some(app) = lock.as_mut() {
+                        let is_already_on_assistant = app.island_state.mode == IslandMode::Expanded(ExpandedPage::Assistant);
+                        if is_already_on_assistant && app.island_state.is_pinned_open {
+                            // Toggle closed if hotkey is pressed while already pinned open
+                            app.island_state.is_pinned_open = false;
+                            app.island_state.assistant.is_input_active = false;
+                            app.island_state.restore_previous_mode();
+                        } else {
+                            // Expand directly to Groq AI Assistant and auto-focus prompt input
+                            app.island_state.select_page(ExpandedPage::Assistant);
+                            app.island_state.assistant.is_input_active = true;
+                            app.island_state.is_pinned_open = true;
+                            app.island_state.unhover_deadline = None;
+                            unsafe {
+                                let _ = BringWindowToTop(hwnd);
+                                let _ = SetForegroundWindow(hwnd);
+                                let _ = SetFocus(hwnd);
+                            }
+                        }
+                        wake_animation(hwnd, app);
+                    }
+                }
+            }
+            LRESULT(0)
+        }
         // 1. Defend against "Show Desktop" (Win+D, 3-finger swipe down) minimization
         WM_SYSCOMMAND => {
             if (wparam.0 & 0xFFF0) == SC_MINIMIZE as usize {
@@ -1782,8 +1748,12 @@ pub unsafe extern "system" fn window_proc(
                             }
                             wake_animation(hwnd, app);
                         } else if code == 27 {
-                            // Esc: cancel / unfocus input
+                            // Esc: cancel / unfocus input & unpin
                             app.island_state.assistant.is_input_active = false;
+                            if app.island_state.is_pinned_open {
+                                app.island_state.is_pinned_open = false;
+                                app.island_state.restore_previous_mode();
+                            }
                             wake_animation(hwnd, app);
                         } else if code == 1 {
                             // Ctrl+A: Select All
@@ -1886,8 +1856,22 @@ pub unsafe extern "system" fn window_proc(
                                 input.update_scroll(&app.text_renderer, font_size, false, visible_w, scroll_margin);
                                 wake_animation(hwnd, app);
                             }
+                            0x1B => {
+                                // VK_ESCAPE
+                                if app.island_state.is_pinned_open || app.island_state.assistant.is_input_active {
+                                    app.island_state.is_pinned_open = false;
+                                    app.island_state.assistant.is_input_active = false;
+                                    app.island_state.restore_previous_mode();
+                                    wake_animation(hwnd, app);
+                                }
+                            }
                             _ => {}
                         }
+                    } else if vk == 0x1B && app.island_state.is_pinned_open {
+                        app.island_state.is_pinned_open = false;
+                        app.island_state.assistant.is_input_active = false;
+                        app.island_state.restore_previous_mode();
+                        wake_animation(hwnd, app);
                     }
                 }
             }
@@ -2087,46 +2071,50 @@ pub unsafe extern "system" fn window_proc(
         }
 
         0x0008 | 0x0006 => {
-            // WM_KILLFOCUS | WM_ACTIVATE: dismiss input mode & auto-minimize if cursor is away
-            if let Ok(mut lock) = APP.lock() {
-                if let Some(app) = lock.as_mut() {
-                    if app.island_state.todo.is_input_active {
-                        app.island_state.todo.commit_input();
-                        app.island_state.todo.is_input_active = false;
-                    }
-                    app.island_state.assistant.is_input_active = false;
-                    app.island_state.calendar.is_input_active = false;
-                    let mut pt = POINT::default();
-                    if unsafe { GetCursorPos(&mut pt) }.is_ok() {
-                        unsafe {
-                            let _ = ScreenToClient(hwnd, &mut pt);
+            // WM_KILLFOCUS (0x0008) | WM_ACTIVATE (0x0006): dismiss input & unpin if click occurred outside
+            let is_deactivating = msg == 0x0008 || (msg == 0x0006 && (wparam.0 & 0xFFFF) == 0);
+            if is_deactivating {
+                if let Ok(mut lock) = APP.lock() {
+                    if let Some(app) = lock.as_mut() {
+                        if app.island_state.todo.is_input_active {
+                            app.island_state.todo.commit_input();
+                            app.island_state.todo.is_input_active = false;
                         }
-                        let cur_x = app.springs.x.current;
-                        let cur_y = app.springs.y.current;
-                        let cur_w = app.springs.width.current;
-                        let cur_h = app.springs.height.current;
-                        let min_y = if cur_y > 2.0 { cur_y - 4.0 } else { 0.0 };
-                        let in_island = (pt.x as f32) >= cur_x && (pt.x as f32) <= (cur_x + cur_w) && (pt.y as f32) >= min_y && (pt.y as f32) <= (cur_y + cur_h);
-                        let in_sub = if let Some(sub) = &app.island_state.sub_notification {
-                            let progress = app.island_state.sub_notif_spring.current;
-                            if progress > 0.2 && !sub.is_dismissing {
-                                let sub_w = 340.0 + (400.0 - 340.0) * progress.min(1.0);
-                                let sub_h = 44.0;
-                                let sub_x = (CANVAS_W as f32 - sub_w) * 0.5;
-                                let sub_y = (cur_y + cur_h + 8.0) - (1.0 - progress.min(1.0)) * 18.0;
-                                (pt.x as f32) >= sub_x - 4.0 && (pt.x as f32) <= sub_x + sub_w + 4.0 && (pt.y as f32) >= sub_y - 4.0 && (pt.y as f32) <= sub_y + sub_h + 4.0
+                        app.island_state.assistant.is_input_active = false;
+                        app.island_state.calendar.is_input_active = false;
+                        let mut pt = POINT::default();
+                        if unsafe { GetCursorPos(&mut pt) }.is_ok() {
+                            unsafe {
+                                let _ = ScreenToClient(hwnd, &mut pt);
+                            }
+                            let cur_x = app.springs.x.current;
+                            let cur_y = app.springs.y.current;
+                            let cur_w = app.springs.width.current;
+                            let cur_h = app.springs.height.current;
+                            let min_y = if cur_y > 2.0 { cur_y - 4.0 } else { 0.0 };
+                            let in_island = (pt.x as f32) >= cur_x && (pt.x as f32) <= (cur_x + cur_w) && (pt.y as f32) >= min_y && (pt.y as f32) <= (cur_y + cur_h);
+                            let in_sub = if let Some(sub) = &app.island_state.sub_notification {
+                                let progress = app.island_state.sub_notif_spring.current;
+                                if progress > 0.2 && !sub.is_dismissing {
+                                    let sub_w = 340.0 + (400.0 - 340.0) * progress.min(1.0);
+                                    let sub_h = 44.0;
+                                    let sub_x = (CANVAS_W as f32 - sub_w) * 0.5;
+                                    let sub_y = (cur_y + cur_h + 8.0) - (1.0 - progress.min(1.0)) * 18.0;
+                                    (pt.x as f32) >= sub_x - 4.0 && (pt.x as f32) <= sub_x + sub_w + 4.0 && (pt.y as f32) >= sub_y - 4.0 && (pt.y as f32) <= sub_y + sub_h + 4.0
+                                } else {
+                                    false
+                                }
                             } else {
                                 false
+                            };
+                            if !in_island && !in_sub {
+                                app.island_state.is_pinned_open = false;
+                                app.island_state.is_hovered = false;
+                                app.island_state.restore_previous_mode();
                             }
-                        } else {
-                            false
-                        };
-                        if !in_island && !in_sub {
-                            app.island_state.is_hovered = false;
-                            app.island_state.unhover_deadline = Some(Instant::now() + std::time::Duration::from_millis(500));
                         }
+                        wake_animation(hwnd, app);
                     }
-                    wake_animation(hwnd, app);
                 }
             }
             unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }
@@ -2794,6 +2782,7 @@ pub unsafe extern "system" fn window_proc(
                             || is_sub_notif_moving
                             || app.island_state.sub_notification.is_some()
                             || app.island_state.is_hovered
+                            || app.island_state.is_pinned_open
                             || app.island_state.is_dragging_slider
                             || app.island_state.pending_shelf_drag.is_some()
                             || app.island_state.todo.is_input_active
@@ -2841,6 +2830,7 @@ pub unsafe extern "system" fn window_proc(
         WM_DESTROY => {
             update_display_hook(HWND::default(), false);
             unsafe {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::UnregisterHotKey(hwnd, HOTKEY_AI_ASSISTANT_ID);
                 let _ = RemoveClipboardFormatListener(hwnd);
                 PostQuitMessage(0);
             }
@@ -2924,6 +2914,14 @@ fn main() {
     // Register clipboard listener to automatically capture copied files into File Shelf
     unsafe {
         let _ = AddClipboardFormatListener(hwnd);
+        // Register global hotkey Ctrl+Shift+Space to summon AI Assistant
+        let _ = windows::Win32::UI::Input::KeyboardAndMouse::RegisterHotKey(
+            hwnd,
+            HOTKEY_AI_ASSISTANT_ID,
+            windows::Win32::UI::Input::KeyboardAndMouse::MOD_CONTROL
+                | windows::Win32::UI::Input::KeyboardAndMouse::MOD_SHIFT,
+            0x20,
+        );
     }
 
     // 4. Initialize state & saved preferences

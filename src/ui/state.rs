@@ -161,6 +161,7 @@ pub struct IslandState {
     pub show_romaji: bool,
     pub glass_theme: GlassTheme,
     pub theme_spring: Spring,
+    pub is_pinned_open: bool,
     #[allow(dead_code)]
     pub recording_start_time: Option<Instant>,
 }
@@ -217,6 +218,7 @@ impl IslandState {
             show_romaji: true,
             glass_theme: saved_theme,
             theme_spring,
+            is_pinned_open: false,
             recording_start_time: None,
             active_call: ActiveCallInfo::default(),
         }
@@ -341,11 +343,13 @@ impl IslandState {
         }
     }
 
-    /// Mouse left island bounds: set grace period before collapsing to Resting or Closed
+    /// Mouse left island bounds: set grace period before collapsing to Resting or Closed (unless pinned open by shortcut)
     pub fn on_mouse_leave(&mut self) {
         self.is_hovered = false;
-        // Grace period of 1.0 second before collapsing
-        self.unhover_deadline = Some(Instant::now() + std::time::Duration::from_millis(1000));
+        if !self.is_pinned_open {
+            // Grace period of 1.0 second before collapsing
+            self.unhover_deadline = Some(Instant::now() + std::time::Duration::from_millis(1000));
+        }
     }
 
     pub fn cycle_page(&mut self, forward: bool) {
@@ -565,8 +569,8 @@ impl IslandState {
     }
 
     pub fn check_timeouts(&mut self) -> bool {
-        // While user is actively typing or dragging slider, pause unhover collapse
-        if self.todo.is_input_active || self.is_dragging_slider {
+        // While user is actively typing, dragging slider, or island is pinned open by hotkey, pause unhover collapse
+        if self.todo.is_input_active || self.assistant.is_input_active || self.is_dragging_slider || self.is_pinned_open {
             return false;
         }
 
