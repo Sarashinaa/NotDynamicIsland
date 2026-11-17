@@ -7,6 +7,10 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+use windows::Win32::System::Registry::{
+    RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
+    KEY_READ,
+};
 use windows::Win32::UI::Input::KeyboardAndMouse::SetFocus;
 use windows::Win32::UI::Shell::ShellExecuteW;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -236,6 +240,24 @@ const APP_ALIASES: &[(&[&str], AppAlias)] = &[
             friendly_name: "Snipping Tool",
         },
     ),
+    (
+        &["steam", "stim"],
+        AppAlias {
+            search_keyword: "steam",
+            executable: "steam.exe",
+            uri_scheme: Some("steam:"),
+            friendly_name: "Steam",
+        },
+    ),
+    (
+        &["anydesk", "any desk", "anidesk"],
+        AppAlias {
+            search_keyword: "anydesk",
+            executable: "anydesk.exe",
+            uri_scheme: None,
+            friendly_name: "AnyDesk",
+        },
+    ),
 ];
 
 /// Resolves an app query or typo/slang into its canonical alias definition
@@ -287,6 +309,217 @@ fn capitalize_words(s: &str) -> String {
     } else {
         words.join(" ")
     }
+}
+
+/// Searches Windows Start Menu shortcut directories for an installed application matching query
+pub fn find_start_menu_shortcut(query: &str) -> Option<PathBuf> {
+    let lower_query = query.trim().to_lowercase();
+    if lower_query.is_empty() {
+        return None;
+    }
+    let query_norm = lower_query.replace(' ', "").replace('-', "").replace('_', "");
+
+    let mut search_dirs = Vec::new();
+    if let Ok(prog_data) = std::env::var("ProgramData") {
+        search_dirs.push(
+            PathBuf::from(prog_data)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+    if let Ok(app_data) = std::env::var("APPDATA") {
+        search_dirs.push(
+            PathBuf::from(app_data)
+                .join("Microsoft")
+                .join("Windows")
+                .join("Start Menu")
+                .join("Programs"),
+        );
+    }
+
+    let mut exact_match: Option<PathBuf> = None;
+    let mut starts_match: Option<PathBuf> = None;
+    let mut contains_match: Option<PathBuf> = None;
+
+    for base_dir in search_dirs {
+        if !base_dir.exists() {
+            continue;
+        }
+        collect_lnk_recursive(
+            &base_dir,
+            &lower_query,
+            &query_norm,
+            &mut exact_match,
+            &mut starts_match,
+            &mut contains_match,
+        );
+        if exact_match.is_some() {
+            return exact_match;
+        }
+    }
+
+    exact_match.or(starts_match).or(contains_match)
+}
+
+fn collect_lnk_recursive(
+    dir: &std::path::Path,
+    query: &str,
+    query_norm: &str,
+    exact_match: &mut Option<PathBuf>,
+    starts_match: &mut Option<PathBuf>,
+    contains_match: &mut Option<PathBuf>,
+) {
+    let entries = match std::fs::read_dir(dir) {
+        Ok(e) => e,
+        Err(_) => return,
+    };
+
+    for entry in entries.flatten() {
+        let path = entry.path();
+        if path.is_dir() {
+            collect_lnk_recursive(
+                &path,
+                query,
+                query_norm,
+                exact_match,
+                starts_match,
+                contains_match,
+            );
+            if exact_match.is_some() {
+                return;
+            }
+        } else if path
+            .extension()
+            .and_then(|s| s.to_str())
+            .map(|e| e.eq_ignore_ascii_case("lnk"))
+            .unwrap_or(false)
+        {
+            if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
+                let lower_stem = stem.to_lowercase();
+                // Ignore uninstallation and documentation shortcuts
+                if lower_stem.contains("uninstall")
+                    || lower_stem.contains("help")
+                    || lower_stem.contains("readme")
+                    || lower_stem.contains("documentation")
+                    || lower_stem.contains("website")
+                    || lower_stem.contains("license")
+                {
+                    continue;
+                }
+
+                let stem_norm = lower_stem.replace(' ', "").replace('-', "").replace('_', "");
+
+                if lower_stem == query || stem_norm == query_norm {
+                    *exact_match = Some(path.clone());
+                    return;
+                }
+                if starts_match.is_none()
+                    && (lower_stem.starts_with(query) || stem_norm.starts_with(query_norm))
+                {
+                    *starts_match = Some(path.clone());
+                } else if contains_match.is_none()
+                    && (lower_stem.contains(query) || stem_norm.contains(query_norm))
+                {
+                    *contains_match = Some(path.clone());
+                }
+            }
+        }
+    }
+}
+
+/// Searches Windows Registry App Paths for registered executables
+pub fn find_registry_app_path(query: &str) -> Option<PathBuf> {
+    let clean = query.trim().trim_end_matches(".exe");
+    let exe_name = format!("{}.exe", clean);
+    let subkey = format!(
+        "SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\App Paths\\{}",
+        exe_name
+    );
+    let wide_subkey: Vec<u16> = subkey.encode_utf16().chain(std::iter::once(0)).collect();
+
+    for root in [HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE] {
+        let mut hkey = HKEY::default();
+        if unsafe { RegOpenKeyExW(root, PCWSTR(wide_subkey.as_ptr()), 0, KEY_READ, &mut hkey) }
+            .is_ok()
+        {
+            let mut buf = [0u16; 1024];
+            let mut buf_size = (buf.len() * 2) as u32;
+            let res = unsafe {
+                RegQueryValueExW(
+                    hkey,
+                    PCWSTR::null(),
+                    None,
+                    None,
+                    Some(buf.as_mut_ptr() as *mut _),
+                    Some(&mut buf_size),
+                )
+            };
+            let _ = unsafe { RegCloseKey(hkey) };
+            if res.is_ok() && buf_size > 2 {
+                let char_len = ((buf_size / 2) as usize).saturating_sub(1);
+                let path_str = String::from_utf16_lossy(&buf[..char_len]);
+                let p = PathBuf::from(path_str.trim().trim_matches('"'));
+                if p.exists() {
+                    return Some(p);
+                }
+            }
+        }
+    }
+    None
+}
+
+/// Searches common installation roots across standard drives (C:, D:)
+pub fn find_common_install_path(query: &str) -> Option<PathBuf> {
+    let clean = query.trim().trim_end_matches(".exe");
+    let exe_name = format!("{}.exe", clean);
+
+    let mut candidate_dirs = Vec::new();
+
+    // Check D:\Programs and D:\Program Files (common for game/software drives)
+    candidate_dirs.push(PathBuf::from(r"D:\Programs").join(clean));
+    candidate_dirs.push(PathBuf::from(r"D:\Program Files").join(clean));
+    candidate_dirs.push(PathBuf::from(r"D:\Program Files (x86)").join(clean));
+
+    if let Ok(pf) = std::env::var("ProgramFiles") {
+        candidate_dirs.push(PathBuf::from(&pf).join(clean));
+    }
+    if let Ok(pf86) = std::env::var("ProgramFiles(x86)") {
+        candidate_dirs.push(PathBuf::from(&pf86).join(clean));
+    }
+    if let Ok(local) = std::env::var("LOCALAPPDATA") {
+        candidate_dirs.push(PathBuf::from(&local).join("Programs").join(clean));
+        candidate_dirs.push(PathBuf::from(&local).join(clean));
+    }
+    if let Ok(appdata) = std::env::var("APPDATA") {
+        candidate_dirs.push(PathBuf::from(&appdata).join(clean));
+    }
+
+    for dir in candidate_dirs {
+        let direct_exe = dir.join(&exe_name);
+        if direct_exe.exists() {
+            return Some(direct_exe);
+        }
+        if dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let p = entry.path();
+                    if p.extension()
+                        .map(|e| e.eq_ignore_ascii_case("exe"))
+                        .unwrap_or(false)
+                    {
+                        if let Some(stem) = p.file_stem().and_then(|s| s.to_str()) {
+                            if stem.eq_ignore_ascii_case(clean) {
+                                return Some(p);
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    None
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -395,33 +628,25 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
     }
 
     // 4. Open specific explorer folder
-    // Check for explicit folder commands: "buka folder ...", "open folder ...", "tolong buka folder ..."
-    let folder_prefixes = [
-        "tolong buka folder ",
-        "buka folder ",
-        "open folder ",
-        "tolong buka direktori ",
-        "buka direktori ",
-    ];
-    for pfx in &folder_prefixes {
-        if lower.starts_with(pfx) {
-            let mut target = lower[pfx.len()..].trim();
-            for suffix in &[" dong", " ya", " please", " tolong", " sekarang"] {
-                if target.ends_with(suffix) {
-                    target = target[..target.len() - suffix.len()].trim();
-                }
-            }
-            if !target.is_empty() {
-                return Some(AppLaunchIntent::OpenExplorer {
-                    path: target.to_string(),
-                });
-            }
-        }
-    }
+    // Check for flexible folder commands (e.g. "minta buka folder downloads", "buka downloads", "bukain unduhan")
+    let has_open_folder_verb = lower.contains("buka")
+        || lower.contains("open")
+        || lower.contains("lihat")
+        || lower.contains("masuk")
+        || lower.contains("tampilkan")
+        || lower.contains("folder")
+        || lower.contains("direktori")
+        || lower.contains("bukain")
+        || lower.contains("minta")
+        || lower.contains("tolong");
 
-    // Common system folders with or without "folder" keyword (e.g. "buka download", "buka downloads", "buka unduhan", "buka dokumen")
-    let is_open_cmd = lower.starts_with("buka ") || lower.starts_with("open ") || lower.starts_with("tolong buka ");
-    if is_open_cmd {
+    if has_open_folder_verb
+        || lower == "downloads"
+        || lower == "download"
+        || lower == "unduhan"
+        || lower == "documents"
+        || lower == "dokumen"
+    {
         if lower.contains("download") || lower.contains("unduhan") {
             return Some(AppLaunchIntent::OpenExplorer {
                 path: "downloads".to_string(),
@@ -432,7 +657,7 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
                 path: "documents".to_string(),
             });
         }
-        if lower.contains("desktop") {
+        if lower.contains("desktop") && !lower.contains("txt") && !lower.contains("file") {
             return Some(AppLaunchIntent::OpenExplorer {
                 path: "desktop".to_string(),
             });
@@ -454,26 +679,30 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
         }
     }
 
-    // Direct folder names without prefix
-    if lower == "downloads" || lower == "download" || lower == "unduhan" {
-        return Some(AppLaunchIntent::OpenExplorer {
-            path: "downloads".to_string(),
-        });
-    }
-    if lower == "documents" || lower == "dokumen" {
-        return Some(AppLaunchIntent::OpenExplorer {
-            path: "documents".to_string(),
-        });
+    // Explicit folder path: "folder ...", "direktori ..."
+    if let Some(idx) = lower.find("folder ").or_else(|| lower.find("direktori ")) {
+        let skip = if lower[idx..].starts_with("folder ") { 7 } else { 10 };
+        let mut target = lower[idx + skip..].trim();
+        for suffix in &[" dong", " ya", " please", " tolong", " sekarang"] {
+            if target.ends_with(suffix) {
+                target = target[..target.len() - suffix.len()].trim();
+            }
+        }
+        if !target.is_empty() {
+            return Some(AppLaunchIntent::OpenExplorer {
+                path: target.to_string(),
+            });
+        }
     }
 
-    // 5. Open App with typos / aliases
+    // 5. Open App with typos / aliases / universal discovery
     // Ambiguous targets (e.g. "note", "catatan", "browser", "terminal", "office")
     // must NOT be eagerly launched. They require Groq AI clarification!
     if is_ambiguous_app_target(&lower) {
         return None;
     }
 
-    // Direct alias match without prefix: "wa", "dc", "spoti", "wrod", "eksel", "tele", "kalkulator"
+    // Direct alias match without prefix: "wa", "dc", "spoti", "wrod", "eksel", "tele", "kalkulator", "steam", "anydesk"
     if let Some(alias) = resolve_app_alias(&lower) {
         return Some(AppLaunchIntent::OpenApp {
             name: alias.search_keyword.to_string(),
@@ -481,24 +710,41 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
         });
     }
 
-    // Prefixed match: "tolong buka wa", "buka wrod", "jalankan excel", "open spotify"
+    // Prefixed match with broad Indonesian and English conversational phrases:
     let prefixes = [
+        "minta tolong bukain ",
+        "minta tolong buka ",
+        "minta tolong jalankan ",
+        "tolong bukain ",
         "tolong buka ",
+        "tolong jalankan ",
+        "minta bukain ",
+        "minta buka ",
+        "minta jalankan ",
+        "coba bukain ",
+        "coba buka ",
+        "bisa bukain ",
+        "bisa buka ",
+        "mau buka ",
+        "pengen buka ",
+        "bukain ",
         "buka ",
         "open ",
         "jalankan ",
         "launch ",
         "start ",
         "nyalakan ",
-        "bisa buka ",
-        "tolong jalankan ",
+        "hidupkan ",
     ];
 
     for prefix in &prefixes {
         if lower.starts_with(prefix) {
             let mut target = lower[prefix.len()..].trim();
             // Strip trailing conversational words
-            for suffix in &[" dong", " ya", " please", " tolong", " sekarang"] {
+            for suffix in &[
+                " dong", " ya", " please", " tolong", " sekarang", " ya tolong", " dulu",
+                " nya", " deh", " bro", " gan", " min",
+            ] {
                 if target.ends_with(suffix) {
                     target = target[..target.len() - suffix.len()].trim();
                 }
@@ -630,24 +876,22 @@ pub fn open_explorer_path(folder_or_path: &str) {
         .collect();
 
     unsafe {
-        // Direct shell open for folders
+        // First try launching explorer.exe directly with the target folder
         let res = ShellExecuteW(
             None,
             windows::core::w!("open"),
+            windows::core::w!("explorer.exe"),
             PCWSTR(wide_path.as_ptr()),
-            None,
             None,
             SW_SHOWNORMAL,
         );
         if (res.0 as usize) <= 32 {
-            // Fallback: invoke explorer.exe with quoted path
-            let quoted = format!("\"{}\"", path_str);
-            let wide_param: Vec<u16> = quoted.encode_utf16().chain(std::iter::once(0)).collect();
+            // Fallback: direct shell open for folders
             let _ = ShellExecuteW(
                 None,
                 windows::core::w!("open"),
-                windows::core::w!("explorer.exe"),
-                PCWSTR(wide_param.as_ptr()),
+                PCWSTR(wide_path.as_ptr()),
+                None,
                 None,
                 SW_SHOWNORMAL,
             );
@@ -815,15 +1059,21 @@ pub fn launch_or_activate_app(app_name: &str) {
             let _ = SetFocus(hwnd);
         }
     } else {
-        // App is not running: launch via URI scheme if available, or invoke executable directly
+        // App is not running: launch via multi-tier discovery
         let mut launched = false;
-        if let Some(uri) = uri_scheme {
-            let wide_uri: Vec<u16> = uri.encode_utf16().chain(std::iter::once(0)).collect();
+
+        // 1. Try Windows Start Menu shortcut (.lnk) - covers almost all installed desktop apps
+        if let Some(lnk_path) = find_start_menu_shortcut(clean) {
+            let wide_lnk: Vec<u16> = lnk_path
+                .as_os_str()
+                .encode_wide()
+                .chain(std::iter::once(0))
+                .collect();
             unsafe {
                 let res = ShellExecuteW(
                     None,
                     windows::core::w!("open"),
-                    PCWSTR(wide_uri.as_ptr()),
+                    PCWSTR(wide_lnk.as_ptr()),
                     None,
                     None,
                     SW_SHOWNORMAL,
@@ -834,6 +1084,84 @@ pub fn launch_or_activate_app(app_name: &str) {
             }
         }
 
+        // 2. Try Windows Registry App Paths
+        if !launched {
+            if let Some(reg_exe) = find_registry_app_path(clean) {
+                let wide_exe: Vec<u16> = reg_exe
+                    .as_os_str()
+                    .encode_wide()
+                    .chain(std::iter::once(0))
+                    .collect();
+                unsafe {
+                    let res = ShellExecuteW(
+                        None,
+                        windows::core::w!("open"),
+                        PCWSTR(wide_exe.as_ptr()),
+                        None,
+                        None,
+                        SW_SHOWNORMAL,
+                    );
+                    if (res.0 as usize) > 32 {
+                        launched = true;
+                    }
+                }
+            }
+        }
+
+        // 3. Try Common Program File Paths across drives (C:, D:)
+        if !launched {
+            if let Some(dir_exe) = find_common_install_path(clean) {
+                let wide_exe: Vec<u16> = dir_exe
+                    .as_os_str()
+                    .encode_wide()
+                    .chain(std::iter::once(0))
+                    .collect();
+                unsafe {
+                    let res = ShellExecuteW(
+                        None,
+                        windows::core::w!("open"),
+                        PCWSTR(wide_exe.as_ptr()),
+                        None,
+                        None,
+                        SW_SHOWNORMAL,
+                    );
+                    if (res.0 as usize) > 32 {
+                        launched = true;
+                    }
+                }
+            }
+        }
+
+        // 4. Try known URI scheme (e.g. "steam:", "spotify:", "whatsapp:", etc.)
+        if !launched {
+            let target_uri = uri_scheme.map(|s| s.to_string()).or_else(|| {
+                if clean.eq_ignore_ascii_case("steam") {
+                    Some("steam:".to_string())
+                } else if clean.eq_ignore_ascii_case("spotify") {
+                    Some("spotify:".to_string())
+                } else {
+                    None
+                }
+            });
+            if let Some(uri) = target_uri {
+                let wide_uri: Vec<u16> = uri.encode_utf16().chain(std::iter::once(0)).collect();
+                unsafe {
+                    let res = ShellExecuteW(
+                        None,
+                        windows::core::w!("open"),
+                        PCWSTR(wide_uri.as_ptr()),
+                        None,
+                        None,
+                        SW_SHOWNORMAL,
+                    );
+                    if (res.0 as usize) > 32 {
+                        launched = true;
+                    }
+                }
+            }
+        }
+
+        // 5. Fallback: ShellExecuteW direct executable name (for tools in PATH / Windows system32)
         if !launched {
             let wide_exe: Vec<u16> = ctx.exe_name.encode_utf16().chain(std::iter::once(0)).collect();
             unsafe {
@@ -930,6 +1258,25 @@ mod tests {
             resolve_app_alias("sticky notes").unwrap().friendly_name,
             "Sticky Notes"
         );
+        assert_eq!(
+            resolve_app_alias("steam").unwrap().friendly_name,
+            "Steam"
+        );
+        assert_eq!(
+            resolve_app_alias("anydesk").unwrap().friendly_name,
+            "AnyDesk"
+        );
+    }
+
+    #[test]
+    fn test_find_start_menu_shortcuts_real() {
+        let steam_res = find_start_menu_shortcut("steam");
+        println!("Start menu steam shortcut: {:?}", steam_res);
+        assert!(steam_res.is_some(), "Steam shortcut should be found");
+
+        let anydesk_res = find_start_menu_shortcut("anydesk");
+        println!("Start menu anydesk shortcut: {:?}", anydesk_res);
+        assert!(anydesk_res.is_some(), "AnyDesk shortcut should be found");
     }
 
     #[test]
@@ -1050,12 +1397,42 @@ mod tests {
         assert_eq!(
             extract_launch_intent("buka folder download"),
             Some(AppLaunchIntent::OpenExplorer {
-                path: "download".to_string(),
+                path: "downloads".to_string(),
             })
         );
 
         assert_eq!(
             extract_launch_intent("buka download"),
+            Some(AppLaunchIntent::OpenExplorer {
+                path: "downloads".to_string(),
+            })
+        );
+
+        assert_eq!(
+            extract_launch_intent("minta buka steam"),
+            Some(AppLaunchIntent::OpenApp {
+                name: "steam".to_string(),
+                friendly_name: "Steam".to_string(),
+            })
+        );
+
+        assert_eq!(
+            extract_launch_intent("minta buka anydesk"),
+            Some(AppLaunchIntent::OpenApp {
+                name: "anydesk".to_string(),
+                friendly_name: "AnyDesk".to_string(),
+            })
+        );
+
+        assert_eq!(
+            extract_launch_intent("minta buka folder downloads"),
+            Some(AppLaunchIntent::OpenExplorer {
+                path: "downloads".to_string(),
+            })
+        );
+
+        assert_eq!(
+            extract_launch_intent("tolong bukain downloads dong"),
             Some(AppLaunchIntent::OpenExplorer {
                 path: "downloads".to_string(),
             })
