@@ -308,17 +308,23 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
                 return true;
             }
             system::app_launcher::AppLaunchIntent::OpenExplorer { path } => {
-                let friendly = match path.to_lowercase().as_str() {
-                    "downloads" | "download" | "unduhan" => "Downloads",
-                    "documents" | "dokumen" => "Documents",
-                    "desktop" => "Desktop",
-                    "pictures" | "gambar" => "Pictures",
-                    "videos" | "video" => "Videos",
-                    "music" | "musik" => "Music",
-                    _ => &path,
-                };
-                system::app_launcher::open_explorer_path_async(path.clone());
-                app.island_state.assistant.last_response = format!("Membuka folder {}...", friendly);
+                let resolved = system::app_launcher::resolve_folder_path(&path);
+                if resolved.exists() {
+                    let friendly = match path.to_lowercase().as_str() {
+                        "downloads" | "download" | "unduhan" => "Downloads",
+                        "documents" | "dokumen" => "Documents",
+                        "desktop" => "Desktop",
+                        "pictures" | "gambar" => "Pictures",
+                        "videos" | "video" => "Videos",
+                        "music" | "musik" => "Music",
+                        "screenshots" | "screenshot" | "tangkapan layar" => "Screenshots",
+                        _ => resolved.file_name().and_then(|n| n.to_str()).unwrap_or(&path),
+                    };
+                    system::app_launcher::open_explorer_path_async(path.clone());
+                    app.island_state.assistant.last_response = format!("Membuka folder {}...", friendly);
+                } else {
+                    app.island_state.assistant.last_response = format!("⚠️ Folder \"{}\" tidak ditemukan di PC.", path);
+                }
                 app.island_state.assistant.is_thinking = false;
                 return true;
             }

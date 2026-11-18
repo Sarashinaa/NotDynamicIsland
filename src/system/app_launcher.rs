@@ -2,7 +2,6 @@
 //! process decoupling, and natural language command parsing.
 //! 0.0% idle CPU, zero heavyweight GUI dependencies, purely Win32 API.
 
-use std::ffi::OsStr;
 use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use windows::core::{PCWSTR, PWSTR};
@@ -646,10 +645,18 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
         || lower == "unduhan"
         || lower == "documents"
         || lower == "dokumen"
+        || lower == "screenshots"
+        || lower == "screenshot"
+        || lower == "tangkapan layar"
     {
         if lower.contains("download") || lower.contains("unduhan") {
             return Some(AppLaunchIntent::OpenExplorer {
                 path: "downloads".to_string(),
+            });
+        }
+        if lower.contains("screenshot") || lower.contains("tangkapan layar") {
+            return Some(AppLaunchIntent::OpenExplorer {
+                path: "screenshots".to_string(),
             });
         }
         if lower.contains("document") || lower.contains("dokumen") {
@@ -778,28 +785,64 @@ pub fn resolve_folder_path(hint: &str) -> PathBuf {
     let user_profile = std::env::var("USERPROFILE").unwrap_or_default();
     let base = PathBuf::from(&user_profile);
 
+    // 1. Standard special folders
     if lower.contains("download") || lower.contains("unduhan") {
-        base.join("Downloads")
-    } else if lower.contains("document") || lower.contains("dokumen") {
-        base.join("Documents")
-    } else if lower.contains("desktop") {
-        base.join("Desktop")
-    } else if lower.contains("picture") || lower.contains("gambar") || lower.contains("foto") {
-        base.join("Pictures")
-    } else if lower.contains("video") {
-        base.join("Videos")
-    } else if lower.contains("music") || lower.contains("musik") || lower.contains("lagu") {
-        base.join("Music")
-    } else {
-        let clean = hint.trim();
-        let p = PathBuf::from(clean);
-        if p.is_absolute() {
-            p
-        } else if !user_profile.is_empty() {
-            base.join(clean)
-        } else {
-            p
+        return base.join("Downloads");
+    } else if lower.contains("screenshot") || lower.contains("tangkapan layar") {
+        for candidate in [
+            base.join("Pictures").join("Screenshots"),
+            base.join("OneDrive").join("Pictures").join("Screenshots"),
+            base.join("OneDrive").join("Gambar").join("Screenshots"),
+            base.join("OneDrive").join("Gambar").join("Screenshot"),
+            base.join("Screenshots"),
+        ] {
+            if candidate.exists() {
+                return candidate;
+            }
         }
+        return base.join("Pictures").join("Screenshots");
+    } else if lower.contains("document") || lower.contains("dokumen") {
+        return base.join("Documents");
+    } else if lower.contains("desktop") {
+        return base.join("Desktop");
+    } else if lower.contains("picture") || lower.contains("gambar") || lower.contains("foto") {
+        return base.join("Pictures");
+    } else if lower.contains("video") {
+        return base.join("Videos");
+    } else if lower.contains("music") || lower.contains("musik") || lower.contains("lagu") {
+        return base.join("Music");
+    }
+
+    let clean = hint.trim();
+    let p = PathBuf::from(clean);
+    if p.is_absolute() {
+        return p;
+    }
+
+    // 2. Search common user subfolders
+    if !user_profile.is_empty() {
+        let candidates = [
+            base.join(clean),
+            base.join("Pictures").join(clean),
+            base.join("Documents").join(clean),
+            base.join("Desktop").join(clean),
+            base.join("Downloads").join(clean),
+            base.join("Videos").join(clean),
+            base.join("Music").join(clean),
+            base.join("OneDrive").join(clean),
+            base.join("OneDrive").join("Dokumen").join(clean),
+            base.join("OneDrive").join("Gambar").join(clean),
+            PathBuf::from(r"D:\").join(clean),
+            PathBuf::from(r"D:\Programs").join(clean),
+        ];
+        for candidate in candidates {
+            if candidate.exists() {
+                return candidate;
+            }
+        }
+        base.join(clean)
+    } else {
+        p
     }
 }
 
@@ -862,15 +905,14 @@ pub fn create_and_open_new_text_file(
 }
 
 /// Opens Windows File Explorer at the target folder or path
-pub fn open_explorer_path(folder_or_path: &str) {
+pub fn open_explorer_path(folder_or_path: &str) -> bool {
     let resolved = resolve_folder_path(folder_or_path);
-    let path_str = if resolved.exists() {
-        resolved.to_string_lossy().to_string()
-    } else {
-        folder_or_path.to_string()
-    };
+    if !resolved.exists() {
+        return false;
+    }
 
-    let wide_path: Vec<u16> = OsStr::new(&path_str)
+    let wide_path: Vec<u16> = resolved
+        .as_os_str()
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
@@ -887,7 +929,7 @@ pub fn open_explorer_path(folder_or_path: &str) {
         );
         if (res.0 as usize) <= 32 {
             // Fallback: direct shell open for folders
-            let _ = ShellExecuteW(
+            let res2 = ShellExecuteW(
                 None,
                 windows::core::w!("open"),
                 PCWSTR(wide_path.as_ptr()),
@@ -895,6 +937,9 @@ pub fn open_explorer_path(folder_or_path: &str) {
                 None,
                 SW_SHOWNORMAL,
             );
+            (res2.0 as usize) > 32
+        } else {
+            true
         }
     }
 }
@@ -1438,10 +1483,32 @@ mod tests {
             })
         );
 
+        assert_eq!(
+            extract_launch_intent("buka folder Screenshots"),
+            Some(AppLaunchIntent::OpenExplorer {
+                path: "screenshots".to_string(),
+            })
+        );
+
+        assert_eq!(
+            extract_launch_intent("tolong buka screenshot"),
+            Some(AppLaunchIntent::OpenExplorer {
+                path: "screenshots".to_string(),
+            })
+        );
+
         // General chat should not be matched
         assert_eq!(
             extract_launch_intent("siapa penemu bahasa rust?"),
             None
         );
+    }
+
+    #[test]
+    fn test_resolve_folder_path() {
+        let screenshots = resolve_folder_path("screenshots");
+        assert!(screenshots.to_string_lossy().to_lowercase().contains("screenshot"));
+        let downloads = resolve_folder_path("downloads");
+        assert!(downloads.to_string_lossy().to_lowercase().contains("downloads"));
     }
 }
