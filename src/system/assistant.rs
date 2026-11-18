@@ -110,6 +110,10 @@ impl AssistantState {
             text: trimmed.clone(),
             timestamp: Instant::now(),
         });
+        if self.messages.len() > 60 {
+            let excess = self.messages.len() - 60;
+            self.messages.drain(0..excess);
+        }
         Some(trimmed)
     }
 
@@ -139,6 +143,10 @@ impl AssistantState {
                 text: response,
                 timestamp: Instant::now(),
             });
+            if self.messages.len() > 60 {
+                let excess = self.messages.len() - 60;
+                self.messages.drain(0..excess);
+            }
         }
     }
 }

@@ -164,6 +164,9 @@ impl TodoList {
         if clean.is_empty() {
             return;
         }
+        if self.items.len() >= 100 {
+            self.items.remove(0);
+        }
         self.items.push(TodoItem {
             id: self.next_id,
             text: clean.to_string(),
