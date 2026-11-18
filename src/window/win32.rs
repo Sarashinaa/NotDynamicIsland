@@ -14,7 +14,7 @@ use windows::Win32::Graphics::Gdi::{
 use windows::Win32::System::Ole::{RegisterDragDrop, RevokeDragDrop, IDropTarget};
 use windows::Win32::UI::Shell::DragAcceptFiles;
 use windows::Win32::UI::WindowsAndMessaging::{
-    CreateWindowExW, DestroyWindow, RegisterClassExW,
+    CreateWindowExW, DestroyWindow, LoadIconW, RegisterClassExW,
     SetWindowPos, ShowWindow, CS_HREDRAW, CS_VREDRAW, HWND_TOPMOST,
     SWP_NOACTIVATE, SW_SHOW, ULW_ALPHA, WNDCLASSEXW, WS_EX_LAYERED, WS_EX_TOOLWINDOW,
     WS_EX_TOPMOST, WS_POPUP,
@@ -50,11 +50,15 @@ impl Win32LayeredWindow {
         unsafe {
             let hinstance = windows::Win32::System::LibraryLoader::GetModuleHandleW(None)?;
 
+            let hicon = LoadIconW(hinstance, PCWSTR(1 as _)).unwrap_or_default();
+
             let wnd_class = WNDCLASSEXW {
                 cbSize: size_of::<WNDCLASSEXW>() as u32,
                 style: CS_HREDRAW | CS_VREDRAW,
                 lpfnWndProc: Some(wnd_proc),
                 hInstance: hinstance.into(),
+                hIcon: hicon,
+                hIconSm: hicon,
                 lpszClassName: class_name,
                 ..Default::default()
             };
