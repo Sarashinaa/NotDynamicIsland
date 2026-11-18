@@ -311,16 +311,16 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
                 let resolved = system::app_launcher::resolve_folder_path(&path);
                 if resolved.exists() {
                     let friendly = match path.to_lowercase().as_str() {
-                        "downloads" | "download" | "unduhan" => "Downloads",
-                        "documents" | "dokumen" => "Documents",
-                        "desktop" => "Desktop",
-                        "pictures" | "gambar" => "Pictures",
-                        "videos" | "video" => "Videos",
-                        "music" | "musik" => "Music",
-                        "screenshots" | "screenshot" | "tangkapan layar" => "Screenshots",
-                        _ => resolved.file_name().and_then(|n| n.to_str()).unwrap_or(&path),
+                        "downloads" | "download" | "unduhan" => "Downloads".to_string(),
+                        "documents" | "dokumen" => "Documents".to_string(),
+                        "desktop" => "Desktop".to_string(),
+                        "pictures" | "gambar" => "Pictures".to_string(),
+                        "videos" | "video" => "Videos".to_string(),
+                        "music" | "musik" => "Music".to_string(),
+                        "screenshots" | "screenshot" | "tangkapan layar" => "Screenshots".to_string(),
+                        _ => resolved.file_name().and_then(|n| n.to_str()).map(|s| s.to_string()).unwrap_or_else(|| path.clone()),
                     };
-                    system::app_launcher::open_explorer_path_async(path.clone());
+                    system::app_launcher::open_explorer_path_async(resolved.to_string_lossy().to_string());
                     app.island_state.assistant.last_response = format!("Membuka folder {}...", friendly);
                 } else {
                     app.island_state.assistant.last_response = format!("⚠️ Folder \"{}\" tidak ditemukan di PC.", path);
@@ -493,7 +493,12 @@ fn process_assistant_actions(response: &str, app: &mut App) -> String {
         if let Some(end) = clean_text[start..].find(']') {
             let target = clean_text[start + 13..start + end].trim().to_string();
             if !target.is_empty() {
-                system::app_launcher::launch_or_activate_app_async(target);
+                let p = std::path::PathBuf::from(&target);
+                if p.exists() || target.contains(":\\") || target.contains(":/") {
+                    system::app_launcher::open_explorer_path_async(target);
+                } else {
+                    system::app_launcher::launch_or_activate_app_async(target);
+                }
             }
             clean_text.replace_range(start..start + end + 1, "");
         }
@@ -520,6 +525,31 @@ fn process_assistant_actions(response: &str, app: &mut App) -> String {
                 system::app_launcher::open_explorer_path_async(path);
             }
             clean_text.replace_range(start..start + end + 1, "");
+        }
+    }
+
+    // Fallback: If Groq AI responded that it is opening a folder/path but omitted the action tag
+    if clean_text.contains(":\\") || clean_text.contains(":/") {
+        let lower_resp = clean_text.to_lowercase();
+        if lower_resp.contains("buka") || lower_resp.contains("membuka") {
+            if let Some(drive_idx) = clean_text.find(":\\").or_else(|| clean_text.find(":/")) {
+                if drive_idx > 0 {
+                    let before = &clean_text[..drive_idx];
+                    if let Some(drive_letter) = before.chars().last() {
+                        if drive_letter.is_ascii_alphabetic() {
+                            let start = drive_idx - 1;
+                            let end_of_path = clean_text[start..]
+                                .find(|c: char| c == '\n' || c == '\r' || c == '"' || c == '\'' || c == '.' || c == ',' || c == ')' || c == ']')
+                                .map(|i| start + i)
+                                .unwrap_or(clean_text.len());
+                            let detected_path = clean_text[start..end_of_path].trim();
+                            if !detected_path.is_empty() {
+                                system::app_launcher::open_explorer_path_async(detected_path.to_string());
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
 

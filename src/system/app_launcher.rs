@@ -626,7 +626,30 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
         });
     }
 
-    // 4. Open specific explorer folder
+    // 4. Explicit Windows drive path anywhere in prompt (e.g. "D:\KULIAH-BELAJAR\masterpiece", "ada di D:\...", "buka C:\Projects")
+    if let Some(drive_idx) = prompt.find(":\\").or_else(|| prompt.find(":/")) {
+        if drive_idx > 0 {
+            let before = &prompt[..drive_idx];
+            if let Some(drive_letter) = before.chars().last() {
+                if drive_letter.is_ascii_alphabetic() {
+                    let start = drive_idx - 1;
+                    let mut candidate = prompt[start..].trim();
+                    for suffix in &[" dong", " ya", " please", " tolong", " sekarang"] {
+                        if candidate.to_lowercase().ends_with(suffix) {
+                            candidate = candidate[..candidate.len() - suffix.len()].trim();
+                        }
+                    }
+                    if !candidate.is_empty() {
+                        return Some(AppLaunchIntent::OpenExplorer {
+                            path: candidate.to_string(),
+                        });
+                    }
+                }
+            }
+        }
+    }
+
+    // 5. Open specific explorer folder
     // Check for flexible folder commands (e.g. "minta buka folder downloads", "buka downloads", "bukain unduhan")
     let has_open_folder_verb = lower.contains("buka")
         || lower.contains("open")
@@ -840,6 +863,22 @@ pub fn resolve_folder_path(hint: &str) -> PathBuf {
                 return candidate;
             }
         }
+
+        // 3. 1-level deep search in drive D:\ directories if present
+        let d_drive = PathBuf::from(r"D:\");
+        if let Ok(entries) = std::fs::read_dir(&d_drive) {
+            for entry in entries.flatten() {
+                if let Ok(file_type) = entry.file_type() {
+                    if file_type.is_dir() {
+                        let candidate = entry.path().join(clean);
+                        if candidate.exists() {
+                            return candidate;
+                        }
+                    }
+                }
+            }
+        }
+
         base.join(clean)
     } else {
         p
@@ -918,22 +957,22 @@ pub fn open_explorer_path(folder_or_path: &str) -> bool {
         .collect();
 
     unsafe {
-        // First try launching explorer.exe directly with the target folder
+        // Direct shell open for folders first (the official Windows shell way)
         let res = ShellExecuteW(
             None,
             windows::core::w!("open"),
-            windows::core::w!("explorer.exe"),
             PCWSTR(wide_path.as_ptr()),
+            None,
             None,
             SW_SHOWNORMAL,
         );
         if (res.0 as usize) <= 32 {
-            // Fallback: direct shell open for folders
+            // Fallback: launch explorer.exe directly with target folder
             let res2 = ShellExecuteW(
                 None,
                 windows::core::w!("open"),
+                windows::core::w!("explorer.exe"),
                 PCWSTR(wide_path.as_ptr()),
-                None,
                 None,
                 SW_SHOWNORMAL,
             );
@@ -1494,6 +1533,13 @@ mod tests {
             extract_launch_intent("tolong buka screenshot"),
             Some(AppLaunchIntent::OpenExplorer {
                 path: "screenshots".to_string(),
+            })
+        );
+
+        assert_eq!(
+            extract_launch_intent(r"ada di D:\KULIAH-BELAJAR\masterpiece"),
+            Some(AppLaunchIntent::OpenExplorer {
+                path: r"D:\KULIAH-BELAJAR\masterpiece".to_string(),
             })
         );
 
