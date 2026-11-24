@@ -4,20 +4,17 @@
 use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering};
-use windows::Win32::Foundation::{BOOL, HMODULE, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
     EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW,
     ENUM_CURRENT_SETTINGS, HDC, HMONITOR, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
 };
-use windows::Win32::UI::WindowsAndMessaging::{
-    CallNextHookEx, PostMessageW, SetWindowsHookExW, UnhookWindowsHookEx,
-    HHOOK, MSLLHOOKSTRUCT, WH_MOUSE_LL, WM_MOUSEMOVE,
-};
+use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, PostMessageW};
 
 pub const WM_APP_DISPLAY_CURSOR_MOVED: u32 = 0x8016;
 
 static TARGET_HWND: AtomicIsize = AtomicIsize::new(0);
-static MOUSE_HOOK_HANDLE: AtomicIsize = AtomicIsize::new(0);
+static MONITOR_THREAD_RUNNING: AtomicBool = AtomicBool::new(false);
 static CURSOR_FOLLOW_ENABLED: AtomicBool = AtomicBool::new(false);
 static TRANSITION_PENDING: AtomicBool = AtomicBool::new(false);
 static CURRENT_MON_LEFT: AtomicI32 = AtomicI32::new(i32::MIN);
@@ -223,64 +220,48 @@ pub fn update_display_hook(hwnd: HWND, enable_follow: bool) {
     TRANSITION_PENDING.store(false, Ordering::SeqCst);
 
     if enable_follow {
-        if MOUSE_HOOK_HANDLE.load(Ordering::SeqCst) == 0 {
-            unsafe {
-                if let Ok(hook) = SetWindowsHookExW(
-                    WH_MOUSE_LL,
-                    Some(display_mouse_hook_proc),
-                    HMODULE::default(),
-                    0,
-                ) {
-                    MOUSE_HOOK_HANDLE.store(hook.0 as isize, Ordering::SeqCst);
-                }
-            }
-        }
-    } else {
-        let h = MOUSE_HOOK_HANDLE.swap(0, Ordering::SeqCst);
-        if h != 0 {
-            unsafe {
-                let _ = UnhookWindowsHookEx(HHOOK(h as *mut _));
-            }
-        }
-    }
-}
+        if !MONITOR_THREAD_RUNNING.swap(true, Ordering::SeqCst) {
+            std::thread::spawn(|| {
+                while MONITOR_THREAD_RUNNING.load(Ordering::Relaxed) {
+                    std::thread::sleep(std::time::Duration::from_millis(30));
+                    if !CURSOR_FOLLOW_ENABLED.load(Ordering::Relaxed) {
+                        continue;
+                    }
+                    let mut pt = POINT::default();
+                    if unsafe { GetCursorPos(&mut pt).is_ok() } {
+                        let px = pt.x;
+                        let py = pt.y;
 
-unsafe extern "system" fn display_mouse_hook_proc(
-    code: i32,
-    wparam: WPARAM,
-    lparam: LPARAM,
-) -> LRESULT {
-    if code >= 0 && CURSOR_FOLLOW_ENABLED.load(Ordering::Relaxed) {
-        if wparam.0 as u32 == WM_MOUSEMOVE {
-            let ms = unsafe { &*(lparam.0 as *const MSLLHOOKSTRUCT) };
-            let px = ms.pt.x;
-            let py = ms.pt.y;
+                        let left = CURRENT_MON_LEFT.load(Ordering::Relaxed);
+                        let top = CURRENT_MON_TOP.load(Ordering::Relaxed);
+                        let right = CURRENT_MON_RIGHT.load(Ordering::Relaxed);
+                        let bottom = CURRENT_MON_BOTTOM.load(Ordering::Relaxed);
 
-            let left = CURRENT_MON_LEFT.load(Ordering::Relaxed);
-            let top = CURRENT_MON_TOP.load(Ordering::Relaxed);
-            let right = CURRENT_MON_RIGHT.load(Ordering::Relaxed);
-            let bottom = CURRENT_MON_BOTTOM.load(Ordering::Relaxed);
-
-            // Fast register comparison: only notify when crossing the active monitor rectangle
-            if px < left || px >= right || py < top || py >= bottom {
-                // Atomic guard: ensure only ONE transition message is in flight until processed
-                if !TRANSITION_PENDING.swap(true, Ordering::SeqCst) {
-                    let target = TARGET_HWND.load(Ordering::Relaxed);
-                    if target != 0 {
-                        unsafe {
-                            let _ = PostMessageW(
-                                HWND(target as *mut _),
-                                WM_APP_DISPLAY_CURSOR_MOVED,
-                                WPARAM(0),
-                                LPARAM(0),
-                            );
+                        if px < left || px >= right || py < top || py >= bottom {
+                            if !TRANSITION_PENDING.swap(true, Ordering::SeqCst) {
+                                let target = TARGET_HWND.load(Ordering::Relaxed);
+                                if target != 0 {
+                                    unsafe {
+                                        let _ = PostMessageW(
+                                            HWND(target as *mut _),
+                                            WM_APP_DISPLAY_CURSOR_MOVED,
+                                            WPARAM(0),
+                                            LPARAM(0),
+                                        );
+                                    }
+                                }
+                            }
                         }
                     }
                 }
-            }
+            });
+        }
+    } else {
+        CURSOR_FOLLOW_ENABLED.store(false, Ordering::SeqCst);
+        if hwnd == HWND::default() {
+            MONITOR_THREAD_RUNNING.store(false, Ordering::SeqCst);
         }
     }
-    unsafe { CallNextHookEx(None, code, wparam, lparam) }
 }
 
 fn enumerate_monitors() -> Vec<MonitorInfo> {

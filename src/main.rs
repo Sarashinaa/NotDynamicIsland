@@ -5,7 +5,7 @@
 #![windows_subsystem = "windows"]
 
 use std::path::PathBuf;
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, AtomicU32, Ordering};
 use std::sync::Mutex;
 use std::time::Instant;
 
@@ -59,7 +59,7 @@ use windows::Win32::UI::WindowsAndMessaging::{
     MSG, SC_MINIMIZE, SWP_HIDEWINDOW, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SW_SHOWNORMAL, SW_SHOWNOACTIVATE,
     TPM_RETURNCMD, TPM_RIGHTBUTTON, WINDOWPOS, WM_CHAR, WM_DESTROY, WM_DROPFILES,
     WM_KEYDOWN, WM_LBUTTONDOWN, WM_LBUTTONUP, WM_MOUSEMOVE, WM_NCHITTEST, WM_POWERBROADCAST, WM_RBUTTONUP,
-    WM_SYSCOMMAND, WM_TIMER, WM_WINDOWPOSCHANGING,
+    WM_SETCURSOR, WM_SYSCOMMAND, WM_TIMER, WM_WINDOWPOSCHANGING,
 };
 
 const WM_MOUSEWHEEL: u32 = 0x020A;
@@ -119,6 +119,17 @@ unsafe impl Send for App {}
 static APP: Mutex<Option<App>> = Mutex::new(None);
 static SHELL_HOOK_MSG: AtomicU32 = AtomicU32::new(0);
 static IS_MENU_ACTIVE: AtomicBool = AtomicBool::new(false);
+
+// Lock-free atomic hit-testing bounds for 0-latency WM_NCHITTEST
+static HIT_MIN_X: AtomicI32 = AtomicI32::new(0);
+static HIT_MAX_X: AtomicI32 = AtomicI32::new(0);
+static HIT_MIN_Y: AtomicI32 = AtomicI32::new(0);
+static HIT_MAX_Y: AtomicI32 = AtomicI32::new(0);
+static SUB_MIN_X: AtomicI32 = AtomicI32::new(0);
+static SUB_MAX_X: AtomicI32 = AtomicI32::new(0);
+static SUB_MIN_Y: AtomicI32 = AtomicI32::new(0);
+static SUB_MAX_Y: AtomicI32 = AtomicI32::new(0);
+static IS_DRAGGING_SLIDER: AtomicBool = AtomicBool::new(false);
 
 fn wake_animation(hwnd: HWND, app: &mut App) {
     let now = Instant::now();
@@ -722,7 +733,11 @@ pub unsafe extern "system" fn window_proc(
             LRESULT(0)
         }
         WM_NCHITTEST => {
-            // Hit-testing passthrough: return HTTRANSPARENT when outside the top notch bounds
+            // Lock-free sub-microsecond hit-testing: completely bypasses APP.lock()
+            if IS_DRAGGING_SLIDER.load(Ordering::Relaxed) {
+                return LRESULT(HTCLIENT as isize);
+            }
+
             let screen_x = (lparam.0 & 0xFFFF) as i16 as i32;
             let screen_y = ((lparam.0 >> 16) & 0xFFFF) as i16 as i32;
 
@@ -734,51 +749,41 @@ pub unsafe extern "system" fn window_proc(
                 let _ = ScreenToClient(hwnd, &mut pt);
             }
 
-            if let Ok(lock) = APP.lock() {
-                if let Some(app) = lock.as_ref() {
-                    // While dragging slider, capture all hit testing
-                    if app.island_state.is_dragging_slider {
-                        return LRESULT(HTCLIENT as isize);
-                    }
+            let min_x = HIT_MIN_X.load(Ordering::Relaxed);
+            let max_x = HIT_MAX_X.load(Ordering::Relaxed);
+            let min_y = HIT_MIN_Y.load(Ordering::Relaxed);
+            let max_y = HIT_MAX_Y.load(Ordering::Relaxed);
 
-                    let cur_x = app.springs.x.current;
-                    let cur_y = app.springs.y.current;
-                    let cur_w = app.springs.width.current;
-                    let cur_h = app.springs.height.current;
-                    let cur_r = app.springs.corner_radius.current;
-                    let r_top = cur_r.min(cur_w * 0.5).min(cur_h * 0.5);
+            if pt.x >= min_x && pt.x <= max_x && pt.y >= min_y && pt.y <= max_y {
+                return LRESULT(HTCLIENT as isize);
+            }
 
-                    let hit_margin = 6.0;
-                    let min_hit_y = if cur_y > 2.0 { cur_y - hit_margin } else { 0.0 };
-                    if pt.x as f32 >= cur_x - r_top - hit_margin
-                        && pt.x as f32 <= cur_x + cur_w + r_top + hit_margin
-                        && (pt.y as f32) >= min_hit_y
-                        && (pt.y as f32) <= cur_y + cur_h + hit_margin
-                    {
-                        return LRESULT(HTCLIENT as isize);
-                    }
-
-                    // Check sub-notification pill hit zone if active
-                    if let Some(sub) = &app.island_state.sub_notification {
-                        let progress = app.island_state.sub_notif_spring.current;
-                        if progress > 0.3 && !sub.is_dismissing {
-                            let sub_w = 340.0 + (400.0 - 340.0) * progress.min(1.0);
-                            let sub_h = 44.0;
-                            let sub_x = (CANVAS_W as f32 - sub_w) * 0.5;
-                            let sub_y = (cur_y + cur_h + 8.0) - (1.0 - progress.min(1.0)) * 18.0;
-                            if (pt.x as f32) >= sub_x - hit_margin
-                                && (pt.x as f32) <= sub_x + sub_w + hit_margin
-                                && (pt.y as f32) >= sub_y - hit_margin
-                                && (pt.y as f32) <= sub_y + sub_h + hit_margin
-                            {
-                                return LRESULT(HTCLIENT as isize);
-                            }
-                        }
-                    }
+            // Check sub-notification pill hit zone if active
+            let s_min_x = SUB_MIN_X.load(Ordering::Relaxed);
+            let s_max_x = SUB_MAX_X.load(Ordering::Relaxed);
+            if s_min_x != s_max_x {
+                let s_min_y = SUB_MIN_Y.load(Ordering::Relaxed);
+                let s_max_y = SUB_MAX_Y.load(Ordering::Relaxed);
+                if pt.x >= s_min_x && pt.x <= s_max_x && pt.y >= s_min_y && pt.y <= s_max_y {
+                    return LRESULT(HTCLIENT as isize);
                 }
             }
+
             // Pass clicks through to whatever application is behind the transparent canvas!
             LRESULT(HTTRANSPARENT as isize)
+        }
+
+        WM_SETCURSOR => {
+            unsafe {
+                let _ = windows::Win32::UI::WindowsAndMessaging::SetCursor(
+                    windows::Win32::UI::WindowsAndMessaging::LoadCursorW(
+                        None,
+                        windows::Win32::UI::WindowsAndMessaging::IDC_ARROW,
+                    )
+                    .unwrap_or_default(),
+                );
+            }
+            LRESULT(1)
         }
 
         WM_LBUTTONDOWN => {
@@ -937,6 +942,9 @@ pub unsafe extern "system" fn window_proc(
                         unsafe {
                             let _ = TrackMouseEvent(&mut tme);
                         }
+                    } else if !app.is_animating {
+                        // While hovering, awaken animation if settled for interactive button hover highlighting
+                        wake_animation(hwnd, app);
                     }
                 }
             }
@@ -2766,6 +2774,42 @@ pub unsafe extern "system" fn window_proc(
                         let is_theme_moving = app.island_state.theme_spring.update(dt);
                         let is_sub_notif_moving = app.island_state.sub_notif_spring.update(dt);
 
+                        // Update lock-free atomic hit-testing bounds
+                        let cur_x = app.springs.x.current;
+                        let cur_y = app.springs.y.current;
+                        let cur_w = app.springs.width.current;
+                        let cur_h = app.springs.height.current;
+                        let cur_r = app.springs.corner_radius.current;
+                        let r_top = cur_r.min(cur_w * 0.5).min(cur_h * 0.5);
+                        let hit_margin = 6.0;
+                        let min_hit_y = if cur_y > 2.0 { cur_y - hit_margin } else { 0.0 };
+                        HIT_MIN_X.store((cur_x - r_top - hit_margin) as i32, Ordering::Relaxed);
+                        HIT_MAX_X.store((cur_x + cur_w + r_top + hit_margin) as i32, Ordering::Relaxed);
+                        HIT_MIN_Y.store(min_hit_y as i32, Ordering::Relaxed);
+                        HIT_MAX_Y.store((cur_y + cur_h + hit_margin) as i32, Ordering::Relaxed);
+
+                        if let Some(sub) = &app.island_state.sub_notification {
+                            let progress = app.island_state.sub_notif_spring.current;
+                            if progress > 0.3 && !sub.is_dismissing {
+                                let sub_w = 340.0 + (400.0 - 340.0) * progress.min(1.0);
+                                let sub_h = 44.0;
+                                let sub_x = (CANVAS_W as f32 - sub_w) * 0.5;
+                                let sub_y = (cur_y + cur_h + 8.0) - (1.0 - progress.min(1.0)) * 18.0;
+                                SUB_MIN_X.store((sub_x - hit_margin) as i32, Ordering::Relaxed);
+                                SUB_MAX_X.store((sub_x + sub_w + hit_margin) as i32, Ordering::Relaxed);
+                                SUB_MIN_Y.store((sub_y - hit_margin) as i32, Ordering::Relaxed);
+                                SUB_MAX_Y.store((sub_y + sub_h + hit_margin) as i32, Ordering::Relaxed);
+                            } else {
+                                SUB_MIN_X.store(0, Ordering::Relaxed);
+                                SUB_MAX_X.store(0, Ordering::Relaxed);
+                            }
+                        } else {
+                            SUB_MIN_X.store(0, Ordering::Relaxed);
+                            SUB_MAX_X.store(0, Ordering::Relaxed);
+                        }
+
+                        IS_DRAGGING_SLIDER.store(app.island_state.is_dragging_slider, Ordering::Relaxed);
+
                         // Get cursor position for hover states
                         let mut cursor_pt = POINT::default();
                         let cursor_pos = unsafe {
@@ -2816,20 +2860,17 @@ pub unsafe extern "system" fn window_proc(
                         // 2. High-precision refresh cadence:
                         // - Instant (0ms) on foreground window change (Alt-Tab, window switch)
                         // - While springs or themes are actively moving, NEVER capture mid-flight:
-                        //   StretchBlt DWM readbacks over PCIe cause micro-stalls that disrupt 16.67ms VSync
-                        //   frame pacing on 60Hz displays. Keeping spring frames pure CPU (<0.4ms) guarantees
-                        //   rock-solid, locked 60 FPS buttery smoothness without a single dropped frame!
-                        // - Fluid 30 FPS (~33ms) while resting open under hover:
-                        //   Maintains live background sync (scrolling web, video) with zero jitter while notch is static.
-                        // - Fluid 8 FPS (120ms) for background wallpaper luminance tracking when notch is idle/resting
+                        //   StretchBlt DWM readbacks over PCIe cause micro-stalls that disrupt VSync
+                        //   frame pacing. Keeping spring frames pure CPU (<0.4ms) guarantees
+                        //   rock-solid, locked 60-240 FPS buttery smoothness without a single dropped frame!
+                        // - Relaxed 500ms cadence while resting open or idle:
+                        //   Eliminates continuous PCIe bus stalls that cause mouse cursor hitching
                         let min_interval = if fg_changed {
                             std::time::Duration::from_millis(0)
                         } else if is_spring_moving || is_theme_moving || is_sub_notif_moving {
                             std::time::Duration::from_secs(3600)
-                        } else if app.island_state.is_hovered {
-                            std::time::Duration::from_millis(33)
                         } else {
-                            std::time::Duration::from_millis(120)
+                            std::time::Duration::from_millis(500)
                         };
 
                         if now.duration_since(app.last_backdrop_capture) >= min_interval {
@@ -2853,12 +2894,12 @@ pub unsafe extern "system" fn window_proc(
                         app.window.update_layered_surface(&app.pixel_buffer.data);
 
                         // Is animation actively needed?
+                        // Note: is_hovered and is_pinned_open intentionally settle once springs settle,
+                        // avoiding 200 FPS continuous DWM surface updates when the card is static.
                         let is_busy = is_spring_moving
                             || is_theme_moving
                             || is_sub_notif_moving
                             || app.island_state.sub_notification.is_some()
-                            || app.island_state.is_hovered
-                            || app.island_state.is_pinned_open
                             || app.island_state.is_dragging_slider
                             || app.island_state.pending_shelf_drag.is_some()
                             || app.island_state.todo.is_input_active
@@ -3014,6 +3055,14 @@ fn main() {
         ui::IslandShape::FloatingPill => 8.0,
     };
     let springs = SpringRect::new(initial_x, initial_y, initial_w, initial_h, initial_r);
+
+    let r_top = initial_r.min(initial_w * 0.5).min(initial_h * 0.5);
+    let hit_margin = 6.0;
+    let min_hit_y = if initial_y > 2.0 { initial_y - hit_margin } else { 0.0 };
+    HIT_MIN_X.store((initial_x - r_top - hit_margin) as i32, Ordering::Relaxed);
+    HIT_MAX_X.store((initial_x + initial_w + r_top + hit_margin) as i32, Ordering::Relaxed);
+    HIT_MIN_Y.store(min_hit_y as i32, Ordering::Relaxed);
+    HIT_MAX_Y.store((initial_y + initial_h + hit_margin) as i32, Ordering::Relaxed);
 
     // 6. Initialize renderers
     let text_renderer = TextRenderer::new();
