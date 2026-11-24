@@ -2773,6 +2773,7 @@ pub unsafe extern "system" fn window_proc(
                         let is_spring_moving = app.springs.update(dt);
                         let is_theme_moving = app.island_state.theme_spring.update(dt);
                         let is_sub_notif_moving = app.island_state.sub_notif_spring.update(dt);
+                        let is_dock_moving = app.island_state.dock_pos.update(dt);
 
                         // Update lock-free atomic hit-testing bounds
                         let cur_x = app.springs.x.current;
@@ -2899,6 +2900,7 @@ pub unsafe extern "system" fn window_proc(
                         let is_busy = is_spring_moving
                             || is_theme_moving
                             || is_sub_notif_moving
+                            || is_dock_moving
                             || app.island_state.sub_notification.is_some()
                             || app.island_state.is_dragging_slider
                             || app.island_state.pending_shelf_drag.is_some()

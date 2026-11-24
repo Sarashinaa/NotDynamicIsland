@@ -25,6 +25,23 @@ pub enum ExpandedPage {
 }
 
 impl ExpandedPage {
+    pub fn to_index(&self) -> usize {
+        *self as usize
+    }
+
+    pub fn from_index(idx: usize) -> Self {
+        match idx {
+            0 => Self::Music,
+            1 => Self::Weather,
+            2 => Self::Shelf,
+            3 => Self::Calendar,
+            4 => Self::ToDo,
+            5 => Self::Tools,
+            6 => Self::Timer,
+            _ => Self::Assistant,
+        }
+    }
+
     #[allow(dead_code)]
     pub fn next(&self) -> Self {
         match self {
@@ -161,6 +178,7 @@ pub struct IslandState {
     pub show_romaji: bool,
     pub glass_theme: GlassTheme,
     pub theme_spring: Spring,
+    pub dock_pos: Spring,
     pub is_pinned_open: bool,
     #[allow(dead_code)]
     pub recording_start_time: Option<Instant>,
@@ -177,6 +195,7 @@ impl IslandState {
         };
         let theme_spring = Spring::new(initial_theme_val, 280.0, 24.0, 1.0);
         let sub_notif_spring = Spring::new(0.0, 320.0, 24.0, 1.0);
+        let dock_pos = Spring::new(0.0, 260.0, 24.0, 1.0);
         Self {
             mode: IslandMode::Resting,
             previous_mode: IslandMode::Resting,
@@ -184,6 +203,7 @@ impl IslandState {
             timeout_at: None,
             sub_notification: None,
             sub_notif_spring,
+            dock_pos,
             unhover_deadline: None,
             active_page: ExpandedPage::Music,
             media_info: MediaTrackInfo::default(),
@@ -419,8 +439,7 @@ impl IslandState {
             }
         };
         if target != self.active_page {
-            self.active_page = target;
-            self.mode = IslandMode::Expanded(target);
+            self.select_page(target);
         }
     }
 
@@ -429,16 +448,19 @@ impl IslandState {
         self.calendar.cancel_input();
         self.active_page = page;
         self.mode = IslandMode::Expanded(page);
+        self.dock_pos.set_target(page.to_index() as f32);
     }
 
     pub fn toggle_lyrics(&mut self) {
         match self.mode {
             IslandMode::Lyrics => {
                 self.mode = IslandMode::Expanded(ExpandedPage::Music);
+                self.dock_pos.set_target(ExpandedPage::Music.to_index() as f32);
             }
             _ => {
                 self.active_page = ExpandedPage::Music;
                 self.mode = IslandMode::Lyrics;
+                self.dock_pos.set_target(ExpandedPage::Music.to_index() as f32);
             }
         }
     }

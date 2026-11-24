@@ -1159,7 +1159,7 @@ impl LayoutManager {
 
         // Bottom Interactive Navigation Dock (GNOME Isle Style)
         let indicator_y = y + 142.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 0, opacity, cursor_pos, is_light);
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
 /// Intelligently wraps a single lyric line into up to two sub-lines if it exceeds max_width.
@@ -1858,7 +1858,7 @@ fn wrap_lyric_line<'a>(
         // Bottom Interactive Navigation Dock (GNOME Isle Style)
         let indicator_y = y + 138.0;
         let center_x = x + w * 0.5;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 1, opacity, cursor_pos, is_light);
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Mode 5: Shelf - Drag-and-drop file shelf, copy to clipboard, launch file
@@ -1989,7 +1989,7 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Interactive Navigation Dock (GNOME Isle Style)
         let indicator_y = y + 134.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, 2, opacity, cursor_pos, is_light);
+        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Mode 6: To-do - Clean typography spacing, task statistics, scrollable task items
@@ -2259,7 +2259,7 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Interactive Navigation Dock (GNOME Isle Style)
         let indicator_y = y + 144.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, 4, opacity, cursor_pos, is_light);
+        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Mode: Calendar & Agenda (Page 3 / 4th Page) - Interactive Month Grid & Google Calendar Sync
@@ -2586,7 +2586,7 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Interactive Navigation Dock (GNOME Isle Style)
         let indicator_y = y + 152.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 3, opacity, cursor_pos, is_light);
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Mode 7: Focus Timer & Stopwatch (Page 3)
@@ -2780,7 +2780,7 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Interactive Navigation Dock (GNOME Isle Style)
         let indicator_y = y + 140.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 6, opacity, cursor_pos, is_light);
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Mode 8: Tools & Utilities (Page 4 / 5th Page) - Apple Control Center cards for Eyedropper, Screen Snip, and Mic Mute
@@ -3025,7 +3025,7 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Interactive Navigation Dock (GNOME Isle Style)
         let indicator_y = y + 134.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 5, opacity, cursor_pos, is_light);
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Helper function to wrap text within max_w and at most max_lines
@@ -3489,7 +3489,7 @@ fn wrap_lyric_line<'a>(
 
         // Bottom Interactive Navigation Dock (GNOME Isle Style)
         let indicator_y = y + 171.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, 7, opacity, cursor_pos, is_light);
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
     fn render_charging(
         &self,
@@ -4438,7 +4438,7 @@ fn wrap_lyric_line<'a>(
         text_renderer: &TextRenderer,
         cx: f32,
         cy: f32,
-        active_idx: usize,
+        state: &IslandState,
         opacity: f32,
         cursor_pos: Option<(f32, f32)>,
         is_light: bool,
@@ -4454,16 +4454,37 @@ fn wrap_lyric_line<'a>(
             "Assistant",
         ];
 
-        let active_title = TITLES.get(active_idx).copied().unwrap_or("Active");
-        let (tw, _) = text_renderer.measure_text(active_title, 9.0, true);
-        let active_w = (tw + 26.0).max(52.0);
         let inactive_w = 19.0;
         let item_gap = 2.0;
         let total_items = 8;
         let dock_h = 20.0;
         let dock_r = 10.0;
 
-        let total_dock_w = (total_items - 1) as f32 * (inactive_w + item_gap) + active_w + 8.0;
+        // Measure ideal active width for each title
+        let mut active_widths = [0.0f32; 8];
+        for i in 0..8 {
+            let (tw, _) = text_renderer.measure_text(TITLES[i], 9.0, true);
+            active_widths[i] = (tw + 26.0).max(52.0);
+        }
+
+        // Kinetic floating cursor position t driven by dock_pos spring
+        let t = state.dock_pos.current;
+        let clamped_t = t.clamp(0.0, 7.0);
+
+        // Smooth continuous weights for each tab: 1.0 when active, linearly decaying to 0.0 when distance >= 1.0
+        let mut weights = [0.0f32; 8];
+        let mut item_widths = [0.0f32; 8];
+        let mut total_content_w = 0.0f32;
+        for i in 0..8 {
+            let dist = (clamped_t - i as f32).abs();
+            let p = (1.0 - dist).max(0.0);
+            weights[i] = p;
+            let w = inactive_w + (active_widths[i] - inactive_w) * p;
+            item_widths[i] = w;
+            total_content_w += w;
+        }
+
+        let total_dock_w = total_content_w + (total_items - 1) as f32 * item_gap + 8.0;
         let dock_x = cx - total_dock_w * 0.5;
         let dock_y = cy - dock_h * 0.5;
 
@@ -4492,69 +4513,80 @@ fn wrap_lyric_line<'a>(
             )
         };
 
+        // Render base dock background track
         draw_rounded_rect(buf, dock_x, dock_y, total_dock_w, dock_h, dock_r, dock_bg);
         draw_rounded_rect_stroke(buf, dock_x, dock_y, total_dock_w, dock_h, dock_r, 1.0, dock_stroke);
 
+        // Compute starting x-position for each tab
+        let mut item_xs = [0.0f32; 8];
         let mut cur_x = dock_x + 4.0;
+        for i in 0..8 {
+            item_xs[i] = cur_x;
+            cur_x += item_widths[i] + item_gap;
+        }
+
+        // Continuous sliding capsule pill position and width with rubber-band edge overshoot
+        let idx_floor = clamped_t.floor() as usize;
+        let idx_ceil = (idx_floor + 1).min(7);
+        let frac = clamped_t - idx_floor as f32;
+
+        let base_pill_x = item_xs[idx_floor] * (1.0 - frac) + item_xs[idx_ceil] * frac;
+        let pill_w = item_widths[idx_floor] * (1.0 - frac) + item_widths[idx_ceil] * frac;
+        let overshoot_offset = (t - clamped_t) * (inactive_w + item_gap);
+        let pill_x = base_pill_x + overshoot_offset;
+
+        // Render kinetic sliding glass capsule pill
+        draw_rounded_rect(buf, pill_x, dock_y + 2.0, pill_w, dock_h - 4.0, 8.0, pill_bg);
+        draw_rounded_rect_stroke(buf, pill_x, dock_y + 2.0, pill_w, dock_h - 4.0, 8.0, 1.0, pill_stroke);
+
+        // Render tabs: icons, animated labels, hover states, and click targets
         for i in 0..total_items {
-            let page = match i {
-                0 => ExpandedPage::Music,
-                1 => ExpandedPage::Weather,
-                2 => ExpandedPage::Shelf,
-                3 => ExpandedPage::Calendar,
-                4 => ExpandedPage::ToDo,
-                5 => ExpandedPage::Tools,
-                6 => ExpandedPage::Timer,
-                _ => ExpandedPage::Assistant,
+            let page = ExpandedPage::from_index(i);
+            let w = item_widths[i];
+            let ix = item_xs[i];
+            let p = weights[i];
+
+            let item_rect = Rect {
+                x: ix,
+                y: dock_y + 2.0,
+                w,
+                h: dock_h - 4.0,
             };
 
-            if i == active_idx {
-                let pill_w = active_w;
-                let pill_rect = Rect {
-                    x: cur_x,
-                    y: dock_y + 2.0,
-                    w: pill_w,
-                    h: dock_h - 4.0,
-                };
+            let is_hover = cursor_pos
+                .map(|(px, py)| item_rect.contains(px, py))
+                .unwrap_or(false);
 
-                // Active capsule pill background & border
-                draw_rounded_rect(buf, pill_rect.x, pill_rect.y, pill_rect.w, pill_rect.h, 8.0, pill_bg);
-                draw_rounded_rect_stroke(buf, pill_rect.x, pill_rect.y, pill_rect.w, pill_rect.h, 8.0, 1.0, pill_stroke);
-
-                // Active micro-icon
-                let icon_cx = cur_x + 10.0;
-                draw_dock_icon(buf, i, icon_cx, cy, active_fg);
-
-                // Active page label
-                let text_x = cur_x + 19.0;
-                text_renderer.draw_text(buf, active_title, text_x, cy + 3.5, 9.0, active_fg, true);
-
-                self.click_targets.push((pill_rect, ClickAction::SelectPage(page)));
-                cur_x += pill_w + item_gap;
-            } else {
-                let item_rect = Rect {
-                    x: cur_x,
-                    y: dock_y + 2.0,
-                    w: inactive_w,
-                    h: dock_h - 4.0,
-                };
-
-                let is_hover = cursor_pos
-                    .map(|(px, py)| item_rect.contains(px, py))
-                    .unwrap_or(false);
-
-                let icon_color = if is_hover {
-                    draw_rounded_rect(buf, item_rect.x, item_rect.y, item_rect.w, item_rect.h, 8.0, hover_bg);
-                    hover_fg
-                } else {
-                    normal_fg
-                };
-
-                draw_dock_icon(buf, i, cur_x + inactive_w * 0.5, cy, icon_color);
-
-                self.click_targets.push((item_rect, ClickAction::SelectPage(page)));
-                cur_x += inactive_w + item_gap;
+            if is_hover && p < 0.25 {
+                draw_rounded_rect(buf, item_rect.x, item_rect.y, item_rect.w, item_rect.h, 8.0, hover_bg);
             }
+
+            // Smooth color interpolation between normal and active
+            let icon_color = if p > 0.02 {
+                let r = (normal_fg.r as f32 * (1.0 - p) + active_fg.r as f32 * p).round() as u8;
+                let g = (normal_fg.g as f32 * (1.0 - p) + active_fg.g as f32 * p).round() as u8;
+                let b = (normal_fg.b as f32 * (1.0 - p) + active_fg.b as f32 * p).round() as u8;
+                let a = (normal_fg.a as f32 * (1.0 - p) + active_fg.a as f32 * p).round() as u8;
+                Color::rgba(r, g, b, a as f32 / 255.0)
+            } else if is_hover {
+                hover_fg
+            } else {
+                normal_fg
+            };
+
+            // Micro-icon smoothly glides from centered (inactive) to x+10 (active)
+            let icon_cx = ix + (inactive_w * 0.5) * (1.0 - p) + 10.0 * p;
+            draw_dock_icon(buf, i, icon_cx, cy, icon_color);
+
+            // Active page label smoothly fades in/out with spring progress
+            if p > 0.05 {
+                let label_a = ((active_fg.a as f32 / 255.0) * p).clamp(0.0, 1.0);
+                let label_color = Color::rgba(active_fg.r, active_fg.g, active_fg.b, label_a);
+                let text_x = ix + 19.0;
+                text_renderer.draw_text(buf, TITLES[i], text_x, cy + 3.5, 9.0, label_color, true);
+            }
+
+            self.click_targets.push((item_rect, ClickAction::SelectPage(page)));
         }
     }
 
