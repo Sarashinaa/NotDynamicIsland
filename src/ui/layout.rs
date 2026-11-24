@@ -282,7 +282,7 @@ impl LayoutManager {
         cur_w: f32,
     ) -> Rect {
         let box_x = cur_x + 44.0;
-        let box_y = cur_y + 36.0;
+        let box_y = cur_y + 54.0;
         let box_w = cur_w - 88.0;
         let box_h = 76.0;
         let card_w = (box_w - 16.0) / (file_count as f32).max(1.0);
@@ -888,10 +888,15 @@ impl LayoutManager {
         self.click_targets
             .push((theme_rect, ClickAction::ToggleGlassTheme));
 
+        // Top Interactive Navbar Dock (positioned directly under Date & Time)
+        let center_x = x + w * 0.5;
+        let indicator_y = y + 40.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
+
         // Middle Row: Album Artwork Tile
-        let art_size = 46.0;
+        let art_size = 42.0;
         let art_x = x + 16.0;
-        let art_y = y + 36.0;
+        let art_y = y + 56.0;
         render_album_art_tile(
             buf,
             art_x,
@@ -925,7 +930,7 @@ impl LayoutManager {
             buf,
             title,
             text_x,
-            art_y + 16.0,
+            art_y + 14.0,
             13.5,
             text_max_w,
             title_color,
@@ -935,7 +940,7 @@ impl LayoutManager {
             buf,
             artist,
             text_x,
-            art_y + 32.0,
+            art_y + 30.0,
             11.5,
             text_max_w,
             artist_color,
@@ -944,7 +949,7 @@ impl LayoutManager {
 
         // Right Nav Arrow Button (>) to cycle to Shelf
         let next_page_btn_x = x + w - 26.0;
-        let next_page_btn_y = art_y + 20.0;
+        let next_page_btn_y = art_y + 18.0;
         let next_page_rect = Rect {
             x: next_page_btn_x - 12.0,
             y: next_page_btn_y - 12.0,
@@ -956,7 +961,7 @@ impl LayoutManager {
         self.click_targets.push((next_page_rect, ClickAction::NextPage));
 
         // Interactive Progress Bar Row
-        let bar_y = y + 86.0;
+        let bar_y = y + 108.0;
         let progress_x = x + 56.0;
         let progress_w = w - 112.0;
 
@@ -1055,8 +1060,8 @@ impl LayoutManager {
             false,
         );
 
-        // Bottom Controls Row: Positioned at ctrl_y = 108px
-        let ctrl_y = y + 108.0;
+        // Bottom Controls Row: Positioned at ctrl_y = 133px
+        let ctrl_y = y + 133.0;
 
         // Lyrics Button (speech bubble 💬) on left
         let lyrics_rect = Rect {
@@ -1156,10 +1161,6 @@ impl LayoutManager {
         let seek_fwd_hover = cursor_pos.map(|(px, py)| seek_fwd_rect.contains(px, py)).unwrap_or(false);
         draw_seek_forward_button_ex(buf, text_renderer, x + w - 28.0, ctrl_y, 18.0, seek_fwd_hover, opacity, is_light);
         self.click_targets.push((seek_fwd_rect, ClickAction::SeekRelative(5)));
-
-        // Bottom Interactive Navigation Dock (GNOME Isle Style)
-        let indicator_y = y + 142.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
 /// Intelligently wraps a single lyric line into up to two sub-lines if it exceeds max_width.
@@ -1689,23 +1690,28 @@ fn wrap_lyric_line<'a>(
         self.click_targets
             .push((theme_rect, ClickAction::ToggleGlassTheme));
 
+        // Top Interactive Navbar Dock (positioned directly under Date & Time)
+        let indicator_y = y + 40.0;
+        let center_x = x + w * 0.5;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
+
         // Navigation Arrows:
         // Left Nav Arrow (<) back to Music
-        let prev_btn_rect = Rect { x: x + 10.0, y: y + 56.0, w: 22.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 10.0, y: y + 70.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + 21.0, y + 68.0, 10.5, false, prev_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + 21.0, y + 82.0, 10.5, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
         // Right Nav Arrow (>) forward to File Shelf
-        let next_btn_rect = Rect { x: x + w - 32.0, y: y + 56.0, w: 22.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 32.0, y: y + 70.0, w: 22.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + w - 21.0, y + 68.0, 10.5, true, next_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + w - 21.0, y + 82.0, 10.5, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // Left Side: Hero Weather Section (Icon + Big Temp + Condition + City)
         let hero_card_rect = Rect {
             x: x + 35.0,
-            y: y + 35.0,
+            y: y + 54.0,
             w: 105.0,
             h: 84.0,
         };
@@ -1734,7 +1740,7 @@ fn wrap_lyric_line<'a>(
         self.click_targets.push((hero_card_rect, ClickAction::RefreshWeather));
 
         let hero_cx = x + 60.0;
-        let hero_cy = y + 56.0;
+        let hero_cy = y + 75.0;
         draw_weather_icon(
             buf,
             hero_cx,
@@ -1796,9 +1802,9 @@ fn wrap_lyric_line<'a>(
         let grid_x = x + 148.0;
         let col_w = 106.0;
         let col_gap = 8.0;
-        let row_h = 35.0;
-        let row1_y = y + 42.0;
-        let row2_y = y + 83.0;
+        let row_h = 36.0;
+        let row1_y = y + 54.0;
+        let row2_y = y + 96.0;
 
         let glass_card_bg = palette.card_bg;
         let glass_card_border = palette.card_stroke;
@@ -1854,11 +1860,6 @@ fn wrap_lyric_line<'a>(
             format!("{:.1} km/h", state.weather.wind_speed)
         };
         text_renderer.draw_text(buf, &wind_str, p4_x + 10.0, p4_y + 26.0, 11.0, palette.primary_fg, true);
-
-        // Bottom Interactive Navigation Dock (GNOME Isle Style)
-        let indicator_y = y + 138.0;
-        let center_x = x + w * 0.5;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Mode 5: Shelf - Drag-and-drop file shelf, copy to clipboard, launch file
@@ -1887,20 +1888,24 @@ fn wrap_lyric_line<'a>(
         let header_time = get_formatted_header_time();
         text_renderer.draw_text(buf, &header_time, x + w * 0.5 - 58.0, cy + 4.0, 11.5, palette.primary_fg, true);
 
+        // Top Interactive Navbar Dock (positioned directly under Date & Time)
+        let indicator_y = y + 40.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, state, opacity, cursor_pos, is_light);
+
         // Nav Arrows: < to Music, > to ToDo
-        let prev_btn_rect = Rect { x: x + 12.0, y: y + 56.0, w: 24.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 12.0, y: y + 70.0, w: 24.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + 24.0, y + 68.0, 11.0, false, prev_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + 24.0, y + 82.0, 11.0, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
-        let next_btn_rect = Rect { x: x + w - 36.0, y: y + 56.0, w: 24.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 36.0, y: y + 70.0, w: 24.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + w - 24.0, y + 68.0, 11.0, true, next_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + w - 24.0, y + 82.0, 11.0, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // Shelf Container Box
         let box_x = x + 44.0;
-        let box_y = y + 36.0;
+        let box_y = y + 54.0;
         let box_w = w - 88.0;
         let box_h = 76.0;
 
@@ -1986,10 +1991,6 @@ fn wrap_lyric_line<'a>(
                 }
             }
         }
-
-        // Bottom Interactive Navigation Dock (GNOME Isle Style)
-        let indicator_y = y + 134.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Mode 6: To-do - Clean typography spacing, task statistics, scrollable task items
@@ -2023,16 +2024,20 @@ fn wrap_lyric_line<'a>(
             draw_monochrome_sound_wave_ex(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity, is_light);
         }
 
+        // Top Interactive Navbar Dock (positioned directly under Date & Time)
+        let indicator_y = y + 40.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, state, opacity, cursor_pos, is_light);
+
         // Prev Arrow Button (<) to cycle to Shelf
-        let prev_btn_rect = Rect { x: x + 12.0, y: y + 62.0, w: 24.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 12.0, y: y + 70.0, w: 24.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + 24.0, y + 74.0, 11.0, false, prev_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + 24.0, y + 82.0, 11.0, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
         // Next Arrow Button (>) to cycle to Calendar
-        let next_btn_rect = Rect { x: x + w - 36.0, y: y + 62.0, w: 24.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 36.0, y: y + 70.0, w: 24.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + w - 24.0, y + 74.0, 11.0, true, next_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + w - 24.0, y + 82.0, 11.0, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // LEFT COLUMN: Scrollable Task List Items with dynamic multi-line wrap
@@ -2040,9 +2045,9 @@ fn wrap_lyric_line<'a>(
         let list_w = 224.0;
         let max_text_w = list_w - 36.0;
         let item_gap = 4.0;
-        let max_list_bottom = y + 122.0;
+        let max_list_bottom = y + 148.0;
 
-        let mut cur_item_y = y + 34.0;
+        let mut cur_item_y = y + 54.0;
         let mut rendered_count = 0;
 
         for item in state.todo.items.iter().skip(state.todo.scroll_offset) {
@@ -2131,8 +2136,8 @@ fn wrap_lyric_line<'a>(
         let total_items = state.todo.items.len();
         if total_items > rendered_count || state.todo.scroll_offset > 0 {
             let sb_x = list_x + list_w + 3.0;
-            let sb_y = y + 36.0;
-            let sb_h = 82.0;
+            let sb_y = y + 54.0;
+            let sb_h = 88.0;
             let visible_ratio = (rendered_count as f32 / total_items.max(1) as f32).clamp(0.2, 1.0);
             let thumb_h = (sb_h * visible_ratio).max(14.0);
             let max_scroll = total_items.saturating_sub(1).max(1);
@@ -2144,8 +2149,8 @@ fn wrap_lyric_line<'a>(
 
         // VERTICAL DIVIDER LINE between task list and right controls
         let div_x = x + 272.0;
-        let min_y = (y + 34.0) as usize;
-        let max_y = (y + 122.0) as usize;
+        let min_y = (y + 54.0) as usize;
+        let max_y = (y + 148.0) as usize;
         for py in min_y..=max_y {
             buf.blend_pixel(div_x as usize, py, palette.divider_col.r, palette.divider_col.g, palette.divider_col.b, palette.divider_col.a);
         }
@@ -2159,7 +2164,7 @@ fn wrap_lyric_line<'a>(
             buf,
             &score_str,
             right_x,
-            y + 54.0,
+            y + 70.0,
             20.0,
             palette.primary_fg,
             true,
@@ -2168,7 +2173,7 @@ fn wrap_lyric_line<'a>(
             buf,
             "Task Done Today",
             right_x,
-            y + 74.0,
+            y + 90.0,
             10.5,
             palette.secondary_fg,
             false,
@@ -2176,7 +2181,7 @@ fn wrap_lyric_line<'a>(
 
         // Interactive Task Input Mode or Action Buttons (+ Add Task & ✎ Clear)
         if state.todo.is_input_active {
-            let input_rect = Rect { x: right_x, y: y + 92.0, w: 146.0, h: 26.0 };
+            let input_rect = Rect { x: right_x, y: y + 112.0, w: 146.0, h: 26.0 };
             let (input_bg, input_stroke, input_text_col) = if is_light {
                 (
                     Color::rgba(240, 243, 246, 0.95 * opacity),
@@ -2241,25 +2246,21 @@ fn wrap_lyric_line<'a>(
             }
             self.click_targets.push((cancel_rect, ClickAction::CancelAddTask));
         } else {
-            // Buttons: + Add Task & ✎ Clear positioned cleanly at y = 94.0
-            let add_btn_rect = Rect { x: right_x, y: y + 94.0, w: 76.0, h: 22.0 };
+            // Buttons: + Add Task & ✎ Clear positioned cleanly at y = 112.0
+            let add_btn_rect = Rect { x: right_x, y: y + 112.0, w: 76.0, h: 22.0 };
             let add_hover = cursor_pos.map(|(px, py)| add_btn_rect.contains(px, py)).unwrap_or(false);
             let add_bg = if add_hover { palette.btn_hover_bg } else { palette.btn_bg };
             draw_rounded_rect(buf, add_btn_rect.x, add_btn_rect.y, add_btn_rect.w, add_btn_rect.h, 6.0, add_bg);
             text_renderer.draw_text(buf, "+ Add Task", add_btn_rect.x + 8.0, add_btn_rect.y + 15.0, 9.5, palette.primary_fg, true);
             self.click_targets.push((add_btn_rect, ClickAction::PromptAddTask));
 
-            let clear_btn_rect = Rect { x: right_x + 82.0, y: y + 94.0, w: 58.0, h: 22.0 };
+            let clear_btn_rect = Rect { x: right_x + 82.0, y: y + 112.0, w: 58.0, h: 22.0 };
             let clear_hover = cursor_pos.map(|(px, py)| clear_btn_rect.contains(px, py)).unwrap_or(false);
             let clear_bg = if clear_hover { palette.btn_hover_bg } else { palette.btn_bg };
             draw_rounded_rect(buf, clear_btn_rect.x, clear_btn_rect.y, clear_btn_rect.w, clear_btn_rect.h, 6.0, clear_bg);
             text_renderer.draw_text(buf, "✎ Clear", clear_btn_rect.x + 8.0, clear_btn_rect.y + 15.0, 9.5, palette.secondary_fg, false);
             self.click_targets.push((clear_btn_rect, ClickAction::ClearDoneTodo));
         }
-
-        // Bottom Interactive Navigation Dock (GNOME Isle Style)
-        let indicator_y = y + 144.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, x + w * 0.5, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Mode: Calendar & Agenda (Page 3 / 4th Page) - Interactive Month Grid & Google Calendar Sync
@@ -2319,15 +2320,19 @@ fn wrap_lyric_line<'a>(
             draw_monochrome_sound_wave_ex(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity, is_light);
         }
 
+        // Top Interactive Navbar Dock (positioned directly under Date & Time)
+        let indicator_y = y + 40.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
+
         // Nav Arrows: < to To-Do, > to Focus Timer
-        let prev_btn_rect = Rect { x: x + 10.0, y: y + 56.0, w: 20.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 10.0, y: y + 70.0, w: 20.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + 18.0, y + 68.0, 10.0, false, prev_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + 18.0, y + 82.0, 10.0, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
-        let next_btn_rect = Rect { x: x + w - 28.0, y: y + 56.0, w: 20.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 28.0, y: y + 70.0, w: 20.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + w - 18.0, y + 68.0, 10.0, true, next_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + w - 18.0, y + 82.0, 10.0, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // LEFT PANE: Mini Interactive Month Grid
@@ -2335,7 +2340,7 @@ fn wrap_lyric_line<'a>(
         let left_w = 188.0;
 
         // Header Row: Month & Year on left, [<] [>] [Today] on right
-        let m_header_y = y + 30.0;
+        let m_header_y = y + 54.0;
 
         // Month Title (e.g. OCTOBER 2026)
         let m_name = crate::system::calendar::month_name(state.calendar.view_month);
@@ -2367,7 +2372,7 @@ fn wrap_lyric_line<'a>(
         self.click_targets.push((today_btn_rect, ClickAction::CalendarJumpToToday));
 
         // Day of Week Header row: Su Mo Tu We Th Fr Sa
-        let dow_y = y + 54.0;
+        let dow_y = y + 74.0;
         let col_w = left_w / 7.0;
         let dows = ["S", "M", "T", "W", "T", "F", "S"];
         for (i, d_str) in dows.iter().enumerate() {
@@ -2379,7 +2384,7 @@ fn wrap_lyric_line<'a>(
         // Days Grid: 1..=days_in_month
         let start_dow = crate::system::calendar::day_of_week(state.calendar.view_year, state.calendar.view_month, 1);
         let total_days = crate::system::calendar::days_in_month(state.calendar.view_year, state.calendar.view_month);
-        let grid_start_y = y + 66.0;
+        let grid_start_y = y + 86.0;
         let row_h = 10.5;
 
         for d in 1..=total_days {
@@ -2429,8 +2434,8 @@ fn wrap_lyric_line<'a>(
 
         // VERTICAL DIVIDER LINE between panes
         let div_x = left_x + left_w + 10.0;
-        let min_y = (y + 34.0) as usize;
-        let max_y = (y + 130.0) as usize;
+        let min_y = (y + 54.0) as usize;
+        let max_y = (y + 150.0) as usize;
         for py in min_y..=max_y {
             buf.blend_pixel(div_x as usize, py, palette.divider_col.r, palette.divider_col.g, palette.divider_col.b, palette.divider_col.a);
         }
@@ -2444,10 +2449,10 @@ fn wrap_lyric_line<'a>(
         let dow_name = crate::system::calendar::day_name_short(dow_sel);
         let m_sel_name = crate::system::calendar::month_short(state.calendar.view_month);
         let header_str = format!("{}, {} {}", dow_name, state.calendar.selected_day, m_sel_name);
-        text_renderer.draw_text(buf, &header_str, right_x, y + 42.0, 11.5, palette.primary_fg, true);
+        text_renderer.draw_text(buf, &header_str, right_x, y + 62.0, 11.5, palette.primary_fg, true);
 
         // Action Buttons: [+] Add Event & [↻] Sync
-        let sync_btn_rect = Rect { x: right_x + right_w - 22.0, y: y + 32.0, w: 20.0, h: 18.0 };
+        let sync_btn_rect = Rect { x: right_x + right_w - 22.0, y: y + 52.0, w: 20.0, h: 18.0 };
         let sync_hover = cursor_pos.map(|(px, py)| sync_btn_rect.contains(px, py)).unwrap_or(false);
         let sync_bg = if sync_hover { palette.btn_hover_bg } else { palette.btn_bg };
         draw_rounded_rect(buf, sync_btn_rect.x, sync_btn_rect.y, sync_btn_rect.w, sync_btn_rect.h, 4.0, sync_bg);
@@ -2455,7 +2460,7 @@ fn wrap_lyric_line<'a>(
         draw_refresh_icon(buf, sync_btn_rect.x + 10.0, sync_btn_rect.y + 9.0, 4.5, sync_col);
         self.click_targets.push((sync_btn_rect, ClickAction::CalendarSyncGoogle));
 
-        let add_btn_rect = Rect { x: right_x + right_w - 46.0, y: y + 32.0, w: 20.0, h: 18.0 };
+        let add_btn_rect = Rect { x: right_x + right_w - 46.0, y: y + 52.0, w: 20.0, h: 18.0 };
         let add_hover = cursor_pos.map(|(px, py)| add_btn_rect.contains(px, py)).unwrap_or(false);
         let add_bg = if add_hover { palette.btn_hover_bg } else { palette.btn_bg };
         draw_rounded_rect(buf, add_btn_rect.x, add_btn_rect.y, add_btn_rect.w, add_btn_rect.h, 4.0, add_bg);
@@ -2465,7 +2470,7 @@ fn wrap_lyric_line<'a>(
         // Agenda Items or Inline Input
         if state.calendar.is_input_active {
             // Render Input Box
-            let input_rect = Rect { x: right_x, y: y + 52.0, w: right_w, h: 26.0 };
+            let input_rect = Rect { x: right_x, y: y + 74.0, w: right_w, h: 26.0 };
             let (input_bg, input_stroke, input_text_col) = if is_light {
                 (
                     Color::rgba(240, 243, 246, 0.95 * opacity),
@@ -2517,12 +2522,12 @@ fn wrap_lyric_line<'a>(
             let events = state.calendar.get_events_for_selected();
             if events.is_empty() {
                 // Empty state
-                text_renderer.draw_text(buf, "No events scheduled", right_x, y + 72.0, 10.5, palette.secondary_fg, false);
-                text_renderer.draw_text(buf, "Free all day • Enjoy! ✨", right_x, y + 88.0, 9.5, palette.muted_fg, false);
+                text_renderer.draw_text(buf, "No events scheduled", right_x, y + 92.0, 10.5, palette.secondary_fg, false);
+                text_renderer.draw_text(buf, "Free all day • Enjoy! ✨", right_x, y + 108.0, 9.5, palette.muted_fg, false);
             } else {
                 // List up to 3 events
                 let item_h = 22.0;
-                let start_item_y = y + 52.0;
+                let start_item_y = y + 74.0;
                 let visible_count = events.len().min(3);
                 for i in 0..visible_count {
                     let e = events[i];
@@ -2576,17 +2581,13 @@ fn wrap_lyric_line<'a>(
         } else {
             Color::rgba(34, 197, 94, 0.95 * opacity)
         };
-        draw_circle(buf, right_x + 4.0, y + 126.5, 2.5, dot_color);
+        draw_circle(buf, right_x + 4.0, y + 148.5, 2.5, dot_color);
         let status_text = if state.calendar.gcal_url.is_empty() {
             "Local (set Google link in calendar_sync.txt)"
         } else {
             &state.calendar.sync_status
         };
-        text_renderer.draw_text(buf, status_text, right_x + 11.0, y + 130.0, 8.5, palette.muted_fg, false);
-
-        // Bottom Interactive Navigation Dock (GNOME Isle Style)
-        let indicator_y = y + 152.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
+        text_renderer.draw_text(buf, status_text, right_x + 11.0, y + 152.0, 8.5, palette.muted_fg, false);
     }
 
     /// Mode 7: Focus Timer & Stopwatch (Page 3)
@@ -2620,26 +2621,30 @@ fn wrap_lyric_line<'a>(
             draw_monochrome_sound_wave_ex(buf, x + w - 38.0, cy - 6.0, 22.0, 12.0, true, state.anim_time, opacity, is_light);
         }
 
+        // Top Interactive Navbar Dock (positioned directly under Date & Time)
+        let indicator_y = y + 40.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
+
         // Nav Arrow: < back to Tools
-        let prev_btn_rect = Rect { x: x + 10.0, y: y + 56.0, w: 22.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 10.0, y: y + 70.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + 20.0, y + 68.0, 10.5, false, prev_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + 20.0, y + 82.0, 10.5, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
         // Nav Arrow: > forward to Assistant (Groq AI)
-        let next_btn_rect = Rect { x: x + w - 32.0, y: y + 56.0, w: 22.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 32.0, y: y + 70.0, w: 22.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + w - 21.0, y + 68.0, 10.5, true, next_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + w - 21.0, y + 82.0, 10.5, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
-        // Mode Selectors Pills (y: 34.0)
+        // Mode Selectors Pills (y: 54.0)
         let modes = [
             ("Focus", crate::system::timer::TimerMode::Focus, 52.0),
             ("Break", crate::system::timer::TimerMode::ShortBreak, 50.0),
             ("Stopwatch", crate::system::timer::TimerMode::Stopwatch, 74.0),
         ];
         let mut pill_x = x + 30.0;
-        let pill_y = y + 34.0;
+        let pill_y = y + 54.0;
         let pill_h = 20.0;
 
         for (label, mode, pill_w) in modes {
@@ -2668,12 +2673,12 @@ fn wrap_lyric_line<'a>(
             pill_x += pill_w + 6.0;
         }
 
-        // Center Area: Large Time Display (y: 76.0)
+        // Center Area: Large Time Display (y: 94.0)
         let (time_str, sub_time) = state.focus_timer.formatted_time();
-        text_renderer.draw_text(buf, &time_str, x + 32.0, y + 76.0, 28.0, palette.primary_fg, true);
+        text_renderer.draw_text(buf, &time_str, x + 32.0, y + 94.0, 28.0, palette.primary_fg, true);
         if !sub_time.is_empty() {
             let (tw, _) = text_renderer.measure_text(&time_str, 28.0, true);
-            text_renderer.draw_text(buf, &sub_time, x + 34.0 + tw, y + 76.0, 14.0, palette.secondary_fg, true);
+            text_renderer.draw_text(buf, &sub_time, x + 34.0 + tw, y + 94.0, 14.0, palette.secondary_fg, true);
         }
 
         // Subtitle / Status text
@@ -2690,11 +2695,11 @@ fn wrap_lyric_line<'a>(
                 format!("{} • Ready to focus", state.focus_timer.mode.display_name())
             }
         };
-        text_renderer.draw_text(buf, &status_text, x + 34.0, y + 90.0, 10.0, palette.muted_fg, false);
+        text_renderer.draw_text(buf, &status_text, x + 34.0, y + 108.0, 10.0, palette.muted_fg, false);
 
-        // Circular Progress Ring Meter on Right (center: x + w - 68.0, y: 72.0, radius: 20.0)
+        // Circular Progress Ring Meter on Right (center: x + w - 68.0, y: 90.0, radius: 20.0)
         let ring_cx = x + w - 68.0;
-        let ring_cy = y + 72.0;
+        let ring_cy = y + 90.0;
         let ring_r = 20.0;
         let prog = state.focus_timer.progress();
 
@@ -2731,8 +2736,8 @@ fn wrap_lyric_line<'a>(
         // Center icon
         draw_timer_icon(buf, ring_cx, ring_cy, 14.0, palette.primary_fg);
 
-        // Bottom Controls Row (ctrl_y: 108.0)
-        let ctrl_y = y + 108.0;
+        // Bottom Controls Row (ctrl_y: 132.0)
+        let ctrl_y = y + 132.0;
 
         // [-5m] and [+5m]
         if state.focus_timer.mode != crate::system::timer::TimerMode::Stopwatch {
@@ -2777,10 +2782,6 @@ fn wrap_lyric_line<'a>(
         draw_rounded_rect(buf, rst_rect.x, rst_rect.y, rst_w, play_h, 10.0, rst_bg);
         text_renderer.draw_text(buf, "Reset", rst_x + 12.0, ctrl_y + 4.0, 10.5, palette.secondary_fg, false);
         self.click_targets.push((rst_rect, ClickAction::ResetTimer));
-
-        // Bottom Interactive Navigation Dock (GNOME Isle Style)
-        let indicator_y = y + 140.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Mode 8: Tools & Utilities (Page 4 / 5th Page) - Apple Control Center cards for Eyedropper, Screen Snip, and Mic Mute
@@ -2850,16 +2851,20 @@ fn wrap_lyric_line<'a>(
             );
         }
 
+        // Top Interactive Navbar Dock (positioned directly under Date & Time)
+        let indicator_y = y + 40.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
+
         // Nav Arrow (<) back to ToDo
-        let prev_btn_rect = Rect { x: x + 10.0, y: y + 56.0, w: 22.0, h: 24.0 };
+        let prev_btn_rect = Rect { x: x + 10.0, y: y + 70.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + 21.0, y + 68.0, 10.5, false, prev_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + 21.0, y + 82.0, 10.5, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
         // Nav Arrow (>) forward to Focus Timer
-        let next_btn_rect = Rect { x: x + w - 32.0, y: y + 56.0, w: 22.0, h: 24.0 };
+        let next_btn_rect = Rect { x: x + w - 32.0, y: y + 70.0, w: 22.0, h: 24.0 };
         let next_hover = cursor_pos.map(|(px, py)| next_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + w - 21.0, y + 68.0, 10.5, true, next_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + w - 21.0, y + 82.0, 10.5, true, next_hover, opacity, is_light);
         self.click_targets.push((next_btn_rect, ClickAction::NextPage));
 
         // 3 Apple Control Center Utility Cards
@@ -2868,7 +2873,7 @@ fn wrap_lyric_line<'a>(
         let card_h = 74.0;
         let gap = 8.0;
         let start_x = x + 43.0;
-        let card_y = y + 38.0;
+        let card_y = y + 54.0;
 
         // Card 1: Eyedropper (Color Picker)
         {
@@ -3022,10 +3027,6 @@ fn wrap_lyric_line<'a>(
 
             self.click_targets.push((c_rect, ClickAction::ToggleMicMute));
         }
-
-        // Bottom Interactive Navigation Dock (GNOME Isle Style)
-        let indicator_y = y + 134.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
 
     /// Helper function to wrap text within max_w and at most max_lines
@@ -3324,8 +3325,12 @@ fn wrap_lyric_line<'a>(
         draw_theme_toggle_animated(buf, theme_rect.x, theme_rect.y, theme_rect.w, theme_rect.h, state.theme_spring.current, theme_hover, opacity);
         self.click_targets.push((theme_rect, ClickAction::ToggleGlassTheme));
 
+        // Top Interactive Navbar Dock (positioned directly under Date & Time)
+        let indicator_y = y + 40.0;
+        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
+
         // Navigation Arrow: < back to Focus Timer (Assistant is the final page)
-        let arrow_y = y + 80.0;
+        let arrow_y = y + 96.0;
         let prev_btn_rect = Rect { x: x + 10.0, y: arrow_y - 12.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
         draw_nav_arrow_button_ex(buf, x + 21.0, arrow_y, 10.5, false, prev_hover, opacity, is_light);
@@ -3335,7 +3340,7 @@ fn wrap_lyric_line<'a>(
         // Response / Chat Card
         let card_x = x + 44.0;
         let card_w = w - 88.0;
-        let card_y = y + 34.0;
+        let card_y = y + 54.0;
         let card_h = 84.0;
 
         let card_bg = palette.card_bg;
@@ -3431,8 +3436,8 @@ fn wrap_lyric_line<'a>(
             text_renderer.draw_text(buf, "Contoh: \"tambahin to-do beli susu\", \"pasang timer 25 menit\", \"matiin mic\", \"cuaca\"", card_x + 12.0, card_y + 54.0, 9.0, palette.muted_fg, false);
         }
 
-        // Prompt Input Field Bar: card_x, y + 124.0, w: card_w, h: 26.0
-        let input_y = y + 124.0;
+        // Prompt Input Field Bar: card_x, y + 144.0, w: card_w, h: 26.0
+        let input_y = y + 144.0;
         let input_h = 26.0;
         let input_rect = Rect { x: card_x, y: input_y, w: card_w, h: input_h };
         let input_hover = cursor_pos.map(|(px, py)| input_rect.contains(px, py)).unwrap_or(false);
@@ -3486,10 +3491,6 @@ fn wrap_lyric_line<'a>(
         let arrow_cy = send_btn_rect.y + send_btn_h * 0.5;
         draw_send_arrow(buf, arrow_cx, arrow_cy, 9.0, Color::rgba(255, 255, 255, 0.98 * opacity));
         self.click_targets.push((send_btn_rect, ClickAction::AssistantSubmitPrompt));
-
-        // Bottom Interactive Navigation Dock (GNOME Isle Style)
-        let indicator_y = y + 171.0;
-        self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
     }
     fn render_charging(
         &self,
@@ -4566,8 +4567,8 @@ fn wrap_lyric_line<'a>(
                 let r = (normal_fg.r as f32 * (1.0 - p) + active_fg.r as f32 * p).round() as u8;
                 let g = (normal_fg.g as f32 * (1.0 - p) + active_fg.g as f32 * p).round() as u8;
                 let b = (normal_fg.b as f32 * (1.0 - p) + active_fg.b as f32 * p).round() as u8;
-                let a = (normal_fg.a as f32 * (1.0 - p) + active_fg.a as f32 * p).round() as u8;
-                Color::rgba(r, g, b, a as f32 / 255.0)
+                let a = normal_fg.a * (1.0 - p) + active_fg.a * p;
+                Color::rgba(r, g, b, a)
             } else if is_hover {
                 hover_fg
             } else {
@@ -4580,7 +4581,7 @@ fn wrap_lyric_line<'a>(
 
             // Active page label smoothly fades in/out with spring progress
             if p > 0.05 {
-                let label_a = ((active_fg.a as f32 / 255.0) * p).clamp(0.0, 1.0);
+                let label_a = (active_fg.a * p).clamp(0.0, 1.0);
                 let label_color = Color::rgba(active_fg.r, active_fg.g, active_fg.b, label_a);
                 let text_x = ix + 19.0;
                 text_renderer.draw_text(buf, TITLES[i], text_x, cy + 3.5, 9.0, label_color, true);

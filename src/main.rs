@@ -801,7 +801,7 @@ pub unsafe extern "system" fn window_proc(
                         IslandMode::Expanded(ExpandedPage::Music) => {
                             let progress_x = cur_x + 56.0;
                             let progress_w = cur_w - 112.0;
-                            let bar_y = cur_y + 90.0;
+                            let bar_y = cur_y + 108.0;
                             let bar_rect = Rect {
                                 x: progress_x - 8.0,
                                 y: bar_y - 10.0,
@@ -2011,8 +2011,8 @@ pub unsafe extern "system" fn window_proc(
                         // Smart Cursor Zone: Left side is task list, right side is menu navigation!
                         let is_over_task_list = mouse_x >= cur_x + 28.0
                             && mouse_x <= cur_x + 270.0
-                            && mouse_y >= cur_y + 28.0
-                            && mouse_y <= cur_y + 138.0;
+                            && mouse_y >= cur_y + 48.0
+                            && mouse_y <= cur_y + 152.0;
 
                         if is_over_task_list {
                             app.island_state.vwheel_accum += delta as i32;
@@ -2032,8 +2032,8 @@ pub unsafe extern "system" fn window_proc(
                         // Smart Cursor Zone: Only scroll month when hovered over month grid; otherwise switch pages!
                         let is_over_month_grid = mouse_x >= cur_x + 28.0
                             && mouse_x <= cur_x + 226.0
-                            && mouse_y >= cur_y + 28.0
-                            && mouse_y <= cur_y + 138.0;
+                            && mouse_y >= cur_y + 48.0
+                            && mouse_y <= cur_y + 152.0;
 
                         if is_over_month_grid {
                             app.island_state.vwheel_accum += delta as i32;
@@ -2052,8 +2052,8 @@ pub unsafe extern "system" fn window_proc(
                     } else if let IslandMode::Expanded(ExpandedPage::Assistant) = app.island_state.mode {
                         let card_x = cur_x + 44.0;
                         let card_w = cur_w - 88.0;
-                        let input_rect = Rect { x: card_x, y: cur_y + 132.0, w: card_w, h: 28.0 };
-                        let response_rect = Rect { x: card_x, y: cur_y + 34.0, w: card_w, h: 92.0 };
+                        let input_rect = Rect { x: card_x, y: cur_y + 144.0, w: card_w, h: 28.0 };
+                        let response_rect = Rect { x: card_x, y: cur_y + 54.0, w: card_w, h: 86.0 };
 
                         if input_rect.contains(mouse_x, mouse_y) {
                             // Over input field: scroll typed text horizontally
