@@ -2874,9 +2874,10 @@ pub unsafe extern "system" fn window_proc(
                         //   Delivers real-time synced optical blur behind the glass card for videos, scrolling, or motion.
                         // - Fluid 8 FPS (120ms) for background wallpaper luminance tracking when notch is idle/resting.
                         let is_open_or_hovered = app.island_state.is_hovered || app.island_state.is_pinned_open;
+                        let is_animating_kinetics = is_spring_moving || is_theme_moving || is_sub_notif_moving || is_dock_moving;
                         let min_interval = if fg_changed {
                             std::time::Duration::from_millis(0)
-                        } else if is_spring_moving || is_theme_moving || is_sub_notif_moving {
+                        } else if is_animating_kinetics {
                             std::time::Duration::from_secs(3600)
                         } else if is_open_or_hovered {
                             std::time::Duration::from_millis(33)

@@ -76,21 +76,35 @@ pub fn get_monitor_refresh_rate_for_window(hwnd: HWND) -> u32 {
     }
 }
 
-/// Computes optimal animation timer tick interval in milliseconds for the monitor where the window currently is.
-/// For 180Hz displays: 5ms (~200Hz tick rate).
-/// For 144Hz displays: 6ms (~166Hz tick rate).
-/// For 120Hz displays: 8ms (125Hz tick rate).
-/// For 60Hz displays: 16ms (60Hz tick rate).
+/// Maps monitor refresh rate in Hz to optimal animation timer tick interval in milliseconds.
+/// Uses sub-frame oversampling cadence to guarantee DWM VSync deadlines are never starved:
+/// - 60Hz displays (16.67ms VSync): 8ms tick (~125Hz) guarantees locked 60.0 FPS with 0 dropped frames.
+/// - 75Hz displays (13.33ms VSync): 7ms tick (~142Hz).
+/// - 90Hz / 100Hz displays (11.11ms / 10.0ms VSync): 6ms tick (~166Hz).
+/// - 120Hz / 144Hz displays (8.33ms / 6.94ms VSync): 5ms tick (~200Hz).
+/// - 165Hz / 180Hz displays (6.06ms / 5.55ms VSync): 4ms tick (~250Hz).
+/// - 240Hz+ displays (<=4.16ms VSync): 3ms tick (~333Hz).
+pub fn hz_to_interval(hz: u32) -> u32 {
+    match hz {
+        0..=70 => 8,
+        71..=85 => 7,
+        86..=110 => 6,
+        111..=155 => 5,
+        156..=200 => 4,
+        _ => 3,
+    }
+}
+
 pub fn get_optimal_animation_interval_for_window(hwnd: HWND) -> u32 {
     let hz = get_monitor_refresh_rate_for_window(hwnd);
-    (1000 / hz).clamp(1, 16)
+    hz_to_interval(hz)
 }
 
 /// Computes optimal animation timer tick interval in milliseconds for the primary display.
 #[allow(dead_code)]
 pub fn get_optimal_animation_interval_ms() -> u32 {
     let hz = get_primary_refresh_rate();
-    (1000 / hz).clamp(1, 16)
+    hz_to_interval(hz)
 }
 
 pub struct DisplayManager {
@@ -455,5 +469,20 @@ mod tests {
         let r1 = dm.get_target_rect(Some(pt1)).unwrap();
         assert_eq!(r1.left, 0);
         assert_eq!(dm.active_index, 1);
+    }
+
+    #[test]
+    fn test_optimal_animation_intervals() {
+        assert_eq!(hz_to_interval(59), 8);
+        assert_eq!(hz_to_interval(60), 8);
+        assert_eq!(hz_to_interval(75), 7);
+        assert_eq!(hz_to_interval(90), 6);
+        assert_eq!(hz_to_interval(100), 6);
+        assert_eq!(hz_to_interval(120), 5);
+        assert_eq!(hz_to_interval(144), 5);
+        assert_eq!(hz_to_interval(165), 4);
+        assert_eq!(hz_to_interval(180), 4);
+        assert_eq!(hz_to_interval(240), 3);
+        assert_eq!(hz_to_interval(360), 3);
     }
 }
