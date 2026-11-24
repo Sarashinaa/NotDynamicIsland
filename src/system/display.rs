@@ -6,8 +6,8 @@ use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicI32, AtomicIsize, Ordering};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT, WPARAM};
 use windows::Win32::Graphics::Gdi::{
-    EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, DEVMODEW,
-    ENUM_CURRENT_SETTINGS, HDC, HMONITOR, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
+    EnumDisplayMonitors, EnumDisplaySettingsW, GetMonitorInfoW, MonitorFromPoint, MonitorFromWindow,
+    DEVMODEW, ENUM_CURRENT_SETTINGS, HDC, HMONITOR, MONITORINFOEXW, MONITOR_DEFAULTTONEAREST,
 };
 use windows::Win32::UI::WindowsAndMessaging::{GetCursorPos, PostMessageW};
 
@@ -53,11 +53,41 @@ pub fn get_primary_refresh_rate() -> u32 {
     }
 }
 
-/// Computes optimal animation timer tick interval in milliseconds for the current display.
+/// Queries the display refresh rate in Hz for a specific HWND's current monitor (e.g. 60, 120, 144, 180, 240).
+/// Correctly adapts across multi-monitor setups (e.g. one 60Hz, one 180Hz) and arbitrary open-source user hardware.
+pub fn get_monitor_refresh_rate_for_window(hwnd: HWND) -> u32 {
+    unsafe {
+        let hmon = MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        if !hmon.is_invalid() {
+            let mut mi = MONITORINFOEXW::default();
+            mi.monitorInfo.cbSize = std::mem::size_of::<MONITORINFOEXW>() as u32;
+            if GetMonitorInfoW(hmon, &mut mi as *mut _ as *mut _).as_bool() {
+                let mut dm = DEVMODEW::default();
+                dm.dmSize = std::mem::size_of::<DEVMODEW>() as u16;
+                let dev_name = windows::core::PCWSTR(mi.szDevice.as_ptr());
+                if EnumDisplaySettingsW(dev_name, ENUM_CURRENT_SETTINGS, &mut dm).as_bool()
+                    && dm.dmDisplayFrequency >= 30
+                {
+                    return dm.dmDisplayFrequency;
+                }
+            }
+        }
+        get_primary_refresh_rate()
+    }
+}
+
+/// Computes optimal animation timer tick interval in milliseconds for the monitor where the window currently is.
 /// For 180Hz displays: 5ms (~200Hz tick rate).
 /// For 144Hz displays: 6ms (~166Hz tick rate).
 /// For 120Hz displays: 8ms (125Hz tick rate).
 /// For 60Hz displays: 16ms (60Hz tick rate).
+pub fn get_optimal_animation_interval_for_window(hwnd: HWND) -> u32 {
+    let hz = get_monitor_refresh_rate_for_window(hwnd);
+    (1000 / hz).clamp(1, 16)
+}
+
+/// Computes optimal animation timer tick interval in milliseconds for the primary display.
+#[allow(dead_code)]
 pub fn get_optimal_animation_interval_ms() -> u32 {
     let hz = get_primary_refresh_rate();
     (1000 / hz).clamp(1, 16)

@@ -151,13 +151,13 @@ fn wake_animation(hwnd: HWND, app: &mut App) {
         }
     }
     app.settled_since = None;
+    let anim_interval = system::display::get_optimal_animation_interval_for_window(hwnd);
+    unsafe {
+        let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, anim_interval, None);
+    }
     if !app.is_animating {
         app.is_animating = true;
         app.last_tick = now;
-        let anim_interval = system::display::get_optimal_animation_interval_ms();
-        unsafe {
-            let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, anim_interval, None);
-        }
     }
 }
 
@@ -886,11 +886,11 @@ pub unsafe extern "system" fn window_proc(
             let cx = (lparam.0 & 0xFFFF) as i16 as f32;
             let cy = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
 
-            // Check if pending shelf drag exceeded drag threshold (4px)
-            // MUST release APP.lock() BEFORE start_drag_drop to prevent re-entrant modal deadlocks during DoDragDrop!
+            // Non-blocking try_lock avoids stalling the OS mouse input thread
             let mut shelf_drag_item: Option<system::shelf::ShelfItem> = None;
-            if let Ok(mut lock) = APP.lock() {
+            if let Ok(mut lock) = APP.try_lock() {
                 if let Some(app) = lock.as_mut() {
+                    // Check if pending shelf drag exceeded drag threshold (4px)
                     if let Some((idx, sx, sy)) = app.island_state.pending_shelf_drag {
                         let dist = ((cx - sx).powi(2) + (cy - sy).powi(2)).sqrt();
                         if dist > 4.0 {
@@ -903,47 +903,44 @@ pub unsafe extern "system" fn window_proc(
                             }
                         }
                     }
+
+                    if shelf_drag_item.is_none() {
+                        if app.island_state.is_dragging_slider {
+                            let cur_x = app.springs.x.current;
+                            let cur_w = app.springs.width.current;
+                            let (progress_x, progress_w) = match app.island_state.mode {
+                                IslandMode::Lyrics => (cur_x + 50.0, 110.0),
+                                _ => (cur_x + 56.0, cur_w - 112.0),
+                            };
+                            let frac = ((cx - progress_x) / progress_w).clamp(0.0, 1.0);
+                            let seek_secs = (frac * app.island_state.media_info.duration_secs as f32) as u32;
+                            app.island_state.drag_seek_secs = Some(seek_secs);
+                            wake_animation(hwnd, app);
+                        } else if !app.island_state.is_hovered {
+                            app.island_state.on_mouse_enter();
+                            wake_animation(hwnd, app);
+
+                            let mut tme = TRACKMOUSEEVENT {
+                                cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
+                                dwFlags: TME_LEAVE,
+                                hwndTrack: hwnd,
+                                dwHoverTime: 0,
+                            };
+                            unsafe {
+                                let _ = TrackMouseEvent(&mut tme);
+                            }
+                        } else if !app.is_animating {
+                            // While hovering, awaken animation if settled for interactive button hover highlighting
+                            wake_animation(hwnd, app);
+                        }
+                    }
                 }
             }
 
             if let Some(item) = shelf_drag_item {
                 system::shelf::start_drag_drop(&item);
-                if let Ok(mut lock) = APP.lock() {
+                if let Ok(mut lock) = APP.try_lock() {
                     if let Some(app) = lock.as_mut() {
-                        wake_animation(hwnd, app);
-                    }
-                }
-                return LRESULT(0);
-            }
-
-            if let Ok(mut lock) = APP.lock() {
-                if let Some(app) = lock.as_mut() {
-                    if app.island_state.is_dragging_slider {
-                        let cur_x = app.springs.x.current;
-                        let cur_w = app.springs.width.current;
-                        let (progress_x, progress_w) = match app.island_state.mode {
-                            IslandMode::Lyrics => (cur_x + 50.0, 110.0),
-                            _ => (cur_x + 56.0, cur_w - 112.0),
-                        };
-                        let frac = ((cx - progress_x) / progress_w).clamp(0.0, 1.0);
-                        let seek_secs = (frac * app.island_state.media_info.duration_secs as f32) as u32;
-                        app.island_state.drag_seek_secs = Some(seek_secs);
-                        wake_animation(hwnd, app);
-                    } else if !app.island_state.is_hovered {
-                        app.island_state.on_mouse_enter();
-                        wake_animation(hwnd, app);
-
-                        let mut tme = TRACKMOUSEEVENT {
-                            cbSize: std::mem::size_of::<TRACKMOUSEEVENT>() as u32,
-                            dwFlags: TME_LEAVE,
-                            hwndTrack: hwnd,
-                            dwHoverTime: 0,
-                        };
-                        unsafe {
-                            let _ = TrackMouseEvent(&mut tme);
-                        }
-                    } else if !app.is_animating {
-                        // While hovering, awaken animation if settled for interactive button hover highlighting
                         wake_animation(hwnd, app);
                     }
                 }
@@ -2699,6 +2696,15 @@ pub unsafe extern "system" fn window_proc(
                         wake_animation(hwnd, app);
                     }
                 }
+            } else {
+                // Refresh rate or display resolution changed without position change (e.g. 60Hz <-> 180Hz)
+                if let Ok(mut lock) = APP.try_lock() {
+                    if let Some(app) = lock.as_mut() {
+                        app.backdrop.capture(app.window.win_x, app.window.win_y);
+                        app.last_backdrop_capture = Instant::now();
+                        wake_animation(hwnd, app);
+                    }
+                }
             }
             LRESULT(0)
         }
@@ -2864,14 +2870,18 @@ pub unsafe extern "system" fn window_proc(
                         //   StretchBlt DWM readbacks over PCIe cause micro-stalls that disrupt VSync
                         //   frame pacing. Keeping spring frames pure CPU (<0.4ms) guarantees
                         //   rock-solid, locked 60-240 FPS buttery smoothness without a single dropped frame!
-                        // - Relaxed 500ms cadence while resting open or idle:
-                        //   Eliminates continuous PCIe bus stalls that cause mouse cursor hitching
+                        // - Fluid 30 FPS (~33ms) while open or hovered:
+                        //   Delivers real-time synced optical blur behind the glass card for videos, scrolling, or motion.
+                        // - Fluid 8 FPS (120ms) for background wallpaper luminance tracking when notch is idle/resting.
+                        let is_open_or_hovered = app.island_state.is_hovered || app.island_state.is_pinned_open;
                         let min_interval = if fg_changed {
                             std::time::Duration::from_millis(0)
                         } else if is_spring_moving || is_theme_moving || is_sub_notif_moving {
                             std::time::Duration::from_secs(3600)
+                        } else if is_open_or_hovered {
+                            std::time::Duration::from_millis(33)
                         } else {
-                            std::time::Duration::from_millis(500)
+                            std::time::Duration::from_millis(120)
                         };
 
                         if now.duration_since(app.last_backdrop_capture) >= min_interval {
@@ -2930,9 +2940,10 @@ pub unsafe extern "system" fn window_proc(
                             } else if let Some(settled_time) = app.settled_since {
                                 if now - settled_time > std::time::Duration::from_millis(500) && app.is_animating {
                                     app.is_animating = false;
-                                    // Switch from 8ms high-refresh timer to 500ms low-power heartbeat (0.0% CPU)
+                                    // Switch from monitor high-refresh animation timer to background heartbeat
+                                    let idle_interval = if is_open_or_hovered { 33 } else { 120 };
                                     unsafe {
-                                        let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, 500, None);
+                                        let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, idle_interval, None);
                                     }
                                     trim_working_set();
                                 }
@@ -3148,7 +3159,7 @@ fn main() {
 
     // 9. Start initial animation tick to render the first frame
     unsafe {
-        let anim_interval = system::display::get_optimal_animation_interval_ms();
+        let anim_interval = system::display::get_optimal_animation_interval_for_window(hwnd);
         let _ = SetTimer(hwnd, TIMER_ANIMATION_ID, anim_interval, None);
     }
 
