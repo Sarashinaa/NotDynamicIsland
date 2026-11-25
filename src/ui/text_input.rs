@@ -410,6 +410,18 @@ impl TextInput {
             self.scroll_offset.clamp(0.0, (total_w - visible_w + 24.0).max(0.0))
         };
 
+        let is_dark_ink = (0.299 * color.r as f32 + 0.587 * color.g as f32 + 0.114 * color.b as f32) < 128.0;
+        let placeholder_color = if is_dark_ink {
+            Color::rgba(71, 85, 105, 0.82 * opacity)
+        } else {
+            Color::rgba(186, 200, 218, 0.78 * opacity)
+        };
+        let (caret_r, caret_g, caret_b) = if is_dark_ink {
+            (15u8, 23u8, 42u8)
+        } else {
+            (255u8, 255u8, 255u8)
+        };
+
         if self.text.is_empty() {
             // Placeholder text
             if !placeholder.is_empty() {
@@ -419,7 +431,7 @@ impl TextInput {
                     text_start_x,
                     baseline_y,
                     size,
-                    Color::rgba(148, 163, 184, 0.65 * opacity),
+                    placeholder_color,
                     false,
                     clip_min_x,
                     clip_max_x,
@@ -431,8 +443,8 @@ impl TextInput {
                 let top_y = (box_y + 5.0).round() as usize;
                 let bot_y = (box_y + box_h - 5.0).round() as usize;
                 for py in top_y..=bot_y {
-                    buf.blend_pixel(caret_x, py, 255, 255, 255, 0.95 * opacity);
-                    buf.blend_pixel(caret_x + 1, py, 255, 255, 255, 0.95 * opacity);
+                    buf.blend_pixel(caret_x, py, caret_r, caret_g, caret_b, 0.95 * opacity);
+                    buf.blend_pixel(caret_x + 1, py, caret_r, caret_g, caret_b, 0.95 * opacity);
                 }
             }
             return;
@@ -496,8 +508,8 @@ impl TextInput {
                 let top_y = (box_y + 5.0).round() as usize;
                 let bot_y = (box_y + box_h - 5.0).round() as usize;
                 for py in top_y..=bot_y {
-                    buf.blend_pixel(caret_x, py, 255, 255, 255, 0.98 * opacity);
-                    buf.blend_pixel(caret_x + 1, py, 255, 255, 255, 0.85 * opacity);
+                    buf.blend_pixel(caret_x, py, caret_r, caret_g, caret_b, 0.98 * opacity);
+                    buf.blend_pixel(caret_x + 1, py, caret_r, caret_g, caret_b, 0.85 * opacity);
                 }
             }
         }

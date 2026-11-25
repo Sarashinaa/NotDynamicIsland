@@ -6,11 +6,14 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 use windows::Win32::Foundation::{HWND, LPARAM, WPARAM};
-use windows::Win32::NetworkManagement::IpHelper::{FreeMibTable, GetIfTable2, MIB_IF_TABLE2};
+use windows::Win32::NetworkManagement::IpHelper::{
+    FreeMibTable, GetIfTable2, GetIpAddrTable, MIB_IF_TABLE2, MIB_IPADDRROW_XP, MIB_IPADDRTABLE,
+};
 use windows::Win32::UI::WindowsAndMessaging::PostMessageW;
 
 pub const WM_APP_NETWORK_CHANGED: u32 = 0x800B;
 pub const WM_APP_TIME_TICK: u32 = 0x800E;
+pub const WM_APP_NETWORK_TOPOLOGY_CHANGED: u32 = 0x8018;
 
 /// Minimum download throughput threshold required to replace the date display in the Dynamic Island
 /// 25 Megabits per second = 3,125,000 bytes/sec (~3.125 MB/s)
@@ -71,6 +74,62 @@ pub fn query_total_octets() -> (u64, u64) {
     }
 }
 
+/// Computes an order-independent fingerprint of active non-loopback, non-APIPA IPv4 addresses.
+/// Returns 0 when no routable IPv4 interface is active.
+pub fn query_ipv4_fingerprint() -> u64 {
+    unsafe {
+        let mut size: u32 = 0;
+        let _ = GetIpAddrTable(None, &mut size, false);
+        if size == 0 || size > 65536 {
+            return 0;
+        }
+
+        let mut buf = vec![0u32; (size as usize + 3) / 4];
+        let mut actual_size = (buf.len() * 4) as u32;
+        let table_ptr = buf.as_mut_ptr() as *mut MIB_IPADDRTABLE;
+        if GetIpAddrTable(Some(table_ptr), &mut actual_size, false) != 0 {
+            return 0;
+        }
+
+        let count = (*table_ptr).dwNumEntries as usize;
+        let header_bytes = std::mem::offset_of!(MIB_IPADDRTABLE, table);
+        if header_bytes + count.saturating_mul(std::mem::size_of::<MIB_IPADDRROW_XP>()) > buf.len() * 4 {
+            return 0;
+        }
+
+        let rows = std::slice::from_raw_parts((*table_ptr).table.as_ptr(), count);
+        let mut addrs: Vec<(u32, u32)> = Vec::new();
+        for row in rows {
+            if row.dwAddr == 0 {
+                continue;
+            }
+            let [b0, b1, _, _] = row.dwAddr.to_ne_bytes();
+            if b0 == 127 || (b0 == 169 && b1 == 254) {
+                continue;
+            }
+            addrs.push((row.dwAddr, row.dwMask));
+        }
+
+        if addrs.is_empty() {
+            return 0;
+        }
+        addrs.sort_unstable();
+
+        let mut hash: u64 = 0xcbf29ce484222325;
+        for (addr, mask) in addrs {
+            for b in addr.to_ne_bytes() {
+                hash ^= b as u64;
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+            for b in mask.to_ne_bytes() {
+                hash ^= b as u64;
+                hash = hash.wrapping_mul(0x100000001b3);
+            }
+        }
+        if hash == 0 { 1 } else { hash }
+    }
+}
+
 pub struct NetworkListener {
     running: Arc<AtomicBool>,
     speed: Arc<Mutex<NetworkSpeed>>,
@@ -104,6 +163,9 @@ impl NetworkListener {
                 let mut prev_minute = unsafe {
                     windows::Win32::System::SystemInformation::GetLocalTime().wMinute
                 };
+                let mut last_ip_fp = query_ipv4_fingerprint();
+                let mut topology_ticks: u8 = 0;
+                let mut pending_topology_notify: u8 = 0;
 
                 while running.load(Ordering::SeqCst) {
                     thread::sleep(Duration::from_millis(1000));
@@ -147,6 +209,26 @@ impl NetworkListener {
                         prev_minute = cur_minute;
                         unsafe {
                             let _ = PostMessageW(hwnd, WM_APP_TIME_TICK, WPARAM(0), LPARAM(0));
+                        }
+                    }
+
+                    // Debounced IPv4 topology change detection (checks every 5s, settles 2s for DHCP/DNS)
+                    if pending_topology_notify > 0 {
+                        pending_topology_notify -= 1;
+                        if pending_topology_notify == 0 {
+                            unsafe {
+                                let _ = PostMessageW(hwnd, WM_APP_NETWORK_TOPOLOGY_CHANGED, WPARAM(0), LPARAM(0));
+                            }
+                        }
+                    }
+                    topology_ticks = (topology_ticks + 1) % 5;
+                    if topology_ticks == 0 {
+                        let cur_fp = query_ipv4_fingerprint();
+                        if cur_fp != last_ip_fp {
+                            last_ip_fp = cur_fp;
+                            if cur_fp != 0 {
+                                pending_topology_notify = 2;
+                            }
                         }
                     }
                 }

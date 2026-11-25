@@ -76,6 +76,13 @@ impl ExpandedPage {
     }
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ClipboardKind {
+    Text,
+    File,
+    Screenshot,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum NotificationKind {
     Charging { percent: u32 },
@@ -88,7 +95,7 @@ pub enum NotificationKind {
     ColorPicked { hex: String, rgb: String },
     PrivacyAlert { is_camera: bool, app_name: String },
     TimerCompleted { message: String },
-    ClipboardCopied { preview: String, item_count: usize, is_file: bool },
+    ClipboardCopied { preview: String, item_count: usize, kind: ClipboardKind },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -522,12 +529,12 @@ impl IslandState {
         self.show_notification(NotificationKind::ColorPicked { hex, rgb }, 3500);
     }
 
-    pub fn show_clipboard_pulse(&mut self, preview: String, item_count: usize, is_file: bool) {
+    pub fn show_clipboard_pulse(&mut self, preview: String, item_count: usize, kind: ClipboardKind) {
         self.show_notification(
             NotificationKind::ClipboardCopied {
                 preview,
                 item_count,
-                is_file,
+                kind,
             },
             1600,
         );

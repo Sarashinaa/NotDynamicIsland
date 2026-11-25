@@ -319,7 +319,7 @@ fn execute_groq_query(api_key: &str, history: &[ChatMessage], prompt: &str) -> R
     let host_w: Vec<u16> = host.encode_utf16().chain(std::iter::once(0)).collect();
     let path_w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
-    let system_content = "Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 1-3 baris dalam Bahasa Indonesia. Pahami typo, singkatan, slang, dan berbagai variasi perintah bahasa Indonesia (contoh: minta buka, tolong bukain, coba buka, buka, jalankan; wa->whatsapp, dc->discord, wrod/word->winword, eksel->excel, spoti->spotify, tele->telegram, kalkulator->calc, krom->chrome, brv->brave, wt->terminal, cmd->cmd, pwsh->powershell, steam, anydesk, vlc, obs, figma, dll).\\n\\n[KLARIFIKASI PENTING]: Jika pengguna meminta untuk membuka sesuatu yang tidak spesifik, ambigu, atau memiliki banyak alternatif di Windows (contoh: 'note' / 'catatan' bisa Notepad, OneNote, atau Sticky Notes; 'browser' bisa Chrome, Brave, atau Edge; 'terminal' bisa Windows Terminal, PowerShell, atau CMD; 'office' bisa Word, Excel, atau PowerPoint):\\nJANGAN langsung membuka dan JANGAN keluarkan tag aksi! Tanyakan klarifikasi dengan ramah dan sebutkan 2-3 pilihan aplikasi tersebut secara singkat (contoh: 'Ada beberapa aplikasi catatan: Notepad, OneNote, atau Sticky Notes. Yang mana yang ingin dibuka?').\\n\\n[EKSEKUSI AKSI]: Jika permintaan sudah jelas/spesifik (membuka aplikasi apapun yang terpasang di Windows atau membuka folder), atau pengguna telah memilih dari pertanyaan klarifikasi, berikan konfirmasi singkat dan WAJIB sertakan SATU tag aksi di baris paling akhir:\\n[ACTION:OPEN:app_name] (contoh: [ACTION:OPEN:steam], [ACTION:OPEN:anydesk], [ACTION:OPEN:notepad], [ACTION:OPEN:whatsapp], [ACTION:OPEN:discord], [ACTION:OPEN:winword], [ACTION:OPEN:excel], [ACTION:OPEN:chrome])\\n[ACTION:EXPLORER:folder] (contoh: [ACTION:EXPLORER:downloads], [ACTION:EXPLORER:documents], [ACTION:EXPLORER:desktop], [ACTION:EXPLORER:pictures], [ACTION:EXPLORER:screenshots], [ACTION:EXPLORER:D:\\\\KULIAH-BELAJAR\\\\masterpiece]). Jika pengguna memberikan letak/path folder spesifik (misal 'ada di D:\\\\...'), langsung buka dengan [ACTION:EXPLORER:path].\\n[ACTION:BROWSER:browser:profile] (contoh: [ACTION:BROWSER:brave:Default])\\n[ACTION:FILE_NEW:folder:file] (contoh: [ACTION:FILE_NEW:desktop:catatan.txt])\\n[ACTION:LOCK]\\n[ACTION:TODO:teks]\\n[ACTION:TIMER:menit]\\n[ACTION:MUTE]\\n[ACTION:SNIP]\\n[ACTION:WEATHER]";
+    let system_content = "Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 1-3 baris dalam Bahasa Indonesia. Pahami typo, singkatan, slang, dan berbagai variasi perintah bahasa Indonesia (contoh: minta buka, tolong bukain, coba buka, buka, jalankan; wa->whatsapp, dc->discord, wrod/word->winword, eksel->excel, spoti->spotify, tele->telegram, kalkulator->calc, krom->chrome, brv->brave, wt->terminal, cmd->cmd, pwsh->powershell, steam, anydesk, vlc, obs, figma, dll).\\n\\n[KLARIFIKASI PENTING]: Jika pengguna meminta untuk membuka sesuatu yang tidak spesifik, ambigu, atau memiliki banyak alternatif di Windows (contoh: 'note' / 'catatan' bisa Notepad, OneNote, atau Sticky Notes; 'browser' bisa Chrome, Brave, atau Edge; 'terminal' bisa Windows Terminal, PowerShell, atau CMD; 'office' bisa Word, Excel, atau PowerPoint):\\nJANGAN langsung membuka dan JANGAN keluarkan tag aksi! Tanyakan klarifikasi dengan ramah dan sebutkan 2-3 pilihan aplikasi tersebut secara singkat (contoh: 'Ada beberapa aplikasi catatan: Notepad, OneNote, atau Sticky Notes. Yang mana yang ingin dibuka?').\\n\\n[EKSEKUSI AKSI]: Jika permintaan sudah jelas/spesifik (membuka aplikasi apapun yang terpasang di Windows atau membuka folder), atau pengguna telah memilih dari pertanyaan klarifikasi, berikan konfirmasi singkat dan WAJIB sertakan SATU tag aksi di baris paling akhir:\\n[ACTION:OPEN:app_name] (contoh: [ACTION:OPEN:steam], [ACTION:OPEN:anydesk], [ACTION:OPEN:notepad], [ACTION:OPEN:whatsapp], [ACTION:OPEN:discord], [ACTION:OPEN:winword], [ACTION:OPEN:excel], [ACTION:OPEN:chrome])\\n[ACTION:EXPLORER:folder] (contoh: [ACTION:EXPLORER:downloads], [ACTION:EXPLORER:documents], [ACTION:EXPLORER:desktop], [ACTION:EXPLORER:pictures], [ACTION:EXPLORER:screenshots], [ACTION:EXPLORER:D:\\\\KULIAH-BELAJAR\\\\masterpiece]). Jika pengguna memberikan letak/path folder spesifik (misal 'ada di D:\\\\...'), langsung buka dengan [ACTION:EXPLORER:path].\\n[ACTION:BROWSER:browser:profile] (contoh: [ACTION:BROWSER:brave:Default])\\n[ACTION:FILE_NEW:folder:file] (contoh: [ACTION:FILE_NEW:desktop:catatan.txt])\\n[ACTION:LOCK]\\n[ACTION:TODO:teks]\\n[ACTION:TIMER:menit]\\n[ACTION:MUTE]\\n[ACTION:SNIP]\\n[ACTION:WEATHER]\\n[ACTION:WEATHER_CITY:kota] (gunakan 'auto' untuk kembali otomatis)";
 
     let mut messages_json = Vec::new();
     messages_json.push(format!(
@@ -522,24 +522,80 @@ pub fn extract_chat_completion_content(json: &str) -> Option<String> {
     Some(result.trim().to_string())
 }
 
-/// Cleans markdown symbols (such as `**`, `###`, etc.) so plain text renders cleanly
+/// Cleans markdown symbols, reasoning blocks, and unrenderable emoji codepoints so plain text renders crisply in Segoe UI.
 pub fn clean_markdown_for_display(text: &str) -> String {
-    let mut cleaned = text.replace("**", "").replace("__", "");
-    // Strip leading markdown headers like `### `
-    let lines: Vec<&str> = cleaned.lines().map(|line| {
-        let t = line.trim_start();
-        if t.starts_with("### ") {
-            &t[4..]
-        } else if t.starts_with("## ") {
-            &t[3..]
-        } else if t.starts_with("# ") {
-            &t[2..]
+    let mut stripped = text.to_string();
+
+    // Strip <think>...</think> reasoning blocks if a model emits them
+    while let Some(start) = stripped.find("<think>") {
+        if let Some(rel_end) = stripped[start..].find("</think>") {
+            stripped.replace_range(start..start + rel_end + 8, "");
+        } else {
+            stripped.truncate(start);
+            break;
+        }
+    }
+
+    // Remove bold/underline markers and inline code backticks
+    let stripped = stripped.replace("**", "").replace("__", "").replace('`', "");
+
+    let mut cleaned_lines = Vec::new();
+    for line in stripped.lines() {
+        let trimmed = line.trim_start();
+        // Skip fenced code block delimiter lines such as ``` or ```rust
+        if trimmed.starts_with("```") {
+            continue;
+        }
+
+        let no_header = if trimmed.starts_with("### ") {
+            &trimmed[4..]
+        } else if trimmed.starts_with("## ") {
+            &trimmed[3..]
+        } else if trimmed.starts_with("# ") {
+            &trimmed[2..]
+        } else if trimmed.starts_with("- ") || trimmed.starts_with("* ") {
+            // Convert markdown list markers to native Segoe UI bullet
+            let rest = &trimmed[2..];
+            let mut bullet_line = String::with_capacity(rest.len() + 4);
+            bullet_line.push_str("• ");
+            bullet_line.push_str(rest);
+            cleaned_lines.push(sanitize_display_chars(&bullet_line));
+            continue;
         } else {
             line
+        };
+
+        cleaned_lines.push(sanitize_display_chars(no_header));
+    }
+
+    cleaned_lines.join("\n").trim().to_string()
+}
+
+fn sanitize_display_chars(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut skip_following_space = false;
+    for ch in s.chars() {
+        match ch {
+            '⚠' => {
+                out.push_str("[!]");
+                skip_following_space = false;
+            }
+            '\u{23F1}' | '\u{2705}' | '\u{274C}' | '\u{FE0E}' | '\u{FE0F}' | '\u{200B}' | '\u{200D}' => {
+                skip_following_space = out.is_empty() || out.ends_with(' ');
+            }
+            c if (c as u32) >= 0x1F000 => {
+                skip_following_space = out.is_empty() || out.ends_with(' ');
+            }
+            ' ' if skip_following_space => {
+                skip_following_space = false;
+            }
+            c => {
+                out.push(c);
+                skip_following_space = false;
+            }
         }
-    }).collect();
-    cleaned = lines.join("\n");
-    cleaned.trim().to_string()
+    }
+    out
 }
 
 /// Executes gemini headless query via CLI subprocess (fallback)
@@ -709,6 +765,19 @@ mod tests {
         let raw = "Buka **Settings** > **System** > **Display**.\n### Langkah 1\nPilih opsi.";
         let cleaned = clean_markdown_for_display(raw);
         assert_eq!(cleaned, "Buka Settings > System > Display.\nLangkah 1\nPilih opsi.");
+    }
+
+    #[test]
+    fn test_clean_markdown_extended_sanitization() {
+        let raw = "<think>internal reasoning</think>\n### Ringkasan\n- Cek `status` API\n* 📸 Ambil gambar\n⚠️ Peringatan\n```\ncode()\n```";
+        let cleaned = clean_markdown_for_display(raw);
+        assert!(!cleaned.contains("<think>"));
+        assert!(!cleaned.contains("internal reasoning"));
+        assert!(!cleaned.contains('`'));
+        assert!(cleaned.contains("• Cek status API"));
+        assert!(cleaned.contains("• Ambil gambar"));
+        assert!(cleaned.contains("[!] Peringatan"));
+        assert!(!cleaned.contains('📸'));
     }
 
     #[test]

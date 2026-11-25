@@ -39,6 +39,11 @@ impl TextRenderer {
         Font::from_bytes(data, FontSettings::default()).ok()
     }
 
+    #[inline]
+    fn is_invisible_format_char(ch: char) -> bool {
+        matches!(ch, '\u{FE0E}' | '\u{FE0F}' | '\u{200B}' | '\u{200D}')
+    }
+
     /// Selects the best font that contains the glyph for `ch`
     fn find_font_for_char(&self, ch: char, is_bold: bool) -> Option<&Font> {
         let primary = if is_bold {
@@ -76,6 +81,9 @@ impl TextRenderer {
         let mut max_height = size;
 
         for ch in text.chars() {
+            if Self::is_invisible_format_char(ch) {
+                continue;
+            }
             if let Some(font) = self.find_font_for_char(ch, is_bold) {
                 let metrics = font.metrics(ch, size);
                 total_width += metrics.advance_width;
@@ -102,6 +110,9 @@ impl TextRenderer {
         let mut current_x = start_x;
 
         for ch in text.chars() {
+            if Self::is_invisible_format_char(ch) {
+                continue;
+            }
             let Some(font) = self.find_font_for_char(ch, is_bold) else {
                 current_x += size * 0.55;
                 continue;
@@ -195,6 +206,9 @@ impl TextRenderer {
         let mut current_x = start_x;
 
         for ch in text.chars() {
+            if Self::is_invisible_format_char(ch) {
+                continue;
+            }
             let Some(font) = self.find_font_for_char(ch, is_bold) else {
                 current_x += size * 0.55;
                 continue;

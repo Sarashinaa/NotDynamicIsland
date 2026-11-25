@@ -25,14 +25,15 @@ use render::{BackdropBlur, PixelBuffer, TextRenderer};
 use system::{
     enable_eco_qos, trim_working_set, AssistantManager, BrightnessListener, DisplayManager,
     DisplayTarget, KeyboardHook, MediaController, NetworkListener, NotificationListener,
-    PowerListener, PrivacyListener, ToastNotificationPayload, VolumeListener, WeatherManager,
-    clear_transition_pending, update_display_hook, WM_APP_ASSISTANT_REPLY, WM_APP_BRIGHTNESS_CHANGED,
-    WM_APP_CALENDAR_UPDATED, WM_APP_CAPSLOCK_CHANGED, WM_APP_DISPLAY_CURSOR_MOVED,
-    WM_APP_MEDIA_CHANGED, WM_APP_NETWORK_CHANGED, WM_APP_NOTIFICATION_ARRIVED,
-    WM_APP_POWER_CHANGED, WM_APP_PRIVACY_CHANGED, WM_APP_TIME_TICK, WM_APP_TODO_UPDATED,
+    PowerListener, PrivacyListener, ScreenshotWatcher, ToastNotificationPayload, VolumeListener,
+    WeatherManager, clear_transition_pending, update_display_hook, WM_APP_ASSISTANT_REPLY,
+    WM_APP_BRIGHTNESS_CHANGED, WM_APP_CALENDAR_UPDATED, WM_APP_CAPSLOCK_CHANGED,
+    WM_APP_DISPLAY_CURSOR_MOVED, WM_APP_MEDIA_CHANGED, WM_APP_NETWORK_CHANGED,
+    WM_APP_NETWORK_TOPOLOGY_CHANGED, WM_APP_NOTIFICATION_ARRIVED, WM_APP_POWER_CHANGED,
+    WM_APP_PRIVACY_CHANGED, WM_APP_SHELF_ITEM_READY, WM_APP_TIME_TICK, WM_APP_TODO_UPDATED,
     WM_APP_VOLUME_CHANGED, WM_APP_WEATHER_UPDATED,
 };
-use ui::{ClickAction, ExpandedPage, IslandMode, IslandState, LayoutManager, Rect};
+use ui::{ClickAction, ClipboardKind, ExpandedPage, IslandMode, IslandState, LayoutManager, Rect};
 use window::{Win32LayeredWindow, CANVAS_H, CANVAS_W, TIMER_ANIMATION_ID};
 
 use windows::Win32::Foundation::{
@@ -105,6 +106,7 @@ struct App {
     _keyboard_hook: Option<KeyboardHook>,
     _privacy_listener: Option<system::privacy::PrivacyListener>,
     _network_listener: Option<system::network::NetworkListener>,
+    _screenshot_watcher: Option<ScreenshotWatcher>,
     weather_manager: Option<WeatherManager>,
     assistant_manager: AssistantManager,
     pub display_manager: DisplayManager,
@@ -281,6 +283,36 @@ fn extract_timer_intent(lower: &str) -> Option<u32> {
     None
 }
 
+fn copy_shelf_item_to_clipboard(item: &system::shelf::ShelfItem, state: &mut IslandState) {
+    match &item.kind {
+        system::shelf::ShelfItemKind::File(path) => {
+            if system::shelf::is_image_file(path) {
+                system::shelf::copy_image_file_to_clipboard(path);
+                state.show_banner(
+                    "Shelf".to_string(),
+                    "Gambar Disalin ke Clipboard".to_string(),
+                    item.name.clone(),
+                );
+            } else {
+                system::shelf::copy_file_to_clipboard_hdrop(path);
+                state.show_banner(
+                    "Shelf".to_string(),
+                    "File Disalin ke Clipboard".to_string(),
+                    item.name.clone(),
+                );
+            }
+        }
+        system::shelf::ShelfItemKind::Text(text) => {
+            system::shelf::copy_text_to_clipboard(text);
+            state.show_banner(
+                "Shelf".to_string(),
+                "Teks Disalin ke Clipboard".to_string(),
+                item.name.clone(),
+            );
+        }
+    }
+}
+
 fn handle_assistant_local_command(prompt: &str, _hwnd: HWND, app: &mut App) -> bool {
     if handle_assistant_local_command_inner(prompt, app) {
         if !app.island_state.assistant.last_response.is_empty() {
@@ -334,7 +366,7 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
                     system::app_launcher::open_explorer_path_async(resolved.to_string_lossy().to_string());
                     app.island_state.assistant.last_response = format!("Membuka folder {}...", friendly);
                 } else {
-                    app.island_state.assistant.last_response = format!("⚠️ Folder \"{}\" tidak ditemukan di PC.", path);
+                    app.island_state.assistant.last_response = format!("[!] Folder \"{}\" tidak ditemukan di PC.", path);
                 }
                 app.island_state.assistant.is_thinking = false;
                 return true;
@@ -342,10 +374,10 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
             system::app_launcher::AppLaunchIntent::CreateNewFile { folder, filename } => {
                 match system::app_launcher::create_and_open_new_text_file(&folder, Some(&filename)) {
                     Ok(p) => {
-                        app.island_state.assistant.last_response = format!("📄 File baru dibuat dan dibuka di Notepad:\n\"{}\"", p.display());
+                        app.island_state.assistant.last_response = format!("File baru dibuat dan dibuka di Notepad:\n\"{}\"", p.display());
                     }
                     Err(e) => {
-                        app.island_state.assistant.last_response = format!("⚠️ Gagal membuat file: {}", e);
+                        app.island_state.assistant.last_response = format!("[!] Gagal membuat file: {}", e);
                     }
                 }
                 app.island_state.assistant.is_thinking = false;
@@ -353,7 +385,7 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
             }
             system::app_launcher::AppLaunchIntent::LockWorkstation => {
                 system::app_launcher::lock_workstation();
-                app.island_state.assistant.last_response = "🔒 Mengunci workstation Windows...".to_string();
+                app.island_state.assistant.last_response = "Mengunci workstation Windows...".to_string();
                 app.island_state.assistant.is_thinking = false;
                 return true;
             }
@@ -369,7 +401,7 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
         || lower.starts_with("buka snip")
     {
         system::snip::trigger_screen_snip();
-        app.island_state.assistant.last_response = "📸 Snipping Tool berhasil dibuka!".to_string();
+        app.island_state.assistant.last_response = "Snipping Tool berhasil dibuka!".to_string();
         app.island_state.assistant.is_thinking = false;
         return true;
     }
@@ -388,7 +420,7 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
         if let Some(muted) = system::privacy::toggle_default_mic_mute() {
             app.island_state.privacy.mic_muted = muted;
             let status = if muted { "Dimatikan (Muted)" } else { "Dinyalakan (Unmuted)" };
-            app.island_state.assistant.last_response = format!("🎙️ Mikrofon {}", status);
+            app.island_state.assistant.last_response = format!("Mikrofon {}", status);
             app.island_state.assistant.is_thinking = false;
             return true;
         }
@@ -398,7 +430,7 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
     if let Some(task) = extract_todo_intent(&lower, prompt) {
         if !task.is_empty() {
             app.island_state.todo.add(task.clone());
-            app.island_state.assistant.last_response = format!("📋 Tugas dicatat ke To-Do List:\n\"{}\"", task);
+            app.island_state.assistant.last_response = format!("Tugas dicatat ke To-Do List:\n\"{}\"", task);
             app.island_state.assistant.is_thinking = false;
             return true;
         }
@@ -411,9 +443,73 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
         if !app.island_state.focus_timer.is_running {
             app.island_state.focus_timer.toggle();
         }
-        app.island_state.assistant.last_response = format!("⏱️ Focus Timer dinyalakan selama {} menit!", clamped);
+        app.island_state.assistant.last_response = format!("Focus Timer dinyalakan selama {} menit!", clamped);
         app.island_state.assistant.is_thinking = false;
         return true;
+    }
+
+    // Weather Location Pin / Auto Reset
+    let trimmed_prompt = prompt.trim();
+    if lower == "lokasi auto"
+        || lower == "reset lokasi"
+        || lower == "lokasi otomatis"
+        || lower == "auto lokasi"
+        || lower == "weather auto"
+    {
+        if let Some(wm) = &app.weather_manager {
+            wm.clear_manual_location();
+        }
+        app.island_state.show_banner(
+            "Weather".to_string(),
+            "Auto Location Enabled".to_string(),
+            "Detecting weather for current location...".to_string(),
+        );
+        app.island_state.assistant.last_response = "Lokasi cuaca dikembalikan ke deteksi otomatis.".to_string();
+        app.island_state.assistant.is_thinking = false;
+        return true;
+    }
+    for prefix in [
+        "set lokasi ",
+        "ganti lokasi ",
+        "ubah lokasi ",
+        "pin lokasi ",
+        "lokasi cuaca ",
+        "set city ",
+        "weather city ",
+    ] {
+        if trimmed_prompt
+            .get(..prefix.len())
+            .map(|s| s.eq_ignore_ascii_case(prefix))
+            .unwrap_or(false)
+        {
+            let target = trimmed_prompt[prefix.len()..].trim();
+            if !target.is_empty() {
+                if system::weather::is_auto_location_keyword(target) {
+                    if let Some(wm) = &app.weather_manager {
+                        wm.clear_manual_location();
+                    }
+                    app.island_state.show_banner(
+                        "Weather".to_string(),
+                        "Auto Location Enabled".to_string(),
+                        "Detecting weather for current location...".to_string(),
+                    );
+                    app.island_state.assistant.last_response = "Lokasi cuaca dikembalikan ke deteksi otomatis.".to_string();
+                } else {
+                    if let Some(wm) = &app.weather_manager {
+                        wm.set_manual_location(target);
+                    }
+                    app.island_state.show_banner(
+                        "Weather".to_string(),
+                        "Location Pinned".to_string(),
+                        format!("Fetching weather for {}...", target),
+                    );
+                    app.island_state.assistant.last_response =
+                        format!("Lokasi cuaca diatur ke {}. Memperbarui cuaca...", target);
+                }
+                app.island_state.assistant.is_thinking = false;
+                return true;
+            }
+        }
     }
 
     // Weather
@@ -430,7 +526,7 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
         let temp = app.island_state.weather.temperature.round() as i32;
         let cond = app.island_state.weather.condition_text();
         let city = &app.island_state.weather.city;
-        app.island_state.assistant.last_response = format!("🌤️ Cuaca saat ini {}°C, {} di {}.", temp, cond, city);
+        app.island_state.assistant.last_response = format!("Cuaca saat ini {}°C, {} di {}.", temp, cond, city);
         app.island_state.assistant.is_thinking = false;
         return true;
     }
@@ -489,6 +585,23 @@ fn process_assistant_actions(response: &str, app: &mut App) -> String {
             app.island_state.privacy.mic_muted = muted;
         }
         clean_text.replace_range(start..start + 13, "");
+    }
+
+    // 4b. [ACTION:WEATHER_CITY:city_or_auto]
+    if let Some(start) = clean_text.find("[ACTION:WEATHER_CITY:") {
+        if let Some(end) = clean_text[start..].find(']') {
+            let target = clean_text[start + 21..start + end].trim().to_string();
+            if !target.is_empty() {
+                if let Some(wm) = &app.weather_manager {
+                    if system::weather::is_auto_location_keyword(&target) {
+                        wm.clear_manual_location();
+                    } else {
+                        wm.set_manual_location(&target);
+                    }
+                }
+            }
+            clean_text.replace_range(start..start + end + 1, "");
+        }
     }
 
     // 5. [ACTION:WEATHER]
@@ -974,24 +1087,7 @@ pub unsafe extern "system" fn window_proc(
                             let _ = ReleaseCapture();
                         }
                         if let Some(item) = app.island_state.shelf.items.get(idx).cloned() {
-                            match &item.kind {
-                                system::shelf::ShelfItemKind::File(path) => {
-                                    system::shelf::copy_file_to_clipboard_hdrop(path);
-                                    app.island_state.show_banner(
-                                        "Shelf".to_string(),
-                                        "File Disalin ke Clipboard".to_string(),
-                                        item.name.clone(),
-                                    );
-                                }
-                                system::shelf::ShelfItemKind::Text(text) => {
-                                    system::shelf::copy_text_to_clipboard(text);
-                                    app.island_state.show_banner(
-                                        "Shelf".to_string(),
-                                        "Teks Disalin ke Clipboard".to_string(),
-                                        item.name.clone(),
-                                    );
-                                }
-                            }
+                            copy_shelf_item_to_clipboard(&item, &mut app.island_state);
                         }
                         wake_animation(hwnd, app);
                         return LRESULT(0);
@@ -1127,24 +1223,7 @@ pub unsafe extern "system" fn window_proc(
                         }
                         Some(ClickAction::OpenShelfItem(idx)) => {
                             if let Some(item) = app.island_state.shelf.items.get(idx).cloned() {
-                                match &item.kind {
-                                    system::shelf::ShelfItemKind::File(path) => {
-                                        system::shelf::copy_file_to_clipboard_hdrop(path);
-                                        app.island_state.show_banner(
-                                            "Shelf".to_string(),
-                                            "File Disalin ke Clipboard".to_string(),
-                                            item.name.clone(),
-                                        );
-                                    }
-                                    system::shelf::ShelfItemKind::Text(text) => {
-                                        system::shelf::copy_text_to_clipboard(text);
-                                        app.island_state.show_banner(
-                                            "Shelf".to_string(),
-                                            "Teks Disalin ke Clipboard".to_string(),
-                                            item.name.clone(),
-                                        );
-                                    }
-                                }
+                                copy_shelf_item_to_clipboard(&item, &mut app.island_state);
                                 wake_animation(hwnd, app);
                             }
                         }
@@ -1279,13 +1358,19 @@ pub unsafe extern "system" fn window_proc(
                                 cx,
                                 text_start_x,
                                 &app.text_renderer,
-                                10.5,
+                                LayoutManager::ASSISTANT_INPUT_FONT_SIZE,
                                 false,
                                 is_shift,
                             );
                             let cur_w = app.springs.width.current;
                             let visible_w = LayoutManager::assistant_input_visible_w(cur_w);
-                            app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                            app.island_state.assistant.input.update_scroll(
+                                &app.text_renderer,
+                                LayoutManager::ASSISTANT_INPUT_FONT_SIZE,
+                                false,
+                                visible_w,
+                                16.0,
+                            );
                             unsafe {
                                 let _ = SetFocus(hwnd);
                             }
@@ -1503,13 +1588,21 @@ pub unsafe extern "system" fn window_proc(
                             let _ = AppendMenuW(hmenu, MF_POPUP, h_shape.0 as usize, windows::core::w!("🎛️  Island Shape"));
                         }
 
-                        // Theme Switcher
-                        let is_dark = if let Ok(lock) = APP.lock() {
+                        // Theme Switcher & Weather Location Status
+                        let (is_dark, is_manual_loc) = if let Ok(lock) = APP.lock() {
                             lock.as_ref()
-                                .map(|a| a.island_state.glass_theme == ui::GlassTheme::DarkObsidian)
-                                .unwrap_or(true)
+                                .map(|a| {
+                                    (
+                                        a.island_state.glass_theme == ui::GlassTheme::DarkObsidian,
+                                        a.weather_manager
+                                            .as_ref()
+                                            .map(|wm| wm.is_manual_location())
+                                            .unwrap_or(false),
+                                    )
+                                })
+                                .unwrap_or((true, false))
                         } else {
-                            true
+                            (true, false)
                         };
                         let theme_label = if is_dark {
                             windows::core::w!("☀️  Switch to Light Glass")
@@ -1519,6 +1612,9 @@ pub unsafe extern "system" fn window_proc(
                         let _ = AppendMenuW(hmenu, MF_STRING, 1030, theme_label);
                         let _ = AppendMenuW(hmenu, MF_STRING, 1032, windows::core::w!("📸  Save Screenshot (PNG)"));
                         let _ = AppendMenuW(hmenu, MF_STRING, 1033, windows::core::w!("🌤️  Refresh Weather Data"));
+                        if is_manual_loc {
+                            let _ = AppendMenuW(hmenu, MF_STRING, 1035, windows::core::w!("📍  Use Auto Weather Location"));
+                        }
 
                         let _ = AppendMenuW(hmenu, MF_SEPARATOR, 0, None);
                         let _ = AppendMenuW(hmenu, MF_STRING, 1031, windows::core::w!("🌐  GitHub Repository"));
@@ -1604,14 +1700,16 @@ pub unsafe extern "system" fn window_proc(
                                             let pixels = app.pixel_buffer.data.clone();
                                             let w = app.pixel_buffer.width;
                                             let h = app.pixel_buffer.height;
+                                            let hwnd_val = hwnd.0 as usize;
                                             std::thread::spawn(move || {
-                                                system::screenshot::save_island_screenshot(&pixels, w, h);
+                                                if let Some(path) = system::screenshot::save_island_screenshot(&pixels, w, h) {
+                                                    system::shelf::enqueue_shelf_image_file(
+                                                        HWND(hwnd_val as *mut _),
+                                                        path,
+                                                        false,
+                                                    );
+                                                }
                                             });
-                                            app.island_state.show_banner(
-                                                "Screenshot".to_string(),
-                                                "Snapshot Saved".to_string(),
-                                                "Saved to Pictures\\NotDynamicIsland".to_string(),
-                                            );
                                         }
                                         1033 => {
                                             if let Some(wm) = &app.weather_manager {
@@ -1620,6 +1718,16 @@ pub unsafe extern "system" fn window_proc(
                                                     "Weather".to_string(),
                                                     "Refreshing Weather".to_string(),
                                                     "Fetching live forecast for current location...".to_string(),
+                                                );
+                                            }
+                                        }
+                                        1035 => {
+                                            if let Some(wm) = &app.weather_manager {
+                                                wm.clear_manual_location();
+                                                app.island_state.show_banner(
+                                                    "Weather".to_string(),
+                                                    "Auto Location Enabled".to_string(),
+                                                    "Detecting weather for current location...".to_string(),
                                                 );
                                             }
                                         }
@@ -1851,25 +1959,25 @@ pub unsafe extern "system" fn window_proc(
                             if let Some(clip) = app.island_state.assistant.input.selected_text() {
                                 system::shelf::copy_text_to_clipboard(&clip);
                                 app.island_state.assistant.input.delete_selection();
-                                app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                                app.island_state.assistant.input.update_scroll(&app.text_renderer, LayoutManager::ASSISTANT_INPUT_FONT_SIZE, false, visible_w, 16.0);
                                 wake_animation(hwnd, app);
                             }
                         } else if code == 22 {
                             // Ctrl+V: Paste from clipboard
                             if let Some(clip) = read_clipboard_unicode_text(hwnd) {
                                 app.island_state.assistant.input.insert_text(&clip);
-                                app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                                app.island_state.assistant.input.update_scroll(&app.text_renderer, LayoutManager::ASSISTANT_INPUT_FONT_SIZE, false, visible_w, 16.0);
                                 wake_animation(hwnd, app);
                             }
                         } else if code == 8 {
                             // Backspace
                             app.island_state.assistant.input.backspace();
-                            app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                            app.island_state.assistant.input.update_scroll(&app.text_renderer, LayoutManager::ASSISTANT_INPUT_FONT_SIZE, false, visible_w, 16.0);
                             wake_animation(hwnd, app);
                         } else if let Some(ch) = char::from_u32(code as u32) {
                             if !ch.is_control() {
                                 app.island_state.assistant.input.insert_char(ch);
-                                app.island_state.assistant.input.update_scroll(&app.text_renderer, 10.5, false, visible_w, 16.0);
+                                app.island_state.assistant.input.update_scroll(&app.text_renderer, LayoutManager::ASSISTANT_INPUT_FONT_SIZE, false, visible_w, 16.0);
                                 wake_animation(hwnd, app);
                             }
                         }
@@ -1892,7 +2000,7 @@ pub unsafe extern "system" fn window_proc(
                     } else if app.island_state.calendar.is_input_active {
                         (Some(&mut app.island_state.calendar.input), 10.0f32, LayoutManager::calendar_input_visible_w(cur_w), 12.0f32)
                     } else if app.island_state.assistant.is_input_active {
-                        (Some(&mut app.island_state.assistant.input), 10.5f32, LayoutManager::assistant_input_visible_w(cur_w), 16.0f32)
+                        (Some(&mut app.island_state.assistant.input), LayoutManager::ASSISTANT_INPUT_FONT_SIZE, LayoutManager::assistant_input_visible_w(cur_w), 16.0f32)
                     } else {
                         (None, 10.0f32, 100.0f32, 12.0f32)
                     };
@@ -2047,10 +2155,8 @@ pub unsafe extern "system" fn window_proc(
                             do_page_nav!(delta);
                         }
                     } else if let IslandMode::Expanded(ExpandedPage::Assistant) = app.island_state.mode {
-                        let card_x = cur_x + 44.0;
-                        let card_w = cur_w - 88.0;
-                        let input_rect = Rect { x: card_x, y: cur_y + 144.0, w: card_w, h: 28.0 };
-                        let response_rect = Rect { x: card_x, y: cur_y + 54.0, w: card_w, h: 86.0 };
+                        let input_rect = LayoutManager::assistant_input_rect(cur_x, cur_y, cur_w);
+                        let response_rect = LayoutManager::assistant_card_rect(cur_x, cur_y, cur_w);
 
                         if input_rect.contains(mouse_x, mouse_y) {
                             // Over input field: scroll typed text horizontally
@@ -2061,15 +2167,15 @@ pub unsafe extern "system" fn window_proc(
                             }
                             wake_animation(hwnd, app);
                         } else if response_rect.contains(mouse_x, mouse_y) {
-                            let max_text_w = card_w - 24.0;
+                            let max_text_w = LayoutManager::assistant_response_max_w(cur_w);
                             let lines = LayoutManager::wrap_text_lines(
                                 &app.island_state.assistant.last_response,
                                 max_text_w,
                                 &app.text_renderer,
-                                10.0,
-                                120,
+                                LayoutManager::ASSISTANT_BODY_FONT_SIZE,
+                                160,
                             );
-                            let max_s = lines.len().saturating_sub(4);
+                            let max_s = lines.len().saturating_sub(LayoutManager::ASSISTANT_VISIBLE_LINES);
                             app.island_state.assistant.max_scroll = max_s;
                             if max_s > 0 {
                                 // Over response card with scrollable text: scroll response lines
@@ -2219,6 +2325,7 @@ pub unsafe extern "system" fn window_proc(
 
             let mut new_files = Vec::new();
             let mut new_text: Option<String> = None;
+            let mut new_image: Option<(Vec<u8>, bool)> = None;
 
             unsafe {
                 if IsClipboardFormatAvailable(15).is_ok() {
@@ -2262,6 +2369,35 @@ pub unsafe extern "system" fn window_proc(
                         }
                         let _ = CloseClipboard();
                     }
+                } else {
+                    let cf_png = system::shelf::get_cf_png();
+                    let capture_fmt = if cf_png != 0 && IsClipboardFormatAvailable(cf_png).is_ok() {
+                        Some((cf_png, true))
+                    } else if IsClipboardFormatAvailable(8).is_ok() {
+                        // CF_DIB format 8: automatically synthesized by Windows for Snipping Tool / PrintScreen / Copy Image
+                        Some((8, false))
+                    } else {
+                        None
+                    };
+
+                    if let Some((fmt, is_png)) = capture_fmt {
+                        if OpenClipboard(hwnd).is_ok() {
+                            if let Ok(hdata) = GetClipboardData(fmt) {
+                                let hglobal = windows::Win32::Foundation::HGLOBAL(hdata.0);
+                                let size = windows::Win32::System::Memory::GlobalSize(hglobal);
+                                let max_bytes = if is_png { 25 * 1024 * 1024 } else { 48 * 1024 * 1024 };
+                                if size >= 32 && size <= max_bytes {
+                                    let ptr = windows::Win32::System::Memory::GlobalLock(hglobal) as *const u8;
+                                    if !ptr.is_null() {
+                                        let slice = std::slice::from_raw_parts(ptr, size);
+                                        new_image = Some((slice.to_vec(), is_png));
+                                        let _ = windows::Win32::System::Memory::GlobalUnlock(hglobal);
+                                    }
+                                }
+                            }
+                            let _ = CloseClipboard();
+                        }
+                    }
                 }
             }
 
@@ -2282,7 +2418,7 @@ pub unsafe extern "system" fn window_proc(
                             }
                         }
                         if added {
-                            app.island_state.show_clipboard_pulse(first_name, count, true);
+                            app.island_state.show_clipboard_pulse(first_name, count, ClipboardKind::File);
                             wake_animation(hwnd, app);
                         }
                     }
@@ -2293,10 +2429,12 @@ pub unsafe extern "system" fn window_proc(
                         let clean_preview = text.replace('\n', " ").replace('\r', " ").trim().to_string();
                         let item = system::shelf::ShelfItem::from_text(text);
                         app.island_state.shelf.add(item);
-                        app.island_state.show_clipboard_pulse(clean_preview, 1, false);
+                        app.island_state.show_clipboard_pulse(clean_preview, 1, ClipboardKind::Text);
                         wake_animation(hwnd, app);
                     }
                 }
+            } else if let Some((bytes, is_png)) = new_image {
+                system::shelf::handle_clipboard_image_async(hwnd, bytes, is_png);
             }
             LRESULT(0)
         }
@@ -2551,6 +2689,17 @@ pub unsafe extern "system" fn window_proc(
             LRESULT(0)
         }
 
+        WM_APP_NETWORK_TOPOLOGY_CHANGED => {
+            if let Ok(mut lock) = APP.lock() {
+                if let Some(app) = lock.as_mut() {
+                    if let Some(wm) = &app.weather_manager {
+                        wm.trigger_refresh();
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+
         WM_APP_TIME_TICK => {
             if let Ok(mut lock) = APP.lock() {
                 if let Some(app) = lock.as_mut() {
@@ -2600,6 +2749,42 @@ pub unsafe extern "system" fn window_proc(
                         wake_animation(hwnd, app);
                     }
                 }
+            }
+            LRESULT(0)
+        }
+
+        WM_APP_SHELF_ITEM_READY => {
+            let pending_items = system::shelf::take_pending_shelf_items();
+            let mut obsolete_temps = Vec::new();
+            if !pending_items.is_empty() {
+                if let Ok(mut lock) = APP.lock() {
+                    if let Some(app) = lock.as_mut() {
+                        for pending in pending_items {
+                            if pending.upgrade_recent_temp {
+                                if let Some(old_path) = app.island_state.shelf.upgrade_recent_temp_capture(pending.item) {
+                                    obsolete_temps.push(old_path);
+                                    wake_animation(hwnd, app);
+                                }
+                            } else {
+                                let preview = if let Some((w, h)) = pending.dimensions {
+                                    format!("{} · {}x{}", pending.item.name, w, h)
+                                } else {
+                                    pending.item.name.clone()
+                                };
+                                app.island_state.shelf.add(pending.item);
+                                app.island_state.show_clipboard_pulse(preview, 1, ClipboardKind::Screenshot);
+                                wake_animation(hwnd, app);
+                            }
+                        }
+                    }
+                }
+            }
+            if !obsolete_temps.is_empty() {
+                std::thread::spawn(move || {
+                    for old_path in obsolete_temps {
+                        let _ = std::fs::remove_file(old_path);
+                    }
+                });
             }
             LRESULT(0)
         }
@@ -3113,6 +3298,9 @@ fn main() {
     let mut network_listener = NetworkListener::new();
     network_listener.start(hwnd);
 
+    let mut screenshot_watcher = ScreenshotWatcher::new();
+    screenshot_watcher.start(hwnd);
+
     let weather_manager = WeatherManager::new(hwnd);
     let assistant_manager = AssistantManager::new();
 
@@ -3141,6 +3329,7 @@ fn main() {
             _keyboard_hook: Some(keyboard_hook),
             _privacy_listener: Some(privacy_listener),
             _network_listener: Some(network_listener),
+            _screenshot_watcher: Some(screenshot_watcher),
             weather_manager: Some(weather_manager),
             assistant_manager,
             display_manager,

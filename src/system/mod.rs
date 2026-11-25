@@ -39,12 +39,15 @@ pub use lyrics::{LyricsManager, SyncedLyrics};
 pub use media::{MediaController, WM_APP_MEDIA_CHANGED};
 pub use notifications::{NotificationListener, ToastNotificationPayload, WM_APP_NOTIFICATION_ARRIVED};
 #[allow(unused_imports)]
-pub use network::{NetworkListener, NetworkSpeed, MIN_DOWNLOAD_THRESHOLD_BYTES, WM_APP_NETWORK_CHANGED, WM_APP_TIME_TICK};
+pub use network::{
+    NetworkListener, NetworkSpeed, MIN_DOWNLOAD_THRESHOLD_BYTES, WM_APP_NETWORK_CHANGED,
+    WM_APP_NETWORK_TOPOLOGY_CHANGED, WM_APP_TIME_TICK,
+};
 pub use power::{PowerListener, WM_APP_POWER_CHANGED};
 #[allow(unused_imports)]
 pub use privacy::{PrivacyListener, PrivacyStatus, WM_APP_PRIVACY_CHANGED};
 #[allow(unused_imports)]
-pub use shelf::{FileShelf, ShelfFile};
+pub use shelf::{FileShelf, ScreenshotWatcher, ShelfFile, WM_APP_SHELF_ITEM_READY};
 #[allow(unused_imports)]
 pub use todo::{TodoItem, TodoList, WM_APP_TODO_UPDATED};
 #[allow(unused_imports)]

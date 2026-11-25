@@ -18,7 +18,7 @@ use crate::render::{
     BackdropBlur, Color, PixelBuffer, TextRenderer,
 };
 use crate::system::lyrics::SyncedLyrics;
-use crate::ui::state::{ExpandedPage, IslandMode, IslandShape, IslandState, NotificationKind};
+use crate::ui::state::{ClipboardKind, ExpandedPage, IslandMode, IslandShape, IslandState, NotificationKind};
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum ClickAction {
@@ -151,10 +151,39 @@ pub struct LayoutManager {
 }
 
 impl LayoutManager {
+    pub const ASSISTANT_BODY_FONT_SIZE: f32 = 12.0;
+    pub const ASSISTANT_INPUT_FONT_SIZE: f32 = 11.5;
+    pub const ASSISTANT_VISIBLE_LINES: usize = 5;
+
     pub fn new() -> Self {
         Self {
             click_targets: Vec::new(),
         }
+    }
+
+    #[inline]
+    pub fn assistant_card_rect(cur_x: f32, cur_y: f32, cur_w: f32) -> Rect {
+        Rect {
+            x: cur_x + 40.0,
+            y: cur_y + 60.0,
+            w: cur_w - 80.0,
+            h: 120.0,
+        }
+    }
+
+    #[inline]
+    pub fn assistant_input_rect(cur_x: f32, cur_y: f32, cur_w: f32) -> Rect {
+        Rect {
+            x: cur_x + 40.0,
+            y: cur_y + 188.0,
+            w: cur_w - 80.0,
+            h: 28.0,
+        }
+    }
+
+    #[inline]
+    pub fn assistant_response_max_w(cur_w: f32) -> f32 {
+        ((cur_w - 80.0) - 34.0).max(120.0)
     }
 
     /// Pre-computes variable-height offsets for synced lyrics.
@@ -246,8 +275,8 @@ impl LayoutManager {
             IslandMode::Expanded(ExpandedPage::Tools) => (420.0, 154.0, 24.0),
             // Timer & Focus: Spacious 400x172, 12px breathing room with clean non-overlapping typography
             IslandMode::Expanded(ExpandedPage::Timer) => (400.0, 172.0, 24.0),
-            // Assistant: Gemini / Groq AI Assistant prompt and response (470x192, 12px breathing room)
-            IslandMode::Expanded(ExpandedPage::Assistant) => (470.0, 192.0, 24.0),
+            // Assistant: Gemini / Groq AI Assistant prompt and response (520x226, 12px breathing room)
+            IslandMode::Expanded(ExpandedPage::Assistant) => (520.0, 226.0, 24.0),
             // Lyrics: Generous width for synchronized scrolling lyrics
             IslandMode::Lyrics => (600.0, 150.0, 24.0),
             // Notifications:
@@ -450,8 +479,8 @@ impl LayoutManager {
             IslandMode::Notification(NotificationKind::TimerCompleted { message }) => {
                 self.render_timer_completed(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, message, opacity, is_light);
             }
-            IslandMode::Notification(NotificationKind::ClipboardCopied { preview, item_count, is_file }) => {
-                self.render_clipboard_copied(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, preview, *item_count, *is_file, opacity, is_light);
+            IslandMode::Notification(NotificationKind::ClipboardCopied { preview, item_count, kind }) => {
+                self.render_clipboard_copied(buf, text_renderer, cur_x, cur_y, cur_w, cur_h, preview, *item_count, *kind, opacity, is_light);
             }
         }
 
@@ -1917,19 +1946,23 @@ fn wrap_lyric_line<'a>(
             draw_rounded_rect(buf, center_box_x - 10.0, box_y + 12.0, 20.0, 10.0, 2.0, palette.muted_fg);
             draw_circle(buf, center_box_x, box_y + 10.0, 2.0, palette.muted_fg);
 
+            let empty_title = "Drop files, screenshots, or text";
+            let (title_w, _) = text_renderer.measure_text(empty_title, 11.5, true);
             text_renderer.draw_text(
                 buf,
-                "Drop files or copy text here",
-                center_box_x - 70.0,
+                empty_title,
+                center_box_x - title_w * 0.5,
                 box_y + 40.0,
                 11.5,
                 palette.primary_fg,
                 true,
             );
+            let empty_sub = "Drag out anytime · click to copy & use";
+            let (sub_w, _) = text_renderer.measure_text(empty_sub, 9.5, false);
             text_renderer.draw_text(
                 buf,
-                "Drag out anytime · click to copy & use",
-                center_box_x - 88.0,
+                empty_sub,
+                center_box_x - sub_w * 0.5,
                 box_y + 56.0,
                 9.5,
                 palette.secondary_fg,
@@ -1949,8 +1982,8 @@ fn wrap_lyric_line<'a>(
                 };
                 draw_rounded_rect(buf, card_rect.x, card_rect.y, card_rect.w, card_rect.h, 8.0, card_bg);
 
-                let icon_x = (card_rect.x + (card_rect.w - 32.0) * 0.5) as usize;
-                let icon_y = (card_rect.y + 6.0) as usize;
+                let icon_x = (card_rect.x + (card_rect.w - item.icon_width as f32) * 0.5).max(card_rect.x + 2.0) as usize;
+                let icon_y = (card_rect.y + 6.0 + (32.0 - item.icon_height as f32).max(0.0) * 0.5) as usize;
                 if item.icon_width > 0 && item.icon_height > 0 && !item.icon_pixels.is_empty() {
                     buf.blend_icon(icon_x, icon_y, &item.icon_pixels, item.icon_width, item.icon_height, opacity);
                 }
@@ -3029,10 +3062,27 @@ fn wrap_lyric_line<'a>(
         }
     }
 
-    /// Helper function to wrap text within max_w and at most max_lines
+    /// Helper function to wrap text within max_w and at most max_lines.
+    /// Preserves intentional blank lines between paragraphs and breaks oversized unspaced tokens (URLs/paths).
     pub fn wrap_text_lines(text: &str, max_w: f32, tr: &TextRenderer, size: f32, max_lines: usize) -> Vec<String> {
-        let mut lines = Vec::new();
-        for raw_line in text.lines() {
+        if max_lines == 0 {
+            return Vec::new();
+        }
+        let mut lines: Vec<String> = Vec::new();
+        let mut was_truncated = false;
+
+        'outer: for raw_line in text.lines() {
+            if raw_line.trim().is_empty() {
+                if !lines.is_empty() && lines.last().map(|s| !s.is_empty()).unwrap_or(false) {
+                    if lines.len() >= max_lines {
+                        was_truncated = true;
+                        break;
+                    }
+                    lines.push(String::new());
+                }
+                continue;
+            }
+
             let mut cur_line = String::new();
             for word in raw_line.split_whitespace() {
                 let candidate = if cur_line.is_empty() {
@@ -3043,24 +3093,52 @@ fn wrap_lyric_line<'a>(
                 let (w, _) = tr.measure_text(&candidate, size, false);
                 if w <= max_w {
                     cur_line = candidate;
+                    continue;
+                }
+
+                if !cur_line.is_empty() {
+                    lines.push(std::mem::take(&mut cur_line));
+                    if lines.len() >= max_lines {
+                        was_truncated = true;
+                        break 'outer;
+                    }
+                }
+
+                // If single word/token fits on a fresh line, keep it whole; otherwise split cleanly by char
+                let (word_w, _) = tr.measure_text(word, size, false);
+                if word_w <= max_w {
+                    cur_line = word.to_string();
                 } else {
-                    if !cur_line.is_empty() {
-                        lines.push(std::mem::take(&mut cur_line));
-                        if lines.len() >= max_lines {
-                            break;
+                    let mut part = String::new();
+                    for ch in word.chars() {
+                        let mut test_part = part.clone();
+                        test_part.push(ch);
+                        let (pw, _) = tr.measure_text(&test_part, size, false);
+                        if pw > max_w && !part.is_empty() {
+                            lines.push(std::mem::take(&mut part));
+                            if lines.len() >= max_lines {
+                                was_truncated = true;
+                                break 'outer;
+                            }
+                            part.push(ch);
+                        } else {
+                            part = test_part;
                         }
                     }
-                    cur_line = word.to_string();
+                    cur_line = part;
                 }
             }
-            if !cur_line.is_empty() && lines.len() < max_lines {
+
+            if !cur_line.is_empty() {
+                if lines.len() >= max_lines {
+                    was_truncated = true;
+                    break;
+                }
                 lines.push(cur_line);
             }
-            if lines.len() >= max_lines {
-                break;
-            }
         }
-        if lines.len() == max_lines {
+
+        if was_truncated {
             if let Some(last) = lines.last_mut() {
                 if !last.ends_with("...") {
                     last.push_str("...");
@@ -3120,7 +3198,7 @@ fn wrap_lyric_line<'a>(
     /// Exact visible width for assistant prompt text input given island width
     #[inline]
     pub fn assistant_input_visible_w(cur_w: f32) -> f32 {
-        let card_w = cur_w - 88.0;
+        let card_w = cur_w - 80.0;
         let box_w = card_w - 32.0;
         (box_w - 16.0).max(50.0)
     }
@@ -3128,7 +3206,7 @@ fn wrap_lyric_line<'a>(
     /// Exact text start X position for assistant text input given island X
     #[inline]
     pub fn assistant_input_text_start_x(cur_x: f32) -> f32 {
-        let card_x = cur_x + 44.0;
+        let card_x = cur_x + 40.0;
         card_x + 10.0
     }
 
@@ -3330,25 +3408,24 @@ fn wrap_lyric_line<'a>(
         self.render_bottom_navigation_dock(buf, text_renderer, center_x, indicator_y, state, opacity, cursor_pos, is_light);
 
         // Navigation Arrow: < back to Focus Timer (Assistant is the final page)
-        let arrow_y = y + 102.0;
-        let prev_btn_rect = Rect { x: x + 10.0, y: arrow_y - 12.0, w: 22.0, h: 24.0 };
+        let arrow_y = y + 120.0;
+        let prev_btn_rect = Rect { x: x + 9.0, y: arrow_y - 12.0, w: 22.0, h: 24.0 };
         let prev_hover = cursor_pos.map(|(px, py)| prev_btn_rect.contains(px, py)).unwrap_or(false);
-        draw_nav_arrow_button_ex(buf, x + 21.0, arrow_y, 10.5, false, prev_hover, opacity, is_light);
+        draw_nav_arrow_button_ex(buf, x + 20.0, arrow_y, 10.5, false, prev_hover, opacity, is_light);
         self.click_targets.push((prev_btn_rect, ClickAction::PrevPage));
 
-        // Content Area:
-        // Response / Chat Card
-        let card_x = x + 44.0;
-        let card_w = w - 88.0;
-        let card_y = y + 60.0;
-        let card_h = 84.0;
+        // Response / Chat Card matching Weather & Tools SemanticPalette Liquid Glass container
+        let card_rect = Self::assistant_card_rect(x, y, w);
+        let card_x = card_rect.x;
+        let card_y = card_rect.y;
+        let card_w = card_rect.w;
+        let card_h = card_rect.h;
 
-        let card_bg = palette.card_bg;
-        let card_stroke = palette.card_stroke;
-        draw_rounded_rect(buf, card_x, card_y, card_w, card_h, 10.0, card_bg);
-        draw_rounded_rect_stroke(buf, card_x, card_y, card_w, card_h, 10.0, 1.0, card_stroke);
+        draw_rounded_rect(buf, card_x, card_y, card_w, card_h, 10.0, palette.card_bg);
+        draw_rounded_rect_stroke(buf, card_x, card_y, card_w, card_h, 10.0, 1.0, palette.card_stroke);
+        draw_rounded_rect(buf, card_x + 10.0, card_y + 24.0, card_w - 20.0, 1.0, 0.5, palette.divider_col);
 
-        // Model / Status Badge
+        // Model / Status Badge in Card Header Strip
         let badge_text = if state.assistant.is_thinking {
             "Thinking..."
         } else if state.assistant.is_groq {
@@ -3357,38 +3434,71 @@ fn wrap_lyric_line<'a>(
             "Gemini 3.5 Flash Lite"
         };
         let badge_color = if state.assistant.is_thinking {
-            Color::rgba(96, 165, 250, 0.95 * opacity)
+            if is_light { Color::rgba(37, 99, 235, 0.98 * opacity) } else { Color::rgba(96, 165, 250, 0.98 * opacity) }
         } else if state.assistant.is_groq {
-            Color::rgba(249, 115, 22, 0.95 * opacity)
+            if is_light { Color::rgba(194, 65, 12, 0.98 * opacity) } else { Color::rgba(251, 146, 60, 0.98 * opacity) }
         } else {
             palette.secondary_fg
         };
-        draw_gemini_sparkle(buf, card_x + 14.0, card_y + 11.0, 4.0, badge_color);
-        text_renderer.draw_text(buf, badge_text, card_x + 22.0, card_y + 14.0, 9.0, badge_color, true);
+        draw_gemini_sparkle(buf, card_x + 14.0, card_y + 12.0, 4.0, badge_color);
+        text_renderer.draw_text(buf, badge_text, card_x + 23.0, card_y + 15.5, 10.5, badge_color, true);
 
-        // Action buttons in top right of card (Clear & Copy)
+        // Precompute response lines so header can display scroll range indicator cleanly without colliding with body text
+        let max_text_w = Self::assistant_response_max_w(w);
+        let all_lines = if !state.assistant.is_thinking && !state.assistant.last_response.is_empty() {
+            Self::wrap_text_lines(
+                &state.assistant.last_response,
+                max_text_w,
+                text_renderer,
+                Self::ASSISTANT_BODY_FONT_SIZE,
+                160,
+            )
+        } else {
+            Vec::new()
+        };
+        let visible_count = Self::ASSISTANT_VISIBLE_LINES;
+        let max_scroll = all_lines.len().saturating_sub(visible_count);
+        let scroll_start = state.assistant.scroll_offset.min(max_scroll);
+        let scroll_end = (scroll_start + visible_count).min(all_lines.len());
+
+        // Action buttons in top right of card (Scroll Counter + Clear + Copy)
         if !state.assistant.last_response.is_empty() && !state.assistant.is_thinking {
-            let clear_btn_w = 38.0;
-            let clear_btn_x = card_x + card_w - clear_btn_w - 48.0;
-            let clear_btn_rect = Rect { x: clear_btn_x, y: card_y + 5.0, w: clear_btn_w, h: 17.0 };
-            let clear_hover = cursor_pos.map(|(px, py)| clear_btn_rect.contains(px, py)).unwrap_or(false);
-            let clear_bg = if clear_hover { palette.btn_hover_bg } else { palette.btn_bg };
-            draw_rounded_rect(buf, clear_btn_rect.x, clear_btn_rect.y, clear_btn_w, 17.0, 4.0, clear_bg);
-            text_renderer.draw_text(buf, "Clear", clear_btn_x + 7.0, card_y + 16.5, 9.0, palette.secondary_fg, true);
-            self.click_targets.push((clear_btn_rect, ClickAction::AssistantClear));
-
-            let copy_btn_w = 40.0;
-            let copy_btn_x = card_x + card_w - copy_btn_w - 6.0;
-            let copy_btn_rect = Rect { x: copy_btn_x, y: card_y + 5.0, w: copy_btn_w, h: 17.0 };
+            let copy_btn_w = 42.0;
+            let copy_btn_x = card_x + card_w - copy_btn_w - 8.0;
+            let copy_btn_rect = Rect { x: copy_btn_x, y: card_y + 3.0, w: copy_btn_w, h: 18.0 };
             let copy_hover = cursor_pos.map(|(px, py)| copy_btn_rect.contains(px, py)).unwrap_or(false);
             let copy_bg = if copy_hover { palette.btn_hover_bg } else { palette.btn_bg };
-            draw_rounded_rect(buf, copy_btn_rect.x, copy_btn_rect.y, copy_btn_w, 17.0, 4.0, copy_bg);
-            text_renderer.draw_text(buf, "Copy", copy_btn_x + 7.0, card_y + 16.5, 9.0, palette.secondary_fg, true);
+            draw_rounded_rect(buf, copy_btn_rect.x, copy_btn_rect.y, copy_btn_w, 18.0, 5.0, copy_bg);
+            let (copy_tw, _) = text_renderer.measure_text("Copy", 9.5, true);
+            text_renderer.draw_text(buf, "Copy", copy_btn_x + (copy_btn_w - copy_tw) * 0.5, card_y + 15.5, 9.5, palette.primary_fg, true);
             self.click_targets.push((copy_btn_rect, ClickAction::AssistantCopyResponse));
+
+            let clear_btn_w = 40.0;
+            let clear_btn_x = copy_btn_x - clear_btn_w - 6.0;
+            let clear_btn_rect = Rect { x: clear_btn_x, y: card_y + 3.0, w: clear_btn_w, h: 18.0 };
+            let clear_hover = cursor_pos.map(|(px, py)| clear_btn_rect.contains(px, py)).unwrap_or(false);
+            let clear_bg = if clear_hover { palette.btn_hover_bg } else { palette.btn_bg };
+            draw_rounded_rect(buf, clear_btn_rect.x, clear_btn_rect.y, clear_btn_w, 18.0, 5.0, clear_bg);
+            let (clear_tw, _) = text_renderer.measure_text("Clear", 9.5, true);
+            text_renderer.draw_text(buf, "Clear", clear_btn_x + (clear_btn_w - clear_tw) * 0.5, card_y + 15.5, 9.5, palette.primary_fg, true);
+            self.click_targets.push((clear_btn_rect, ClickAction::AssistantClear));
+
+            if all_lines.len() > visible_count {
+                let ind_text = format!("{}-{}/{}", scroll_start + 1, scroll_end, all_lines.len());
+                let (ind_w, _) = text_renderer.measure_text(&ind_text, 9.0, false);
+                text_renderer.draw_text(
+                    buf,
+                    &ind_text,
+                    clear_btn_x - ind_w - 8.0,
+                    card_y + 15.5,
+                    9.0,
+                    palette.secondary_fg,
+                    false,
+                );
+            }
         }
 
-        // Response text area with word wrapping and mouse wheel scrolling
-        let max_text_w = card_w - 24.0;
+        // Response text area with generous 12.0px typography, 18px line leading, and vertical scrollbar
         if state.assistant.is_thinking {
             let dots_count = (state.anim_time * 3.0) as usize % 4;
             let dots = match dots_count {
@@ -3398,33 +3508,46 @@ fn wrap_lyric_line<'a>(
                 _ => "   ",
             };
             let thinking_msg = format!("Sedang memproses{}", dots);
-            text_renderer.draw_text(buf, &thinking_msg, card_x + 12.0, card_y + 38.0, 11.0, palette.primary_fg, false);
-        } else if !state.assistant.last_response.is_empty() {
-            let all_lines = Self::wrap_text_lines(&state.assistant.last_response, max_text_w, text_renderer, 10.0, 120);
-            let visible_count = 4;
-            let max_scroll = all_lines.len().saturating_sub(visible_count);
-            let start = state.assistant.scroll_offset.min(max_scroll);
-            let end = (start + visible_count).min(all_lines.len());
-            let visible_slice = &all_lines[start..end];
-
-            let start_baseline = card_y + 33.0;
+            text_renderer.draw_text(buf, &thinking_msg, card_x + 14.0, card_y + 44.0, Self::ASSISTANT_BODY_FONT_SIZE, palette.primary_fg, false);
+        } else if !all_lines.is_empty() {
+            let body_fg = if state.assistant.error_message.is_some() {
+                if is_light { Color::rgba(220, 38, 38, 0.98 * opacity) } else { Color::rgba(252, 165, 165, 0.98 * opacity) }
+            } else {
+                palette.primary_fg
+            };
+            let visible_slice = &all_lines[scroll_start..scroll_end];
+            let start_baseline = card_y + 41.0;
             for (i, line) in visible_slice.iter().enumerate() {
-                let line_y = start_baseline + (i as f32) * 14.0;
-                text_renderer.draw_text(buf, line, card_x + 12.0, line_y, 10.0, palette.primary_fg, false);
+                if !line.is_empty() {
+                    let line_y = start_baseline + (i as f32) * 18.0;
+                    text_renderer.draw_text(
+                        buf,
+                        line,
+                        card_x + 14.0,
+                        line_y,
+                        Self::ASSISTANT_BODY_FONT_SIZE,
+                        body_fg,
+                        false,
+                    );
+                }
             }
 
-            // Scroll indicator if text exceeds 4 lines
+            // Sleek vertical scrollbar when content exceeds 5 lines
             if all_lines.len() > visible_count {
-                let indicator_text = format!("↕ {}-{}/{}", start + 1, end, all_lines.len());
-                text_renderer.draw_text(
-                    buf,
-                    &indicator_text,
-                    card_x + card_w - 56.0,
-                    card_y + card_h - 7.0,
-                    8.5,
-                    palette.muted_fg,
-                    false,
-                );
+                let track_x = card_x + card_w - 8.0;
+                let track_y = card_y + 30.0;
+                let track_w = 3.0;
+                let track_h = 82.0;
+                draw_rounded_rect(buf, track_x, track_y, track_w, track_h, 1.5, palette.track_bg);
+
+                let thumb_h = ((visible_count as f32 / all_lines.len() as f32) * track_h).clamp(16.0, track_h);
+                let scroll_frac = if max_scroll > 0 {
+                    scroll_start as f32 / max_scroll as f32
+                } else {
+                    0.0
+                };
+                let thumb_y = track_y + scroll_frac * (track_h - thumb_h);
+                draw_rounded_rect(buf, track_x, thumb_y, track_w, thumb_h, 1.5, palette.secondary_fg);
             }
         } else {
             let placeholder_intro = if state.assistant.is_groq {
@@ -3432,29 +3555,31 @@ fn wrap_lyric_line<'a>(
             } else {
                 "Tanyakan apa saja ke Gemini AI..."
             };
-            text_renderer.draw_text(buf, placeholder_intro, card_x + 12.0, card_y + 36.0, 10.5, palette.secondary_fg, false);
-            text_renderer.draw_text(buf, "Contoh: \"tambahin to-do beli susu\", \"pasang timer 25 menit\", \"matiin mic\", \"cuaca\"", card_x + 12.0, card_y + 54.0, 9.0, palette.muted_fg, false);
+            text_renderer.draw_text(buf, placeholder_intro, card_x + 14.0, card_y + 42.0, Self::ASSISTANT_BODY_FONT_SIZE, palette.primary_fg, true);
+            let example_hint = "Contoh: \"tambahin to-do beli susu\", \"pasang timer 25 menit\", \"matiin mic\", \"cuaca\"";
+            let hint_lines = Self::wrap_text_lines(example_hint, max_text_w, text_renderer, 11.0, 3);
+            for (i, line) in hint_lines.iter().enumerate() {
+                text_renderer.draw_text(buf, line, card_x + 14.0, card_y + 62.0 + (i as f32) * 16.5, 11.0, palette.secondary_fg, false);
+            }
         }
 
-        // Prompt Input Field Bar: card_x, y + 150.0, w: card_w, h: 26.0
-        let input_y = y + 150.0;
-        let input_h = 26.0;
-        let input_rect = Rect { x: card_x, y: input_y, w: card_w, h: input_h };
+        // Prompt Input Field Bar matching Weather & Tools card translucency
+        let input_rect = Self::assistant_input_rect(x, y, w);
+        let input_y = input_rect.y;
+        let input_h = input_rect.h;
         let input_hover = cursor_pos.map(|(px, py)| input_rect.contains(px, py)).unwrap_or(false);
-        let input_bg = if state.assistant.is_input_active {
-            if is_light { Color::rgba(0, 0, 0, 0.08 * opacity) } else { Color::rgba(255, 255, 255, 0.12 * opacity) }
-        } else if input_hover {
-            if is_light { Color::rgba(0, 0, 0, 0.05 * opacity) } else { Color::rgba(255, 255, 255, 0.09 * opacity) }
-        } else {
+        let input_bg = if state.assistant.is_input_active || input_hover {
             palette.btn_bg
-        };
-        let input_stroke = if state.assistant.is_input_active {
-            Color::rgba(59, 130, 246, 0.85 * opacity)
         } else {
-            palette.card_stroke
+            palette.card_bg
+        };
+        let (input_stroke, stroke_w) = if state.assistant.is_input_active {
+            (Color::rgba(59, 130, 246, 0.85 * opacity), 1.25)
+        } else {
+            (palette.card_stroke, 1.0)
         };
         draw_rounded_rect(buf, card_x, input_y, card_w, input_h, 8.0, input_bg);
-        draw_rounded_rect_stroke(buf, card_x, input_y, card_w, input_h, 8.0, 1.0, input_stroke);
+        draw_rounded_rect_stroke(buf, card_x, input_y, card_w, input_h, 8.0, stroke_w, input_stroke);
         self.click_targets.push((input_rect, ClickAction::AssistantFocusInput));
 
         // Text inside input or placeholder using TextInput::render
@@ -3470,7 +3595,7 @@ fn wrap_lyric_line<'a>(
             input_y,
             card_w - 32.0,
             input_h,
-            10.5,
+            Self::ASSISTANT_INPUT_FONT_SIZE,
             palette.primary_fg,
             placeholder_text,
             state.assistant.is_input_active,
@@ -3485,8 +3610,8 @@ fn wrap_lyric_line<'a>(
         let send_btn_x = card_x + card_w - send_btn_w - 2.0;
         let send_btn_rect = Rect { x: send_btn_x, y: input_y + 2.0, w: send_btn_w, h: send_btn_h };
         let send_hover = cursor_pos.map(|(px, py)| send_btn_rect.contains(px, py)).unwrap_or(false);
-        let send_bg = if send_hover { Color::rgba(59, 130, 246, 0.90 * opacity) } else { Color::rgba(59, 130, 246, 0.65 * opacity) };
-        draw_rounded_rect(buf, send_btn_rect.x, send_btn_rect.y, send_btn_w, send_btn_h, 6.0, send_bg);
+        let send_bg = if send_hover { Color::rgba(59, 130, 246, 0.95 * opacity) } else { Color::rgba(59, 130, 246, 0.78 * opacity) };
+        draw_rounded_rect(buf, send_btn_rect.x, send_btn_rect.y, send_btn_w, send_btn_h, 6.5, send_bg);
         let arrow_cx = send_btn_x + send_btn_w * 0.5;
         let arrow_cy = send_btn_rect.y + send_btn_h * 0.5;
         draw_send_arrow(buf, arrow_cx, arrow_cy, 9.0, Color::rgba(255, 255, 255, 0.98 * opacity));
@@ -4098,7 +4223,7 @@ fn wrap_lyric_line<'a>(
         h: f32,
         preview: &str,
         item_count: usize,
-        is_file: bool,
+        kind: ClipboardKind,
         opacity: f32,
         is_light: bool,
     ) {
@@ -4124,21 +4249,23 @@ fn wrap_lyric_line<'a>(
             Color::rgba(255, 255, 255, 0.95 * opacity)
         };
 
-        if is_file {
-            draw_file_icon(buf, x + 19.5, cy - 8.0, 16.0, icon_color);
-        } else {
-            draw_clipboard_icon(buf, x + 27.0, cy, 15.0, icon_color);
-        }
-
-        // Header: "Copied to Clipboard" / "Copied 3 files"
-        let title = if is_file {
-            if item_count > 1 {
-                format!("Copied {} files", item_count)
-            } else {
-                "File Copied".to_string()
+        let title = match kind {
+            ClipboardKind::Screenshot => {
+                draw_snip_icon(buf, x + 27.0, cy, 15.0, icon_color);
+                "Screenshot Saved to Shelf".to_string()
             }
-        } else {
-            "Copied to Clipboard".to_string()
+            ClipboardKind::File => {
+                draw_file_icon(buf, x + 19.5, cy - 8.0, 16.0, icon_color);
+                if item_count > 1 {
+                    format!("Copied {} files", item_count)
+                } else {
+                    "File Copied".to_string()
+                }
+            }
+            ClipboardKind::Text => {
+                draw_clipboard_icon(buf, x + 27.0, cy, 15.0, icon_color);
+                "Copied to Clipboard".to_string()
+            }
         };
 
         let title_color = if is_light {
@@ -4376,17 +4503,29 @@ fn wrap_lyric_line<'a>(
                 text_renderer.draw_text_truncated(buf, "Focus Timer", content_x, cy - 3.0, 10.5, 90.0, timer_tag_color, true);
                 text_renderer.draw_text_truncated(buf, message, content_x, cy + 12.0, 9.5, sub_w - 60.0, sub_message_color, false);
             }
-            NotificationKind::ClipboardCopied { preview, item_count, is_file } => {
+            NotificationKind::ClipboardCopied { preview, item_count, kind } => {
                 draw_circle(buf, sub_x + 24.0, cy, 13.0, badge_bg);
-                draw_clipboard_icon(buf, sub_x + 24.0, cy, 12.0, sub_icon_color);
+                let tag = match kind {
+                    ClipboardKind::Screenshot => {
+                        draw_snip_icon(buf, sub_x + 24.0, cy, 12.0, sub_icon_color);
+                        "Screenshot -> Shelf".to_string()
+                    }
+                    ClipboardKind::File => {
+                        draw_file_icon(buf, sub_x + 19.0, cy - 6.0, 12.0, sub_icon_color);
+                        format!("Disalin ({} file)", item_count)
+                    }
+                    ClipboardKind::Text => {
+                        draw_clipboard_icon(buf, sub_x + 24.0, cy, 12.0, sub_icon_color);
+                        "Disalin ke Clipboard".to_string()
+                    }
+                };
                 let content_x = sub_x + 46.0;
-                let tag = if *is_file { format!("Disalin ({} file)", item_count) } else { "Disalin ke Clipboard".to_string() };
                 let tag_color = if is_sub_light {
                     Color::rgba(2, 132, 199, 0.98 * sub_opacity)
                 } else {
                     Color::rgba(56, 189, 248, 0.98 * sub_opacity)
                 };
-                text_renderer.draw_text_truncated(buf, &tag, content_x, cy - 3.0, 10.0, 120.0, tag_color, true);
+                text_renderer.draw_text_truncated(buf, &tag, content_x, cy - 3.0, 10.0, 130.0, tag_color, true);
                 text_renderer.draw_text_truncated(buf, preview, content_x, cy + 12.0, 9.5, sub_w - 60.0, sub_message_color, false);
             }
             _ => {
@@ -5275,7 +5414,7 @@ mod tests {
 
         // 9d. Gemini AI Assistant Page
         {
-            let mut buf = PixelBuffer::new(820, 200);
+            let mut buf = PixelBuffer::new(820, 260);
             let mut state = IslandState::new();
             state.mode = IslandMode::Expanded(ExpandedPage::Assistant);
             state.assistant.last_response = "Halo! Saya Gemini AI asisten desktop Anda. Saya siap membantu menjawab pertanyaan coding, produktivitas, atau menjalankan quick tools langsung dari Dynamic Island.".to_string();
@@ -5303,7 +5442,7 @@ mod tests {
 
         // 9d. Groq AI Assistant Page with Select All (Ctrl+A) Highlight Active
         {
-            let mut buf = PixelBuffer::new(820, 200);
+            let mut buf = PixelBuffer::new(820, 260);
             let mut state = IslandState::new();
             state.mode = IslandMode::Expanded(ExpandedPage::Assistant);
             state.assistant.is_input_active = true;
@@ -5325,7 +5464,7 @@ mod tests {
 
         // 9e. Groq AI Assistant Page (Frosted Light)
         {
-            let mut buf = PixelBuffer::new(820, 200);
+            let mut buf = PixelBuffer::new(820, 260);
             let mut state = IslandState::new();
             state.glass_theme = GlassTheme::FrostedLight;
             state.theme_spring.snap_to(0.0);
@@ -5584,6 +5723,73 @@ mod tests {
                 lm_wa.click_targets.iter().any(|(_, a)| matches!(a, ClickAction::ActivateApp { app_name } if app_name == "WhatsApp")),
                 "WhatsApp notification must be clickable"
             );
+        }
+
+        // 20. Assistant Word Wrapping (long unspaced URLs/paths + paragraph breaks + no bogus ellipsis)
+        {
+            let long_url = "https://example.com/very/long/path/without/spaces/segment_one/segment_two/segment_three/file.png";
+            let wrapped = LayoutManager::wrap_text_lines(long_url, 200.0, &tr, 12.0, 20);
+            assert!(wrapped.len() >= 2, "Unspaced URL must wrap across lines");
+            for line in &wrapped {
+                let (lw, _) = tr.measure_text(line, 12.0, false);
+                assert!(lw <= 202.0, "Wrapped line '{}' ({}px) exceeded max_w", line, lw);
+            }
+            assert!(!wrapped.last().unwrap().ends_with("..."), "Non-truncated wrap must not append ellipsis");
+
+            let with_para = "Paragraf satu.\n\nParagraf dua.";
+            let para_lines = LayoutManager::wrap_text_lines(with_para, 300.0, &tr, 12.0, 20);
+            assert_eq!(para_lines, vec!["Paragraf satu.", "", "Paragraf dua."]);
+        }
+
+        // 21. Assistant Readability Contrast over Bright White & Mid-Tone Backdrops
+        {
+            for bg_pixel in [0xFFFFFFFFu32, 0xFF708090u32] {
+                let mut buf = PixelBuffer::new(820, 260);
+                let mut state = IslandState::new();
+                state.mode = IslandMode::Expanded(ExpandedPage::Assistant);
+                state.assistant.last_response = "Ini adalah teks jawaban AI dengan kontras tinggi agar mudah dibaca di latar apa pun.".to_string();
+
+                let mut bd = BackdropBlur::new(820, 240);
+                bd.raw_buffer.fill(bg_pixel);
+                bd.apply_optical_blur(2);
+
+                let (tx, ty, tw, th, tr_val) = lm.compute_target_geometry(820.0, &state);
+                let mut springs = SpringRect::new(tx, ty, tw, th, tr_val);
+                springs.x.current = tx;
+                springs.y.current = ty;
+                springs.width.current = tw;
+                springs.height.current = th;
+                springs.corner_radius.current = tr_val;
+                springs.opacity.current = 1.0;
+
+                let lyrics = SyncedLyrics::default();
+                let mut lm_ai = LayoutManager::new();
+                lm_ai.render(&mut buf, &tr, &springs, &state, &lyrics, None, Some(&bd));
+
+                let card_rect = LayoutManager::assistant_card_rect(tx, ty, tw);
+                let mut min_lum = 255.0f32;
+                let mut max_lum = 0.0f32;
+                let y_start = (card_rect.y + 30.0) as usize;
+                let y_end = (card_rect.y + 60.0) as usize;
+                let x_start = (card_rect.x + 14.0) as usize;
+                let x_end = (card_rect.x + 220.0) as usize;
+                for py in y_start..y_end {
+                    for px in x_start..x_end {
+                        let p = buf.data[py * buf.width + px];
+                        let r = ((p >> 16) & 0xFF) as f32;
+                        let g = ((p >> 8) & 0xFF) as f32;
+                        let b = (p & 0xFF) as f32;
+                        let lum = 0.299 * r + 0.587 * g + 0.114 * b;
+                        min_lum = min_lum.min(lum);
+                        max_lum = max_lum.max(lum);
+                    }
+                }
+                assert!(
+                    (max_lum - min_lum) > 120.0,
+                    "Insufficient contrast range ({:.1}..{:.1}) in Assistant body for bg {:#010X}",
+                    min_lum, max_lum, bg_pixel
+                );
+            }
         }
     }
 }
