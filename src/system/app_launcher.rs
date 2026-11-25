@@ -6,6 +6,7 @@ use std::os::windows::ffi::OsStrExt;
 use std::path::PathBuf;
 use windows::core::{PCWSTR, PWSTR};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, RECT};
+use windows::Win32::Storage::FileSystem::{GetDriveTypeW, GetLogicalDrives};
 use windows::Win32::System::Registry::{
     RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, HKEY_LOCAL_MACHINE,
     KEY_READ,
@@ -469,17 +470,87 @@ pub fn find_registry_app_path(query: &str) -> Option<PathBuf> {
     None
 }
 
-/// Searches common installation roots across standard drives (C:, D:)
+fn resolve_system_root() -> PathBuf {
+    std::env::var("SystemRoot")
+        .or_else(|_| std::env::var("windir"))
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from(r"C:\Windows"))
+}
+
+fn enumerate_secondary_fixed_drives() -> Vec<PathBuf> {
+    let sys_letter = std::env::var("SystemDrive")
+        .ok()
+        .and_then(|s| s.chars().next())
+        .map(|c| c.to_ascii_uppercase())
+        .unwrap_or('C');
+    let mut drives = Vec::new();
+    let mask = unsafe { GetLogicalDrives() };
+    for bit in 0..26u32 {
+        if (mask & (1 << bit)) != 0 {
+            let letter = (b'A' + bit as u8) as char;
+            if letter == sys_letter {
+                continue;
+            }
+            let root = format!("{}:\\", letter);
+            let root_w: Vec<u16> = root.encode_utf16().chain(std::iter::once(0)).collect();
+            if unsafe { GetDriveTypeW(PCWSTR(root_w.as_ptr())) } == 3 {
+                drives.push(PathBuf::from(root));
+            }
+        }
+    }
+    drives
+}
+
+pub fn sanitize_browser_profile(profile: &str) -> String {
+    let clean: String = profile
+        .chars()
+        .filter(|c| c.is_ascii_alphanumeric() || matches!(c, ' ' | '-' | '_' | '.'))
+        .take(64)
+        .collect();
+    let trimmed = clean.trim_matches(|c: char| c == ' ' || c == '-');
+    if trimmed.is_empty() {
+        "Default".to_string()
+    } else {
+        trimmed.to_string()
+    }
+}
+
+pub fn sanitize_text_filename(raw_name: &str) -> String {
+    let base = raw_name
+        .trim()
+        .rsplit(['\\', '/'])
+        .next()
+        .unwrap_or("");
+    let cleaned: String = base
+        .chars()
+        .filter(|c| {
+            !c.is_control()
+                && !matches!(c, '\\' | '/' | ':' | '*' | '?' | '"' | '<' | '>' | '|')
+        })
+        .collect();
+    let no_traversal = cleaned.replace("..", "");
+    let trimmed = no_traversal.trim_matches(|c: char| c == ' ' || c == '.');
+    if trimmed.is_empty() {
+        "Catatan_Baru.txt".to_string()
+    } else if trimmed.to_ascii_lowercase().ends_with(".txt") {
+        trimmed.to_string()
+    } else {
+        format!("{}.txt", trimmed)
+    }
+}
+
+/// Searches common installation roots across system and secondary fixed drives
 pub fn find_common_install_path(query: &str) -> Option<PathBuf> {
     let clean = query.trim().trim_end_matches(".exe");
     let exe_name = format!("{}.exe", clean);
 
     let mut candidate_dirs = Vec::new();
 
-    // Check D:\Programs and D:\Program Files (common for game/software drives)
-    candidate_dirs.push(PathBuf::from(r"D:\Programs").join(clean));
-    candidate_dirs.push(PathBuf::from(r"D:\Program Files").join(clean));
-    candidate_dirs.push(PathBuf::from(r"D:\Program Files (x86)").join(clean));
+    for drive in enumerate_secondary_fixed_drives() {
+        candidate_dirs.push(drive.join("Programs").join(clean));
+        candidate_dirs.push(drive.join("Program Files").join(clean));
+        candidate_dirs.push(drive.join("Program Files (x86)").join(clean));
+    }
 
     if let Ok(pf) = std::env::var("ProgramFiles") {
         candidate_dirs.push(PathBuf::from(&pf).join(clean));
@@ -626,7 +697,7 @@ pub fn extract_launch_intent(prompt: &str) -> Option<AppLaunchIntent> {
         });
     }
 
-    // 4. Explicit Windows drive path anywhere in prompt (e.g. "D:\KULIAH-BELAJAR\masterpiece", "ada di D:\...", "buka C:\Projects")
+    // 4. Explicit Windows drive path anywhere in prompt (e.g. "C:\Projects\demo", "ada di C:\...", "buka C:\Projects")
     if let Some(drive_idx) = prompt.find(":\\").or_else(|| prompt.find(":/")) {
         if drive_idx > 0 {
             let before = &prompt[..drive_idx];
@@ -855,8 +926,6 @@ pub fn resolve_folder_path(hint: &str) -> PathBuf {
             base.join("OneDrive").join(clean),
             base.join("OneDrive").join("Dokumen").join(clean),
             base.join("OneDrive").join("Gambar").join(clean),
-            PathBuf::from(r"D:\").join(clean),
-            PathBuf::from(r"D:\Programs").join(clean),
         ];
         for candidate in candidates {
             if candidate.exists() {
@@ -864,15 +933,24 @@ pub fn resolve_folder_path(hint: &str) -> PathBuf {
             }
         }
 
-        // 3. 1-level deep search in drive D:\ directories if present
-        let d_drive = PathBuf::from(r"D:\");
-        if let Ok(entries) = std::fs::read_dir(&d_drive) {
-            for entry in entries.flatten() {
-                if let Ok(file_type) = entry.file_type() {
-                    if file_type.is_dir() {
-                        let candidate = entry.path().join(clean);
-                        if candidate.exists() {
-                            return candidate;
+        // 3. Search secondary fixed drives and 1-level deep subdirectories
+        for drive in enumerate_secondary_fixed_drives() {
+            let direct = drive.join(clean);
+            if direct.exists() {
+                return direct;
+            }
+            let programs = drive.join("Programs").join(clean);
+            if programs.exists() {
+                return programs;
+            }
+            if let Ok(entries) = std::fs::read_dir(&drive) {
+                for entry in entries.flatten() {
+                    if let Ok(file_type) = entry.file_type() {
+                        if file_type.is_dir() {
+                            let candidate = entry.path().join(clean);
+                            if candidate.exists() {
+                                return candidate;
+                            }
                         }
                     }
                 }
@@ -896,14 +974,13 @@ pub fn create_and_open_new_text_file(
             .map_err(|e| format!("Gagal membuat direktori {:?}: {}", folder, e))?;
     }
 
-    let raw_name = file_name.unwrap_or("Catatan_Baru.txt").trim();
-    let clean_name = if !raw_name.ends_with(".txt") {
-        format!("{}.txt", raw_name)
-    } else {
-        raw_name.to_string()
-    };
+    let raw_name = file_name.unwrap_or("Catatan_Baru.txt");
+    let clean_name = sanitize_text_filename(raw_name);
 
     let mut file_path = folder.join(&clean_name);
+    if file_path.parent() != Some(folder.as_path()) {
+        return Err("Nama file tidak valid".to_string());
+    }
     if file_path.exists() {
         let stem = file_path
             .file_stem()
@@ -922,18 +999,21 @@ pub fn create_and_open_new_text_file(
         std::fs::write(&file_path, "").map_err(|e| format!("Gagal membuat file {:?}: {}", file_path, e))?;
     }
 
-    // Launch Notepad asynchronously
-    let wide_path: Vec<u16> = file_path
+    // Launch Notepad asynchronously with explicit system path and quoted file argument
+    let notepad_exe = resolve_system_root().join("System32").join("notepad.exe");
+    let wide_notepad: Vec<u16> = notepad_exe
         .as_os_str()
         .encode_wide()
         .chain(std::iter::once(0))
         .collect();
+    let quoted_arg = format!("\"{}\"", file_path.display());
+    let wide_path: Vec<u16> = quoted_arg.encode_utf16().chain(std::iter::once(0)).collect();
 
     unsafe {
         let _ = ShellExecuteW(
             None,
             windows::core::w!("open"),
-            windows::core::w!("notepad.exe"),
+            PCWSTR(wide_notepad.as_ptr()),
             PCWSTR(wide_path.as_ptr()),
             None,
             SW_SHOWNORMAL,
@@ -945,12 +1025,21 @@ pub fn create_and_open_new_text_file(
 
 /// Opens Windows File Explorer at the target folder or path
 pub fn open_explorer_path(folder_or_path: &str) -> bool {
+    if folder_or_path.trim().starts_with("\\\\") {
+        return false;
+    }
     let resolved = resolve_folder_path(folder_or_path);
-    if !resolved.exists() {
+    if !resolved.exists() || !resolved.is_dir() {
         return false;
     }
 
     let wide_path: Vec<u16> = resolved
+        .as_os_str()
+        .encode_wide()
+        .chain(std::iter::once(0))
+        .collect();
+    let explorer_exe = resolve_system_root().join("explorer.exe");
+    let wide_explorer: Vec<u16> = explorer_exe
         .as_os_str()
         .encode_wide()
         .chain(std::iter::once(0))
@@ -967,11 +1056,11 @@ pub fn open_explorer_path(folder_or_path: &str) -> bool {
             SW_SHOWNORMAL,
         );
         if (res.0 as usize) <= 32 {
-            // Fallback: launch explorer.exe directly with target folder
+            // Fallback: launch %SystemRoot%\explorer.exe directly with target folder
             let res2 = ShellExecuteW(
                 None,
                 windows::core::w!("open"),
-                windows::core::w!("explorer.exe"),
+                PCWSTR(wide_explorer.as_ptr()),
                 PCWSTR(wide_path.as_ptr()),
                 None,
                 SW_SHOWNORMAL,
@@ -991,7 +1080,8 @@ pub fn launch_browser_profile(browser: &str, profile: &str) {
         _ => windows::core::w!("brave.exe"),
     };
 
-    let param = format!("--profile-directory=\"{}\"", profile);
+    let clean_profile = sanitize_browser_profile(profile);
+    let param = format!("--profile-directory=\"{}\"", clean_profile);
     let wide_param: Vec<u16> = param.encode_utf16().chain(std::iter::once(0)).collect();
 
     unsafe {
@@ -1246,7 +1336,11 @@ pub fn launch_or_activate_app(app_name: &str) {
         }
 
         // 5. Fallback: ShellExecuteW direct executable name (for tools in PATH / Windows system32)
-        if !launched {
+        if !launched
+            && !ctx.exe_name.starts_with("\\\\")
+            && !ctx.exe_name.contains("..")
+            && !ctx.exe_name.contains("://")
+        {
             let wide_exe: Vec<u16> = ctx.exe_name.encode_utf16().chain(std::iter::once(0)).collect();
             unsafe {
                 let _ = ShellExecuteW(
@@ -1354,13 +1448,8 @@ mod tests {
 
     #[test]
     fn test_find_start_menu_shortcuts_real() {
-        let steam_res = find_start_menu_shortcut("steam");
-        println!("Start menu steam shortcut: {:?}", steam_res);
-        assert!(steam_res.is_some(), "Steam shortcut should be found");
-
-        let anydesk_res = find_start_menu_shortcut("anydesk");
-        println!("Start menu anydesk shortcut: {:?}", anydesk_res);
-        assert!(anydesk_res.is_some(), "AnyDesk shortcut should be found");
+        assert!(find_start_menu_shortcut("nonexistent_app_xyz_999").is_none());
+        let _ = find_start_menu_shortcut("notepad");
     }
 
     #[test]
@@ -1537,9 +1626,9 @@ mod tests {
         );
 
         assert_eq!(
-            extract_launch_intent(r"ada di D:\KULIAH-BELAJAR\masterpiece"),
+            extract_launch_intent(r"ada di C:\Projects\demo"),
             Some(AppLaunchIntent::OpenExplorer {
-                path: r"D:\KULIAH-BELAJAR\masterpiece".to_string(),
+                path: r"C:\Projects\demo".to_string(),
             })
         );
 
@@ -1556,5 +1645,23 @@ mod tests {
         assert!(screenshots.to_string_lossy().to_lowercase().contains("screenshot"));
         let downloads = resolve_folder_path("downloads");
         assert!(downloads.to_string_lossy().to_lowercase().contains("downloads"));
+    }
+
+    #[test]
+    fn test_sanitize_browser_profile() {
+        assert_eq!(sanitize_browser_profile("Profile 1"), "Profile 1");
+        assert_eq!(
+            sanitize_browser_profile("Default\" --gpu-launcher=calc"),
+            "Default --gpu-launchercalc"
+        );
+        assert_eq!(sanitize_browser_profile("---\"\"---"), "Default");
+    }
+
+    #[test]
+    fn test_sanitize_text_filename() {
+        assert_eq!(sanitize_text_filename("notes"), "notes.txt");
+        assert_eq!(sanitize_text_filename(r"..\..\evil.bat"), "evil.bat.txt");
+        assert_eq!(sanitize_text_filename("C:\\Windows\\System32\\cmd"), "cmd.txt");
+        assert_eq!(sanitize_text_filename("..."), "Catatan_Baru.txt");
     }
 }

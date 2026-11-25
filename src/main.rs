@@ -652,31 +652,6 @@ fn process_assistant_actions(response: &str, app: &mut App) -> String {
         }
     }
 
-    // Fallback: If Groq AI responded that it is opening a folder/path but omitted the action tag
-    if clean_text.contains(":\\") || clean_text.contains(":/") {
-        let lower_resp = clean_text.to_lowercase();
-        if lower_resp.contains("buka") || lower_resp.contains("membuka") {
-            if let Some(drive_idx) = clean_text.find(":\\").or_else(|| clean_text.find(":/")) {
-                if drive_idx > 0 {
-                    let before = &clean_text[..drive_idx];
-                    if let Some(drive_letter) = before.chars().last() {
-                        if drive_letter.is_ascii_alphabetic() {
-                            let start = drive_idx - 1;
-                            let end_of_path = clean_text[start..]
-                                .find(|c: char| c == '\n' || c == '\r' || c == '"' || c == '\'' || c == '.' || c == ',' || c == ')' || c == ']')
-                                .map(|i| start + i)
-                                .unwrap_or(clean_text.len());
-                            let detected_path = clean_text[start..end_of_path].trim();
-                            if !detected_path.is_empty() {
-                                system::app_launcher::open_explorer_path_async(detected_path.to_string());
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
     // 9. [ACTION:FILE_NEW:folder:filename]
     if let Some(start) = clean_text.find("[ACTION:FILE_NEW:") {
         if let Some(end) = clean_text[start..].find(']') {
@@ -701,28 +676,86 @@ fn process_assistant_actions(response: &str, app: &mut App) -> String {
     clean_text.trim().to_string()
 }
 
+unsafe fn read_wide_from_hglobal(hglobal: windows::Win32::Foundation::HGLOBAL) -> Option<String> {
+    let byte_len = unsafe { windows::Win32::System::Memory::GlobalSize(hglobal) };
+    if byte_len < 2 {
+        return None;
+    }
+    let max_units = (byte_len / 2).min(65536);
+    let ptr = unsafe { windows::Win32::System::Memory::GlobalLock(hglobal) } as *const u16;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut len = 0usize;
+    while len < max_units && unsafe { *ptr.add(len) } != 0 {
+        len += 1;
+    }
+    let text = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(ptr, len) })
+        .trim()
+        .to_string();
+    let _ = unsafe { windows::Win32::System::Memory::GlobalUnlock(hglobal) };
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+unsafe fn is_clipboard_sensitive(hwnd: HWND) -> bool {
+    use std::sync::OnceLock;
+    use windows::Win32::System::DataExchange::RegisterClipboardFormatW;
+
+    static CF_EXCLUDE: OnceLock<u32> = OnceLock::new();
+    static CF_IGNORE: OnceLock<u32> = OnceLock::new();
+    static CF_HISTORY: OnceLock<u32> = OnceLock::new();
+
+    let cf_excl = *CF_EXCLUDE.get_or_init(|| unsafe {
+        RegisterClipboardFormatW(windows::core::w!("ExcludeClipboardContentFromMonitorProcessing"))
+    });
+    if cf_excl != 0 && unsafe { IsClipboardFormatAvailable(cf_excl) }.is_ok() {
+        return true;
+    }
+
+    let cf_ign = *CF_IGNORE.get_or_init(|| unsafe {
+        RegisterClipboardFormatW(windows::core::w!("Clipboard Viewer Ignore"))
+    });
+    if cf_ign != 0 && unsafe { IsClipboardFormatAvailable(cf_ign) }.is_ok() {
+        return true;
+    }
+
+    let cf_hist = *CF_HISTORY.get_or_init(|| unsafe {
+        RegisterClipboardFormatW(windows::core::w!("CanIncludeInClipboardHistory"))
+    });
+    if cf_hist != 0 && unsafe { IsClipboardFormatAvailable(cf_hist) }.is_ok() {
+        if unsafe { OpenClipboard(hwnd) }.is_ok() {
+            let mut blocked = false;
+            if let Ok(hdata) = unsafe { GetClipboardData(cf_hist) } {
+                let hglobal = windows::Win32::Foundation::HGLOBAL(hdata.0);
+                if unsafe { windows::Win32::System::Memory::GlobalSize(hglobal) } >= 4 {
+                    let ptr = unsafe { windows::Win32::System::Memory::GlobalLock(hglobal) } as *const u32;
+                    if !ptr.is_null() {
+                        if unsafe { *ptr } == 0 {
+                            blocked = true;
+                        }
+                        let _ = unsafe { windows::Win32::System::Memory::GlobalUnlock(hglobal) };
+                    }
+                }
+            }
+            let _ = unsafe { CloseClipboard() };
+            if blocked {
+                return true;
+            }
+        }
+    }
+    false
+}
+
 fn read_clipboard_unicode_text(hwnd: HWND) -> Option<String> {
     unsafe {
         if OpenClipboard(hwnd).is_ok() {
             let mut result = None;
             if let Ok(hdata) = GetClipboardData(13) {
-                let ptr = windows::Win32::System::Memory::GlobalLock(
-                    windows::Win32::Foundation::HGLOBAL(hdata.0),
-                ) as *const u16;
-                if !ptr.is_null() {
-                    let mut len = 0;
-                    while *ptr.add(len) != 0 {
-                        len += 1;
-                    }
-                    let slice = std::slice::from_raw_parts(ptr, len);
-                    let text = String::from_utf16_lossy(slice).trim().to_string();
-                    let _ = windows::Win32::System::Memory::GlobalUnlock(
-                        windows::Win32::Foundation::HGLOBAL(hdata.0),
-                    );
-                    if !text.is_empty() {
-                        result = Some(text);
-                    }
-                }
+                result = read_wide_from_hglobal(windows::Win32::Foundation::HGLOBAL(hdata.0));
             }
             let _ = CloseClipboard();
             result
@@ -2322,6 +2355,10 @@ pub unsafe extern "system" fn window_proc(
             if system::shelf::IS_INTERNAL_CLIPBOARD_COPY.swap(false, std::sync::atomic::Ordering::SeqCst) {
                 return LRESULT(0);
             }
+            // Honor Windows password manager / privacy clipboard exclusion markers
+            if unsafe { is_clipboard_sensitive(hwnd) } {
+                return LRESULT(0);
+            }
 
             let mut new_files = Vec::new();
             let mut new_text: Option<String> = None;
@@ -2349,23 +2386,7 @@ pub unsafe extern "system" fn window_proc(
                     // CF_UNICODETEXT format 13: Text copied from WhatsApp, Discord, Browser, Notepad, etc.
                     if OpenClipboard(hwnd).is_ok() {
                         if let Ok(hdata) = GetClipboardData(13) {
-                            let ptr = windows::Win32::System::Memory::GlobalLock(
-                                windows::Win32::Foundation::HGLOBAL(hdata.0),
-                            ) as *const u16;
-                            if !ptr.is_null() {
-                                let mut len = 0;
-                                while *ptr.add(len) != 0 {
-                                    len += 1;
-                                }
-                                let slice = std::slice::from_raw_parts(ptr, len);
-                                let text = String::from_utf16_lossy(slice).trim().to_string();
-                                let _ = windows::Win32::System::Memory::GlobalUnlock(
-                                    windows::Win32::Foundation::HGLOBAL(hdata.0),
-                                );
-                                if !text.is_empty() {
-                                    new_text = Some(text);
-                                }
-                            }
+                            new_text = read_wide_from_hglobal(windows::Win32::Foundation::HGLOBAL(hdata.0));
                         }
                         let _ = CloseClipboard();
                     }
@@ -3158,11 +3179,18 @@ pub unsafe extern "system" fn window_proc(
 }
 
 fn main() {
-    // Install emergency panic handler to capture any panics into crash.log
+    // Install emergency panic handler to capture any panics into %APPDATA%\NotDynamicIsland\crash.log
     std::panic::set_hook(Box::new(|info| {
         let msg = format!("[PANIC] {}\n", info);
         eprintln!("{}", msg);
-        let _ = std::fs::write("crash.log", msg);
+        let log_path = std::env::var_os("APPDATA")
+            .map(|a| {
+                let dir = std::path::PathBuf::from(a).join("NotDynamicIsland");
+                let _ = std::fs::create_dir_all(&dir);
+                dir.join("crash.log")
+            })
+            .unwrap_or_else(|| std::env::temp_dir().join("not_dynamic_island_crash.log"));
+        let _ = std::fs::write(log_path, msg);
     }));
 
     // High-DPI Per-Monitor V2: Ensures pixel-perfect 1:1 crisp rendering on 100%, 125%, 150%, 200% displays!
@@ -3370,6 +3398,7 @@ fn main() {
         windows::Win32::System::Ole::OleUninitialize();
         let _ = timeEndPeriod(1);
     }
+    system::shelf::cleanup_temp_shelf_snippet();
 }
 
 #[cfg(test)]

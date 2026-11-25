@@ -311,28 +311,22 @@ impl CalendarManager {
         if self.sync_url_path.exists() {
             if let Ok(content) = fs::read_to_string(&self.sync_url_path) {
                 for line in content.lines() {
-                    let mut trimmed = line.trim();
-                    if trimmed.starts_with('#') {
-                        let without_hash = trimmed.trim_start_matches('#').trim();
-                        if let Some(after_example) = without_hash.strip_prefix("Example:") {
-                            trimmed = after_example.trim();
-                        } else if without_hash.starts_with("http://") || without_hash.starts_with("https://") {
-                            trimmed = without_hash;
-                        } else {
-                            continue;
-                        }
+                    let trimmed = line.trim();
+                    if trimmed.is_empty() || trimmed.starts_with('#') {
+                        continue;
                     }
-                    if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
+                    if trimmed.starts_with("https://") {
                         self.gcal_url = trimmed.to_string();
                         self.sync_status = "GCal Ready".to_string();
                         return;
                     }
                 }
             }
+            return;
         }
 
         // Help template for users to paste their own Google Calendar secret iCal link
-        let help = "# Paste your Google Calendar secret iCal URL below:\n# Example: https://calendar.google.com/calendar/ical/.../basic.ics\n";
+        let help = "# Paste your Google Calendar secret HTTPS iCal URL below:\n# Example: https://calendar.google.com/calendar/ical/.../basic.ics\n";
         let _ = fs::write(&self.sync_url_path, help);
     }
 
@@ -544,6 +538,7 @@ pub fn fetch_url_native(url: &str) -> Result<String, String> {
         if session.is_null() {
             return Err("WinHttpOpen failed".to_string());
         }
+        let _ = WinHttpSetTimeouts(session, 5000, 5000, 10000, 10000);
 
         let port = if is_https { 443 } else { 80 };
         let connect = WinHttpConnect(session, PCWSTR(host_w.as_ptr()), port, 0);
@@ -596,18 +591,23 @@ pub fn fetch_url_native(url: &str) -> Result<String, String> {
             return Err("WinHttpReceiveResponse failed".to_string());
         }
 
+        const MAX_HTTP_RESPONSE_BYTES: usize = 2 * 1024 * 1024;
         let mut response_bytes: Vec<u8> = Vec::new();
         loop {
             let mut size_to_read = 0u32;
             if WinHttpQueryDataAvailable(request, &mut size_to_read).is_err() || size_to_read == 0 {
                 break;
             }
-            let mut temp_buf = vec![0u8; size_to_read as usize];
+            if response_bytes.len() >= MAX_HTTP_RESPONSE_BYTES {
+                break;
+            }
+            let capped_read = (size_to_read as usize).min(MAX_HTTP_RESPONSE_BYTES - response_bytes.len());
+            let mut temp_buf = vec![0u8; capped_read];
             let mut downloaded = 0u32;
             if WinHttpReadData(
                 request,
                 temp_buf.as_mut_ptr() as *mut _,
-                size_to_read,
+                capped_read as u32,
                 &mut downloaded,
             ).is_ok() && downloaded > 0 {
                 response_bytes.extend_from_slice(&temp_buf[..downloaded as usize]);
@@ -885,5 +885,44 @@ END:VCALENDAR"#;
                 }
             }
         }
+    }
+
+    #[test]
+    fn test_load_sync_url_rejects_comments_and_http() {
+        let temp_sync = std::env::temp_dir().join("ndi_test_calendar_sync_security.txt");
+        let temp_cal = std::env::temp_dir().join("ndi_test_calendar_events_security.json");
+        let _ = fs::write(
+            &temp_sync,
+            "# Example: https://example.com/ignored.ics\n# https://example.com/commented_out.ics\nhttp://example.com/insecure.ics\n",
+        );
+
+        let mut mgr = CalendarManager {
+            events: Vec::new(),
+            next_id: 1,
+            view_year: 2026,
+            view_month: 1,
+            selected_day: 1,
+            today_year: 2026,
+            today_month: 1,
+            today_day: 1,
+            gcal_url: String::new(),
+            is_syncing: false,
+            sync_status: String::new(),
+            is_input_active: false,
+            input: crate::ui::TextInput::new(64),
+            scroll_offset: 0,
+            file_path: temp_cal,
+            sync_url_path: temp_sync.clone(),
+            is_sync_running: Arc::new(AtomicBool::new(false)),
+        };
+
+        mgr.load_sync_url();
+        assert_eq!(mgr.gcal_url, "");
+
+        let _ = fs::write(&temp_sync, "https://example.com/valid/calendar.ics\n");
+        mgr.load_sync_url();
+        assert_eq!(mgr.gcal_url, "https://example.com/valid/calendar.ics");
+
+        let _ = fs::remove_file(&temp_sync);
     }
 }

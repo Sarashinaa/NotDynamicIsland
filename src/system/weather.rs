@@ -273,7 +273,7 @@ impl WeatherManager {
                             }
                         }
 
-                        // Tier 2: Public IP Geolocation Fallback (ip-api HTTP -> ipwho.is HTTPS)
+                        // Tier 2: Public IP Geolocation Fallback (ip-api first for accurate local city, HTTPS ipwho.is fallback)
                         if !geo_resolved
                             && !manual_override_clone.load(Ordering::SeqCst)
                             && !resolved_coords_this_cycle
@@ -559,10 +559,14 @@ fn load_manual_location_from_path(path: &std::path::Path) -> Option<ManualLocati
     })
 }
 
+fn sanitize_single_line(s: &str) -> String {
+    s.replace(['\r', '\n'], " ").trim().to_string()
+}
+
 fn save_manual_location_to_path(path: &std::path::Path, loc: &ManualLocation) {
-    let mut content = format!("query={}\n", loc.query);
+    let mut content = format!("query={}\n", sanitize_single_line(&loc.query));
     if let Some(ref city) = loc.resolved_city {
-        content.push_str(&format!("city={}\n", city));
+        content.push_str(&format!("city={}\n", sanitize_single_line(city)));
     }
     if let (Some(lat), Some(lon)) = (loc.lat, loc.lon) {
         content.push_str(&format!("lat={}\nlon={}\n", lat, lon));
@@ -627,8 +631,9 @@ fn query_windows_geolocation() -> Option<(f32, f32)> {
     }
 
     let point = coord.Point().ok()?.Position().ok()?;
-    let lat = point.Latitude as f32;
-    let lon = point.Longitude as f32;
+    // Round physical coordinates to ~1.1 km (2 decimals) before outbound API calls or disk caching
+    let lat = ((point.Latitude * 100.0).round() / 100.0) as f32;
+    let lon = ((point.Longitude * 100.0).round() / 100.0) as f32;
     if is_valid_coords(lat, lon) {
         Some((lat, lon))
     } else {
@@ -704,9 +709,10 @@ fn geocode_manual_query(query: &str) -> GeocodeOutcome {
 }
 
 fn save_cache_to_path(path: &std::path::Path, lat: f32, lon: f32, city: &str, info: &WeatherInfo) {
+    let safe_city = sanitize_single_line(city);
     let content = format!(
         "city={}\nlat={}\nlon={}\ntemperature={}\napparent_temperature={}\nweather_code={}\nis_day={}\nrelative_humidity={}\nwind_speed={}\ntemp_max={}\ntemp_min={}\n",
-        city,
+        safe_city,
         lat,
         lon,
         info.temperature,

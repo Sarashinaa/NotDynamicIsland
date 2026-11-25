@@ -8,8 +8,8 @@
 use windows::core::{w, PCWSTR};
 use windows::Win32::Networking::WinHttp::{
     WinHttpCloseHandle, WinHttpConnect, WinHttpOpen, WinHttpOpenRequest, WinHttpReadData,
-    WinHttpReceiveResponse, WinHttpSendRequest, WINHTTP_ACCESS_TYPE_DEFAULT_PROXY,
-    WINHTTP_FLAG_SECURE,
+    WinHttpReceiveResponse, WinHttpSendRequest, WinHttpSetTimeouts,
+    WINHTTP_ACCESS_TYPE_DEFAULT_PROXY, WINHTTP_FLAG_SECURE,
 };
 
 /// Returns true if the text contains Japanese (Kanji, Hiragana, Katakana) or Korean (Hangul).
@@ -377,6 +377,7 @@ fn fetch_google_romaji_batch(lines: &[String]) -> Vec<String> {
             if session.is_null() {
                 continue;
             }
+            let _ = WinHttpSetTimeouts(session, 5000, 5000, 10000, 10000);
 
             let connect = WinHttpConnect(session, w!("translate.googleapis.com"), 443, 0);
             if connect.is_null() {
@@ -400,6 +401,7 @@ fn fetch_google_romaji_batch(lines: &[String]) -> Vec<String> {
                 if sent.is_ok() {
                     let rec = WinHttpReceiveResponse(request, std::ptr::null_mut());
                     if rec.is_ok() {
+                        const MAX_ROMAJI_BYTES: usize = 512 * 1024;
                         let mut body = Vec::new();
                         let mut buf = [0u8; 4096];
                         let mut read_bytes = 0u32;
@@ -412,7 +414,12 @@ fn fetch_google_romaji_batch(lines: &[String]) -> Vec<String> {
                         .is_ok()
                             && read_bytes > 0
                         {
-                            body.extend_from_slice(&buf[..read_bytes as usize]);
+                            let remaining = MAX_ROMAJI_BYTES.saturating_sub(body.len());
+                            if remaining == 0 {
+                                break;
+                            }
+                            let take = (read_bytes as usize).min(remaining);
+                            body.extend_from_slice(&buf[..take]);
                         }
                         if let Ok(s) = String::from_utf8(body) {
                             result_json = s;

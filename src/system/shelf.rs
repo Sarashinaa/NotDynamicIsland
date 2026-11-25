@@ -72,11 +72,68 @@ pub fn get_cf_png() -> u32 {
     *CF_PNG.get_or_init(|| unsafe { RegisterClipboardFormatW(w!("PNG")) })
 }
 
+fn temp_snippet_file_path() -> PathBuf {
+    shelf_captures_dir().join("shelf_text_snippet.txt")
+}
+
 fn get_or_create_temp_text_file(text: &str) -> PathBuf {
-    let temp_dir = std::env::temp_dir();
-    let file_path = temp_dir.join("shelf_text_snippet.txt");
+    let file_path = temp_snippet_file_path();
     let _ = fs::write(&file_path, text);
     file_path
+}
+
+pub fn cleanup_temp_shelf_snippet() {
+    let _ = fs::remove_file(temp_snippet_file_path());
+}
+
+unsafe fn read_ole_utf16_bounded(hglobal: windows::Win32::Foundation::HGLOBAL) -> Option<String> {
+    let byte_len = unsafe { windows::Win32::System::Memory::GlobalSize(hglobal) };
+    if byte_len < 2 {
+        return None;
+    }
+    let max_units = (byte_len / 2).min(65536);
+    let ptr = unsafe { windows::Win32::System::Memory::GlobalLock(hglobal) } as *const u16;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut len = 0usize;
+    while len < max_units && unsafe { *ptr.add(len) } != 0 {
+        len += 1;
+    }
+    let text = String::from_utf16_lossy(unsafe { std::slice::from_raw_parts(ptr, len) })
+        .trim()
+        .to_string();
+    let _ = unsafe { windows::Win32::System::Memory::GlobalUnlock(hglobal) };
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
+}
+
+unsafe fn read_ole_bytes_bounded(hglobal: windows::Win32::Foundation::HGLOBAL) -> Option<String> {
+    let byte_len = unsafe { windows::Win32::System::Memory::GlobalSize(hglobal) };
+    if byte_len == 0 {
+        return None;
+    }
+    let max_bytes = byte_len.min(65536);
+    let ptr = unsafe { windows::Win32::System::Memory::GlobalLock(hglobal) } as *const u8;
+    if ptr.is_null() {
+        return None;
+    }
+    let mut len = 0usize;
+    while len < max_bytes && unsafe { *ptr.add(len) } != 0 {
+        len += 1;
+    }
+    let text = String::from_utf8_lossy(unsafe { std::slice::from_raw_parts(ptr, len) })
+        .trim()
+        .to_string();
+    let _ = unsafe { windows::Win32::System::Memory::GlobalUnlock(hglobal) };
+    if text.is_empty() {
+        None
+    } else {
+        Some(text)
+    }
 }
 
 /// Flag to suppress clipboard loops when NotDynamicIsland copies text/file itself
@@ -609,37 +666,27 @@ impl IDropTarget_Impl for IslandDropTarget_Impl {
                     tymed: TYMED_HGLOBAL.0 as u32,
                 };
                 if let Ok(stg) = unsafe { data.GetData(&fmt_text) } {
-                    let hglobal = unsafe { stg.u.hGlobal };
-                    if stg.tymed == TYMED_HGLOBAL.0 as u32 && !hglobal.is_invalid() {
-                        unsafe {
-                            let ptr = windows::Win32::System::Memory::GlobalLock(hglobal) as *const u16;
-                            if !ptr.is_null() {
-                                let mut len = 0;
-                                while *ptr.add(len) != 0 {
-                                    len += 1;
-                                }
-                                let slice = std::slice::from_raw_parts(ptr, len);
-                                let text = String::from_utf16_lossy(slice).trim().to_string();
-                                let _ = windows::Win32::System::Memory::GlobalUnlock(hglobal);
-                                ReleaseStgMedium(&stg as *const _ as *mut _);
+                    let text_opt = if stg.tymed == TYMED_HGLOBAL.0 as u32 && unsafe { !stg.u.hGlobal.is_invalid() } {
+                        unsafe { read_ole_utf16_bounded(stg.u.hGlobal) }
+                    } else {
+                        None
+                    };
+                    unsafe { ReleaseStgMedium(&stg as *const _ as *mut _) };
 
-                                if !text.is_empty() {
-                                    if let Ok(mut lock) = crate::APP.lock() {
-                                        if let Some(app) = lock.as_mut() {
-                                            let item = ShelfItem::from_text(text);
-                                            let item_name = item.name.clone();
-                                            app.island_state.shelf.add(item);
-                                            app.island_state.select_page(crate::ui::state::ExpandedPage::Shelf);
-                                            app.island_state.show_banner(
-                                                "Shelf".to_string(),
-                                                "Teks Ditambahkan".to_string(),
-                                                item_name,
-                                            );
-                                            crate::wake_animation(self.hwnd, app);
-                                            dropped = true;
-                                        }
-                                    }
-                                }
+                    if let Some(text) = text_opt {
+                        if let Ok(mut lock) = crate::APP.lock() {
+                            if let Some(app) = lock.as_mut() {
+                                let item = ShelfItem::from_text(text);
+                                let item_name = item.name.clone();
+                                app.island_state.shelf.add(item);
+                                app.island_state.select_page(crate::ui::state::ExpandedPage::Shelf);
+                                app.island_state.show_banner(
+                                    "Shelf".to_string(),
+                                    "Teks Ditambahkan".to_string(),
+                                    item_name,
+                                );
+                                crate::wake_animation(self.hwnd, app);
+                                dropped = true;
                             }
                         }
                     }
@@ -657,38 +704,28 @@ impl IDropTarget_Impl for IslandDropTarget_Impl {
                         tymed: TYMED_HGLOBAL.0 as u32,
                     };
                     if let Ok(stg) = unsafe { data.GetData(&fmt_plain) } {
-                        let hglobal = unsafe { stg.u.hGlobal };
-                        if stg.tymed == TYMED_HGLOBAL.0 as u32 && !hglobal.is_invalid() {
-                            unsafe {
-                                let ptr = windows::Win32::System::Memory::GlobalLock(hglobal) as *mut u8;
-                                if !ptr.is_null() {
-                                    let mut len = 0;
-                                    while *ptr.add(len) != 0 {
-                                        len += 1;
-                                    }
-                                    let slice = std::slice::from_raw_parts(ptr, len);
-                                    let text = String::from_utf8_lossy(slice).trim().to_string();
-                                    let _ = windows::Win32::System::Memory::GlobalUnlock(stg.u.hGlobal);
-                                    ReleaseStgMedium(&stg as *const _ as *mut _);
+                        let text_opt = if stg.tymed == TYMED_HGLOBAL.0 as u32 && unsafe { !stg.u.hGlobal.is_invalid() } {
+                            unsafe { read_ole_bytes_bounded(stg.u.hGlobal) }
+                        } else {
+                            None
+                        };
+                        unsafe { ReleaseStgMedium(&stg as *const _ as *mut _) };
 
-                                    if !text.is_empty() {
-                                        if let Ok(mut lock) = crate::APP.lock() {
-                                            if let Some(app) = lock.as_mut() {
-                                                let item = ShelfItem::from_text(text);
-                                                let item_name = item.name.clone();
-                                                app.island_state.shelf.add(item);
-                                                app.island_state.select_page(crate::ui::state::ExpandedPage::Shelf);
-                                                app.island_state.show_banner(
-                                                    "Shelf".to_string(),
-                                                    "Teks Ditambahkan".to_string(),
-                                                    item_name,
-                                                );
-                                                crate::wake_animation(self.hwnd, app);
-                                                dropped = true;
-                                                break;
-                                            }
-                                        }
-                                    }
+                        if let Some(text) = text_opt {
+                            if let Ok(mut lock) = crate::APP.lock() {
+                                if let Some(app) = lock.as_mut() {
+                                    let item = ShelfItem::from_text(text);
+                                    let item_name = item.name.clone();
+                                    app.island_state.shelf.add(item);
+                                    app.island_state.select_page(crate::ui::state::ExpandedPage::Shelf);
+                                    app.island_state.show_banner(
+                                        "Shelf".to_string(),
+                                        "Teks Ditambahkan".to_string(),
+                                        item_name,
+                                    );
+                                    crate::wake_animation(self.hwnd, app);
+                                    dropped = true;
+                                    break;
                                 }
                             }
                         }
@@ -706,37 +743,27 @@ impl IDropTarget_Impl for IslandDropTarget_Impl {
                     tymed: TYMED_HGLOBAL.0 as u32,
                 };
                 if let Ok(stg) = unsafe { data.GetData(&fmt_ansi) } {
-                    let hglobal = unsafe { stg.u.hGlobal };
-                    if stg.tymed == TYMED_HGLOBAL.0 as u32 && !hglobal.is_invalid() {
-                        unsafe {
-                            let ptr = windows::Win32::System::Memory::GlobalLock(hglobal) as *mut u8;
-                            if !ptr.is_null() {
-                                let mut len = 0;
-                                while *ptr.add(len) != 0 {
-                                    len += 1;
-                                }
-                                let slice = std::slice::from_raw_parts(ptr, len);
-                                let text = String::from_utf8_lossy(slice).trim().to_string();
-                                let _ = windows::Win32::System::Memory::GlobalUnlock(stg.u.hGlobal);
-                                ReleaseStgMedium(&stg as *const _ as *mut _);
+                    let text_opt = if stg.tymed == TYMED_HGLOBAL.0 as u32 && unsafe { !stg.u.hGlobal.is_invalid() } {
+                        unsafe { read_ole_bytes_bounded(stg.u.hGlobal) }
+                    } else {
+                        None
+                    };
+                    unsafe { ReleaseStgMedium(&stg as *const _ as *mut _) };
 
-                                if !text.is_empty() {
-                                    if let Ok(mut lock) = crate::APP.lock() {
-                                        if let Some(app) = lock.as_mut() {
-                                            let item = ShelfItem::from_text(text);
-                                            let item_name = item.name.clone();
-                                            app.island_state.shelf.add(item);
-                                            app.island_state.select_page(crate::ui::state::ExpandedPage::Shelf);
-                                            app.island_state.show_banner(
-                                                "Shelf".to_string(),
-                                                "Teks Ditambahkan".to_string(),
-                                                item_name,
-                                            );
-                                            crate::wake_animation(self.hwnd, app);
-                                            dropped = true;
-                                        }
-                                    }
-                                }
+                    if let Some(text) = text_opt {
+                        if let Ok(mut lock) = crate::APP.lock() {
+                            if let Some(app) = lock.as_mut() {
+                                let item = ShelfItem::from_text(text);
+                                let item_name = item.name.clone();
+                                app.island_state.shelf.add(item);
+                                app.island_state.select_page(crate::ui::state::ExpandedPage::Shelf);
+                                app.island_state.show_banner(
+                                    "Shelf".to_string(),
+                                    "Teks Ditambahkan".to_string(),
+                                    item_name,
+                                );
+                                crate::wake_animation(self.hwnd, app);
+                                dropped = true;
                             }
                         }
                     }
@@ -1087,6 +1114,7 @@ impl FileShelf {
     #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.items.clear();
+        cleanup_temp_shelf_snippet();
     }
 }
 
@@ -1948,14 +1976,21 @@ pub fn copy_text_to_clipboard(text: &str) -> bool {
                 {
                     let _ = windows::Win32::System::DataExchange::EmptyClipboard();
                     // CF_UNICODETEXT format is 13
-                    let _ = windows::Win32::System::DataExchange::SetClipboardData(
+                    let ok = windows::Win32::System::DataExchange::SetClipboardData(
                         13,
                         windows::Win32::Foundation::HANDLE(h_global.0),
-                    );
+                    )
+                    .is_ok();
                     let _ = windows::Win32::System::DataExchange::CloseClipboard();
-                    return true;
+                    if ok {
+                        return true;
+                    }
+                    IS_INTERNAL_CLIPBOARD_COPY.store(false, Ordering::SeqCst);
+                } else {
+                    IS_INTERNAL_CLIPBOARD_COPY.store(false, Ordering::SeqCst);
                 }
             }
+            let _ = windows::Win32::Foundation::GlobalFree(h_global);
         }
     }
     false

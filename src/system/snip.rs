@@ -21,8 +21,12 @@ pub fn trigger_screen_snip() {
     LAST_TRIGGER_TIME.store(now_ms, Ordering::Relaxed);
 
     std::thread::spawn(move || {
-        // Launch detached via explorer.exe to avoid any COM/DDE synchronization with our process
-        let _ = std::process::Command::new("explorer")
+        let sys_root = std::env::var("SystemRoot")
+            .or_else(|_| std::env::var("windir"))
+            .unwrap_or_else(|_| r"C:\Windows".to_string());
+        let explorer_exe = std::path::PathBuf::from(sys_root).join("explorer.exe");
+        // Launch detached via %SystemRoot%\explorer.exe to avoid any COM/DDE synchronization or CWD binary planting
+        let _ = std::process::Command::new(explorer_exe)
             .arg("ms-screenclip:")
             .spawn();
     });

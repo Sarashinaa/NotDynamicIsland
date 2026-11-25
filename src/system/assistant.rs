@@ -239,7 +239,6 @@ pub fn load_groq_api_key() -> Option<String> {
     }
 
     let search_paths = [
-        std::path::PathBuf::from("groq_key.txt"),
         std::env::current_exe()
             .ok()
             .and_then(|p| p.parent().map(|d| d.join("groq_key.txt")))
@@ -319,7 +318,7 @@ fn execute_groq_query(api_key: &str, history: &[ChatMessage], prompt: &str) -> R
     let host_w: Vec<u16> = host.encode_utf16().chain(std::iter::once(0)).collect();
     let path_w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
-    let system_content = "Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 1-3 baris dalam Bahasa Indonesia. Pahami typo, singkatan, slang, dan berbagai variasi perintah bahasa Indonesia (contoh: minta buka, tolong bukain, coba buka, buka, jalankan; wa->whatsapp, dc->discord, wrod/word->winword, eksel->excel, spoti->spotify, tele->telegram, kalkulator->calc, krom->chrome, brv->brave, wt->terminal, cmd->cmd, pwsh->powershell, steam, anydesk, vlc, obs, figma, dll).\\n\\n[KLARIFIKASI PENTING]: Jika pengguna meminta untuk membuka sesuatu yang tidak spesifik, ambigu, atau memiliki banyak alternatif di Windows (contoh: 'note' / 'catatan' bisa Notepad, OneNote, atau Sticky Notes; 'browser' bisa Chrome, Brave, atau Edge; 'terminal' bisa Windows Terminal, PowerShell, atau CMD; 'office' bisa Word, Excel, atau PowerPoint):\\nJANGAN langsung membuka dan JANGAN keluarkan tag aksi! Tanyakan klarifikasi dengan ramah dan sebutkan 2-3 pilihan aplikasi tersebut secara singkat (contoh: 'Ada beberapa aplikasi catatan: Notepad, OneNote, atau Sticky Notes. Yang mana yang ingin dibuka?').\\n\\n[EKSEKUSI AKSI]: Jika permintaan sudah jelas/spesifik (membuka aplikasi apapun yang terpasang di Windows atau membuka folder), atau pengguna telah memilih dari pertanyaan klarifikasi, berikan konfirmasi singkat dan WAJIB sertakan SATU tag aksi di baris paling akhir:\\n[ACTION:OPEN:app_name] (contoh: [ACTION:OPEN:steam], [ACTION:OPEN:anydesk], [ACTION:OPEN:notepad], [ACTION:OPEN:whatsapp], [ACTION:OPEN:discord], [ACTION:OPEN:winword], [ACTION:OPEN:excel], [ACTION:OPEN:chrome])\\n[ACTION:EXPLORER:folder] (contoh: [ACTION:EXPLORER:downloads], [ACTION:EXPLORER:documents], [ACTION:EXPLORER:desktop], [ACTION:EXPLORER:pictures], [ACTION:EXPLORER:screenshots], [ACTION:EXPLORER:D:\\\\KULIAH-BELAJAR\\\\masterpiece]). Jika pengguna memberikan letak/path folder spesifik (misal 'ada di D:\\\\...'), langsung buka dengan [ACTION:EXPLORER:path].\\n[ACTION:BROWSER:browser:profile] (contoh: [ACTION:BROWSER:brave:Default])\\n[ACTION:FILE_NEW:folder:file] (contoh: [ACTION:FILE_NEW:desktop:catatan.txt])\\n[ACTION:LOCK]\\n[ACTION:TODO:teks]\\n[ACTION:TIMER:menit]\\n[ACTION:MUTE]\\n[ACTION:SNIP]\\n[ACTION:WEATHER]\\n[ACTION:WEATHER_CITY:kota] (gunakan 'auto' untuk kembali otomatis)";
+    let system_content = "Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 1-3 baris dalam Bahasa Indonesia. Pahami typo, singkatan, slang, dan berbagai variasi perintah bahasa Indonesia (contoh: minta buka, tolong bukain, coba buka, buka, jalankan; wa->whatsapp, dc->discord, wrod/word->winword, eksel->excel, spoti->spotify, tele->telegram, kalkulator->calc, krom->chrome, brv->brave, wt->terminal, cmd->cmd, pwsh->powershell, steam, anydesk, vlc, obs, figma, dll).\\n\\n[KLARIFIKASI PENTING]: Jika pengguna meminta untuk membuka sesuatu yang tidak spesifik, ambigu, atau memiliki banyak alternatif di Windows (contoh: 'note' / 'catatan' bisa Notepad, OneNote, atau Sticky Notes; 'browser' bisa Chrome, Brave, atau Edge; 'terminal' bisa Windows Terminal, PowerShell, atau CMD; 'office' bisa Word, Excel, atau PowerPoint):\\nJANGAN langsung membuka dan JANGAN keluarkan tag aksi! Tanyakan klarifikasi dengan ramah dan sebutkan 2-3 pilihan aplikasi tersebut secara singkat (contoh: 'Ada beberapa aplikasi catatan: Notepad, OneNote, atau Sticky Notes. Yang mana yang ingin dibuka?').\\n\\n[EKSEKUSI AKSI]: Jika permintaan sudah jelas/spesifik (membuka aplikasi apapun yang terpasang di Windows atau membuka folder), atau pengguna telah memilih dari pertanyaan klarifikasi, berikan konfirmasi singkat dan WAJIB sertakan SATU tag aksi di baris paling akhir:\\n[ACTION:OPEN:app_name] (contoh: [ACTION:OPEN:steam], [ACTION:OPEN:anydesk], [ACTION:OPEN:notepad], [ACTION:OPEN:whatsapp], [ACTION:OPEN:discord], [ACTION:OPEN:winword], [ACTION:OPEN:excel], [ACTION:OPEN:chrome])\\n[ACTION:EXPLORER:folder] (contoh: [ACTION:EXPLORER:downloads], [ACTION:EXPLORER:documents], [ACTION:EXPLORER:desktop], [ACTION:EXPLORER:pictures], [ACTION:EXPLORER:screenshots], [ACTION:EXPLORER:C:\\\\Users\\\\Public\\\\Projects]). Jika pengguna memberikan letak/path folder spesifik (misal 'ada di C:\\\\...'), langsung buka dengan [ACTION:EXPLORER:path].\\n[ACTION:BROWSER:browser:profile] (contoh: [ACTION:BROWSER:brave:Default])\\n[ACTION:FILE_NEW:folder:file] (contoh: [ACTION:FILE_NEW:desktop:catatan.txt])\\n[ACTION:LOCK]\\n[ACTION:TODO:teks]\\n[ACTION:TIMER:menit]\\n[ACTION:MUTE]\\n[ACTION:SNIP]\\n[ACTION:WEATHER]\\n[ACTION:WEATHER_CITY:kota] (gunakan 'auto' untuk kembali otomatis)";
 
     let mut messages_json = Vec::new();
     messages_json.push(format!(
@@ -376,6 +375,7 @@ fn execute_groq_query(api_key: &str, history: &[ChatMessage], prompt: &str) -> R
         if session.is_null() {
             return Err("WinHttpOpen failed".to_string());
         }
+        let _ = WinHttpSetTimeouts(session, 5000, 5000, 10000, 15000);
 
         let connect = WinHttpConnect(session, PCWSTR(host_w.as_ptr()), 443, 0);
         if connect.is_null() {
@@ -439,18 +439,23 @@ fn execute_groq_query(api_key: &str, history: &[ChatMessage], prompt: &str) -> R
             return Err("WinHttpReceiveResponse failed".to_string());
         }
 
+        const MAX_GROQ_RESPONSE_BYTES: usize = 512 * 1024;
         let mut response_bytes: Vec<u8> = Vec::new();
         loop {
             let mut size_to_read = 0u32;
             if WinHttpQueryDataAvailable(request, &mut size_to_read).is_err() || size_to_read == 0 {
                 break;
             }
-            let mut temp_buf = vec![0u8; size_to_read as usize];
+            if response_bytes.len() >= MAX_GROQ_RESPONSE_BYTES {
+                break;
+            }
+            let capped_read = (size_to_read as usize).min(MAX_GROQ_RESPONSE_BYTES - response_bytes.len());
+            let mut temp_buf = vec![0u8; capped_read];
             let mut downloaded = 0u32;
             if WinHttpReadData(
                 request,
                 temp_buf.as_mut_ptr() as *mut _,
-                size_to_read,
+                capped_read as u32,
                 &mut downloaded,
             )
             .is_ok()
@@ -627,14 +632,45 @@ fn execute_gemini_query(history: &[ChatMessage], prompt: &str) -> (String, Optio
     let prompt_owned = concise_prompt;
 
     thread::spawn(move || {
-        let mut cmd = Command::new("cmd");
-        cmd.args(["/C", "gemini.cmd", "--allowed-mcp-server-names", "none", "--skip-trust", "-p", &prompt_owned, "-o", "json"]);
+        use std::io::Write;
+
+        let bundle_js = std::env::var_os("APPDATA").map(|appdata| {
+            std::path::PathBuf::from(appdata)
+                .join("npm")
+                .join("node_modules")
+                .join("@google")
+                .join("gemini-cli")
+                .join("bundle")
+                .join("gemini.js")
+        });
+
+        let mut cmd = if let Some(ref js_path) = bundle_js.filter(|p| p.exists()) {
+            let mut c = Command::new("node");
+            c.arg(js_path)
+                .args(["--allowed-mcp-server-names", "none", "-p", "", "-o", "json"]);
+            c
+        } else {
+            // Pass strictly static args via cmd /C and deliver untrusted prompt over stdin to avoid BatBadBut cmd injection
+            let mut c = Command::new("cmd");
+            c.args(["/C", "gemini.cmd", "--allowed-mcp-server-names", "none", "-p", "", "-o", "json"]);
+            c
+        };
+
         cmd.current_dir(std::env::temp_dir());
         cmd.creation_flags(CREATE_NO_WINDOW);
+        cmd.stdin(Stdio::piped());
         cmd.stdout(Stdio::piped());
         cmd.stderr(Stdio::piped());
 
-        let res = cmd.output();
+        let res = match cmd.spawn() {
+            Ok(mut child) => {
+                if let Some(mut stdin) = child.stdin.take() {
+                    let _ = stdin.write_all(prompt_owned.as_bytes());
+                }
+                child.wait_with_output()
+            }
+            Err(e) => Err(e),
+        };
         let _ = tx.send(res);
     });
 
@@ -691,7 +727,7 @@ fn execute_gemini_query(history: &[ChatMessage], prompt: &str) -> (String, Optio
             (
                 String::new(),
                 Some(format!(
-                    "Gagal menjalankan Gemini CLI (gemini.cmd): {}. Pastikan Antigravity CLI terpasang.",
+                    "Gagal menjalankan Gemini CLI (gemini.cmd): {}. Pastikan Gemini CLI terpasang.",
                     e
                 )),
             )

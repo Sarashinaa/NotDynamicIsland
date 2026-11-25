@@ -5182,6 +5182,7 @@ mod tests {
         {
             let mut buf = PixelBuffer::new(820, 200);
             let mut state = IslandState::new();
+            state.todo.items.clear();
             state.mode = IslandMode::Expanded(ExpandedPage::ToDo);
             state.todo.is_input_active = true;
             state.todo.input.set_text("Beli buah segar di pasar pagi dan sayur bayam");

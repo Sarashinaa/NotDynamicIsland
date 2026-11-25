@@ -91,15 +91,45 @@ impl TodoList {
                 let mut loaded = Vec::new();
                 let mut rest = content.as_str();
 
-                // Scan each JSON object delimited by { and }
+                // Scan each JSON object delimited by balanced { and } outside quoted strings
                 while let Some(start_obj) = rest.find('{') {
                     let after_start = &rest[start_obj..];
-                    if let Some(end_obj) = after_start.find('}') {
+                    let bytes = after_start.as_bytes();
+                    let mut depth = 0usize;
+                    let mut in_str = false;
+                    let mut escape = false;
+                    let mut end_obj_opt = None;
+                    for (idx, &b) in bytes.iter().enumerate() {
+                        if in_str {
+                            if escape {
+                                escape = false;
+                            } else if b == b'\\' {
+                                escape = true;
+                            } else if b == b'"' {
+                                in_str = false;
+                            }
+                            continue;
+                        }
+                        match b {
+                            b'"' => in_str = true,
+                            b'{' => depth += 1,
+                            b'}' => {
+                                depth = depth.saturating_sub(1);
+                                if depth == 0 {
+                                    end_obj_opt = Some(idx);
+                                    break;
+                                }
+                            }
+                            _ => {}
+                        }
+                    }
+
+                    if let Some(end_obj) = end_obj_opt {
                         let obj_str = &after_start[..=end_obj];
                         let is_done = obj_str.contains("\"done\":true");
                         let id = extract_json_num(obj_str, "\"id\":").unwrap_or(0);
                         let text = extract_json_str(obj_str, "\"text\":\"").unwrap_or_default();
-                        let unescaped = text.replace("\\\"", "\"").replace("\\\\", "\\");
+                        let unescaped = unescape_json_str(&text);
                         if !unescaped.is_empty() {
                             loaded.push(TodoItem {
                                 id,
@@ -138,7 +168,13 @@ impl TodoList {
         }
         let mut out = String::from("[\n");
         for (i, item) in self.items.iter().enumerate() {
-            let escaped_text = item.text.replace('\\', "\\\\").replace('\"', "\\\"");
+            let escaped_text = item
+                .text
+                .replace('\\', "\\\\")
+                .replace('\"', "\\\"")
+                .replace('\n', "\\n")
+                .replace('\r', "\\r")
+                .replace('\t', "\\t");
             let line = format!(
                 "  {{\"id\":{},\"done\":{},\"text\":\"{}\"}}{}\n",
                 item.id,
@@ -210,8 +246,13 @@ fn extract_json_str(line: &str, key: &str) -> Option<String> {
     let sub = &line[start..];
     let mut end = 0;
     let bytes = sub.as_bytes();
+    let mut escaped = false;
     while end < bytes.len() {
-        if bytes[end] == b'"' && (end == 0 || bytes[end - 1] != b'\\') {
+        if escaped {
+            escaped = false;
+        } else if bytes[end] == b'\\' {
+            escaped = true;
+        } else if bytes[end] == b'"' {
             break;
         }
         end += 1;
@@ -221,6 +262,30 @@ fn extract_json_str(line: &str, key: &str) -> Option<String> {
     } else {
         None
     }
+}
+
+fn unescape_json_str(s: &str) -> String {
+    let mut out = String::with_capacity(s.len());
+    let mut chars = s.chars();
+    while let Some(c) = chars.next() {
+        if c == '\\' {
+            match chars.next() {
+                Some('n') => out.push('\n'),
+                Some('r') => out.push('\r'),
+                Some('t') => out.push('\t'),
+                Some('"') => out.push('"'),
+                Some('\\') => out.push('\\'),
+                Some(other) => {
+                    out.push('\\');
+                    out.push(other);
+                }
+                None => out.push('\\'),
+            }
+        } else {
+            out.push(c);
+        }
+    }
+    out
 }
 
 #[cfg(test)]
@@ -247,9 +312,9 @@ mod tests {
         assert_eq!(list.items[0].text, "testing, clear this task");
         assert!(!list.items[0].done);
 
-        // 2. Add custom tasks with special characters
+        // 2. Add custom tasks with special characters (quotes, braces, backslashes)
         list.add("Beli kopi & susu \"Enak\"".to_string());
-        list.add("Task nomor dua".to_string());
+        list.add("Cek {config} dan \\path".to_string());
         assert_eq!(list.items.len(), 3);
 
         // 3. Toggle task done
@@ -270,7 +335,7 @@ mod tests {
         assert_eq!(reloaded.items.len(), 3);
         assert_eq!(reloaded.items[1].text, "Beli kopi & susu \"Enak\"");
         assert!(reloaded.items[1].done);
-        assert_eq!(reloaded.items[2].text, "Task nomor dua");
+        assert_eq!(reloaded.items[2].text, "Cek {config} dan \\path");
         assert!(!reloaded.items[2].done);
 
         // 5. Test clear done
