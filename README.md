@@ -135,7 +135,7 @@ Designed from the ground up for power users who refuse to sacrifice system resou
 ### Ready-to-Run (No Installation Required)
 
 1. Head to the [Latest Releases](https://github.com/Sarashinaa/NotDynamicIsland/releases/latest) page.
-2. Download **`NotDynamicIsland-v2.0-windows-x64.zip`** (or standalone `not_dynamic_island.exe`).
+2. Download **`NotDynamicIsland-windows-x64.zip`** (or standalone `not_dynamic_island.exe`).
 3. Extract and double-click `not_dynamic_island.exe`. The notch will immediately anchor to the top-center of your primary display.
 
 > [!TIP]

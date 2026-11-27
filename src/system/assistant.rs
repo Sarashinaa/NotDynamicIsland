@@ -430,7 +430,7 @@ fn execute_groq_query(api_key: &str, history: &[ChatMessage], prompt: &str) -> R
     );
     let body_bytes = json_body.as_bytes();
 
-    let user_agent = windows::core::w!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) NotDynamicIsland/2.0");
+    let user_agent = windows::core::w!("Mozilla/5.0 (Windows NT 10.0; Win64; x64) NotDynamicIsland/2.1");
     let headers_str = format!(
         "Authorization: Bearer {}\r\nContent-Type: application/json\r\n",
         api_key
