@@ -263,12 +263,8 @@ impl IslandState {
     }
 
     fn load_saved_glass_theme() -> GlassTheme {
-        if let Ok(content) = std::fs::read_to_string(Self::get_theme_path()) {
-            if content.trim().eq_ignore_ascii_case("frosted") {
-                return GlassTheme::FrostedLight;
-            }
-        }
-        GlassTheme::DarkObsidian
+        let content = std::fs::read_to_string(Self::get_theme_path()).ok();
+        parse_saved_glass_theme(content.as_deref())
     }
 
     #[inline]
@@ -305,12 +301,8 @@ impl IslandState {
     }
 
     fn load_saved_shape() -> IslandShape {
-        if let Ok(content) = std::fs::read_to_string(Self::get_shape_path()) {
-            if content.trim().eq_ignore_ascii_case("pill") || content.trim().eq_ignore_ascii_case("floating") {
-                return IslandShape::FloatingPill;
-            }
-        }
-        IslandShape::TopNotch
+        let content = std::fs::read_to_string(Self::get_shape_path()).ok();
+        parse_saved_shape(content.as_deref())
     }
 
     pub fn set_shape(&mut self, shape: IslandShape) {
@@ -675,5 +667,50 @@ fn query_battery_status() -> (u32, bool) {
         } else {
             (100, false)
         }
+    }
+}
+
+pub(crate) fn parse_saved_glass_theme(content: Option<&str>) -> GlassTheme {
+    if let Some(raw) = content {
+        let t = raw.trim();
+        if t.eq_ignore_ascii_case("dark") || t.eq_ignore_ascii_case("obsidian") {
+            return GlassTheme::DarkObsidian;
+        }
+    }
+    GlassTheme::FrostedLight
+}
+
+pub(crate) fn parse_saved_shape(content: Option<&str>) -> IslandShape {
+    if let Some(raw) = content {
+        let t = raw.trim();
+        if t.eq_ignore_ascii_case("notch")
+            || t.eq_ignore_ascii_case("top")
+            || t.eq_ignore_ascii_case("topnotch")
+        {
+            return IslandShape::TopNotch;
+        }
+    }
+    IslandShape::FloatingPill
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_default_shape_and_theme_for_fresh_install() {
+        assert_eq!(parse_saved_shape(None), IslandShape::FloatingPill);
+        assert_eq!(parse_saved_shape(Some("")), IslandShape::FloatingPill);
+        assert_eq!(parse_saved_shape(Some("pill")), IslandShape::FloatingPill);
+        assert_eq!(parse_saved_shape(Some("floating")), IslandShape::FloatingPill);
+        assert_eq!(parse_saved_shape(Some("notch")), IslandShape::TopNotch);
+        assert_eq!(parse_saved_shape(Some("TOP")), IslandShape::TopNotch);
+
+        assert_eq!(parse_saved_glass_theme(None), GlassTheme::FrostedLight);
+        assert_eq!(parse_saved_glass_theme(Some("")), GlassTheme::FrostedLight);
+        assert_eq!(parse_saved_glass_theme(Some("frosted")), GlassTheme::FrostedLight);
+        assert_eq!(parse_saved_glass_theme(Some("light")), GlassTheme::FrostedLight);
+        assert_eq!(parse_saved_glass_theme(Some("dark")), GlassTheme::DarkObsidian);
+        assert_eq!(parse_saved_glass_theme(Some("Obsidian")), GlassTheme::DarkObsidian);
     }
 }

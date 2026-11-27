@@ -1700,9 +1700,9 @@ pub unsafe extern "system" fn window_proc(
                         // Submenu: Island Shape (Top Notch vs Floating Pill)
                         if let Ok(h_shape) = CreatePopupMenu() {
                             let cur_shape = if let Ok(lock) = APP.lock() {
-                                lock.as_ref().map(|a| a.island_state.shape).unwrap_or(ui::IslandShape::TopNotch)
+                                lock.as_ref().map(|a| a.island_state.shape).unwrap_or(ui::IslandShape::FloatingPill)
                             } else {
-                                ui::IslandShape::TopNotch
+                                ui::IslandShape::FloatingPill
                             };
                             let is_notch = cur_shape == ui::IslandShape::TopNotch;
                             let notch_str = if is_notch { "●  Top Notch (Bezel Attached)" } else { "    Top Notch (Bezel Attached)" };
@@ -1729,9 +1729,9 @@ pub unsafe extern "system" fn window_proc(
                                             .unwrap_or(false),
                                     )
                                 })
-                                .unwrap_or((true, false))
+                                .unwrap_or((false, false))
                         } else {
-                            (true, false)
+                            (false, false)
                         };
                         let theme_label = if is_dark {
                             windows::core::w!("☀️  Switch to Light Glass")
