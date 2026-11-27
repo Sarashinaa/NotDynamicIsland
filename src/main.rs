@@ -313,25 +313,56 @@ fn copy_shelf_item_to_clipboard(item: &system::shelf::ShelfItem, state: &mut Isl
     }
 }
 
-fn handle_assistant_local_command(prompt: &str, _hwnd: HWND, app: &mut App) -> bool {
-    if handle_assistant_local_command_inner(prompt, app) {
-        if !app.island_state.assistant.last_response.is_empty() {
-            app.island_state.assistant.messages.push(system::assistant::ChatMessage {
-                is_user: false,
-                text: app.island_state.assistant.last_response.clone(),
-                timestamp: Instant::now(),
-            });
-        }
-        true
-    } else {
-        false
-    }
+fn handle_assistant_local_command(prompt: &str, hwnd: HWND, app: &mut App) -> bool {
+    handle_assistant_local_command_inner(prompt, hwnd, app)
 }
 
-fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
+fn handle_assistant_local_command_inner(prompt: &str, hwnd: HWND, app: &mut App) -> bool {
     let lower = prompt.trim().to_lowercase();
     if lower == "clear" || lower == "bersihkan" || lower == "hapus chat" {
         app.island_state.assistant.clear();
+        return true;
+    }
+
+    // Music player browser/app mode configuration (e.g. "set musik edge app", "set musik default")
+    if let Some(mode) = system::music::extract_music_player_config_intent(prompt) {
+        let saved = system::music::save_music_browser_mode(&mode);
+        if saved {
+            let reply = match &mode {
+                system::music::MusicBrowserMode::Default => {
+                    "Pemutar musik dikembalikan ke browser default sistem.".to_string()
+                }
+                system::music::MusicBrowserMode::Browser { app_mode: true, .. } => format!(
+                    "Pemutar musik diatur ke {} (1 jendela, tanpa tab menumpuk).",
+                    mode.display_label()
+                ),
+                system::music::MusicBrowserMode::Browser {
+                    app_mode: false, ..
+                } => format!("Pemutar musik diatur ke {}.", mode.display_label()),
+            };
+            app.island_state.assistant.set_action_done(reply, 5);
+        } else {
+            app.island_state.assistant.set_action_error(
+                "[!] Gagal menyimpan konfigurasi pemutar musik.".to_string(),
+                6,
+            );
+        }
+        return true;
+    }
+
+    // Music playback command (YouTube Music / YouTube auto-play, or Spotify search).
+    // Checked BEFORE app_launcher so "lagu" / "music" does not open Explorer's Music folder.
+    if let Some(req) = system::music::extract_play_music_intent(prompt) {
+        let status_label = match req.platform {
+            system::music::MusicPlatform::Spotify => {
+                format!("Membuka \"{}\" di Spotify", req.query)
+            }
+            _ => format!("Mencari \"{}\" di {}", req.query, req.platform.display_name()),
+        };
+        app.island_state
+            .assistant
+            .set_thinking_status(status_label);
+        system::music::play_music_async(req, Some(hwnd));
         return true;
     }
 
@@ -340,14 +371,17 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
         match intent {
             system::app_launcher::AppLaunchIntent::OpenApp { name, friendly_name } => {
                 system::app_launcher::launch_or_activate_app_async(name);
-                app.island_state.assistant.last_response = format!("Membuka {}...", friendly_name);
-                app.island_state.assistant.is_thinking = false;
+                app.island_state
+                    .assistant
+                    .set_action_done(format!("Berhasil membuka {}.", friendly_name), 5);
                 return true;
             }
             system::app_launcher::AppLaunchIntent::OpenBrowserProfile { browser, profile } => {
                 system::app_launcher::launch_browser_profile_async(browser.clone(), profile.clone());
-                app.island_state.assistant.last_response = format!("Membuka {} (Profil: \"{}\")...", browser, profile);
-                app.island_state.assistant.is_thinking = false;
+                app.island_state.assistant.set_action_done(
+                    format!("Berhasil membuka {} (Profil: \"{}\").", browser, profile),
+                    5,
+                );
                 return true;
             }
             system::app_launcher::AppLaunchIntent::OpenExplorer { path } => {
@@ -364,29 +398,38 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
                         _ => resolved.file_name().and_then(|n| n.to_str()).map(|s| s.to_string()).unwrap_or_else(|| path.clone()),
                     };
                     system::app_launcher::open_explorer_path_async(resolved.to_string_lossy().to_string());
-                    app.island_state.assistant.last_response = format!("Membuka folder {}...", friendly);
+                    app.island_state
+                        .assistant
+                        .set_action_done(format!("Folder {} dibuka di File Explorer.", friendly), 5);
                 } else {
-                    app.island_state.assistant.last_response = format!("[!] Folder \"{}\" tidak ditemukan di PC.", path);
+                    app.island_state.assistant.set_action_error(
+                        format!("[!] Folder \"{}\" tidak ditemukan di PC.", path),
+                        6,
+                    );
                 }
-                app.island_state.assistant.is_thinking = false;
                 return true;
             }
             system::app_launcher::AppLaunchIntent::CreateNewFile { folder, filename } => {
                 match system::app_launcher::create_and_open_new_text_file(&folder, Some(&filename)) {
                     Ok(p) => {
-                        app.island_state.assistant.last_response = format!("File baru dibuat dan dibuka di Notepad:\n\"{}\"", p.display());
+                        app.island_state.assistant.set_action_done(
+                            format!("File baru dibuat dan dibuka di Notepad:\n\"{}\"", p.display()),
+                            5,
+                        );
                     }
                     Err(e) => {
-                        app.island_state.assistant.last_response = format!("[!] Gagal membuat file: {}", e);
+                        app.island_state
+                            .assistant
+                            .set_action_error(format!("[!] Gagal membuat file: {}", e), 6);
                     }
                 }
-                app.island_state.assistant.is_thinking = false;
                 return true;
             }
             system::app_launcher::AppLaunchIntent::LockWorkstation => {
                 system::app_launcher::lock_workstation();
-                app.island_state.assistant.last_response = "Mengunci workstation Windows...".to_string();
-                app.island_state.assistant.is_thinking = false;
+                app.island_state
+                    .assistant
+                    .set_action_done("Workstation Windows dikunci.".to_string(), 5);
                 return true;
             }
         }
@@ -401,8 +444,9 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
         || lower.starts_with("buka snip")
     {
         system::snip::trigger_screen_snip();
-        app.island_state.assistant.last_response = "Snipping Tool berhasil dibuka!".to_string();
-        app.island_state.assistant.is_thinking = false;
+        app.island_state
+            .assistant
+            .set_action_done("Snipping Tool berhasil dibuka!".to_string(), 5);
         return true;
     }
 
@@ -420,8 +464,9 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
         if let Some(muted) = system::privacy::toggle_default_mic_mute() {
             app.island_state.privacy.mic_muted = muted;
             let status = if muted { "Dimatikan (Muted)" } else { "Dinyalakan (Unmuted)" };
-            app.island_state.assistant.last_response = format!("Mikrofon {}", status);
-            app.island_state.assistant.is_thinking = false;
+            app.island_state
+                .assistant
+                .set_action_done(format!("Mikrofon {}", status), 5);
             return true;
         }
     }
@@ -430,8 +475,10 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
     if let Some(task) = extract_todo_intent(&lower, prompt) {
         if !task.is_empty() {
             app.island_state.todo.add(task.clone());
-            app.island_state.assistant.last_response = format!("Tugas dicatat ke To-Do List:\n\"{}\"", task);
-            app.island_state.assistant.is_thinking = false;
+            app.island_state.assistant.set_action_done(
+                format!("Tugas dicatat ke To-Do List:\n\"{}\"", task),
+                5,
+            );
             return true;
         }
     }
@@ -443,8 +490,10 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
         if !app.island_state.focus_timer.is_running {
             app.island_state.focus_timer.toggle();
         }
-        app.island_state.assistant.last_response = format!("Focus Timer dinyalakan selama {} menit!", clamped);
-        app.island_state.assistant.is_thinking = false;
+        app.island_state.assistant.set_action_done(
+            format!("Focus Timer dinyalakan selama {} menit!", clamped),
+            5,
+        );
         return true;
     }
 
@@ -464,8 +513,9 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
             "Auto Location Enabled".to_string(),
             "Detecting weather for current location...".to_string(),
         );
-        app.island_state.assistant.last_response = "Lokasi cuaca dikembalikan ke deteksi otomatis.".to_string();
-        app.island_state.assistant.is_thinking = false;
+        app.island_state
+            .assistant
+            .set_action_done("Lokasi cuaca dikembalikan ke deteksi otomatis.".to_string(), 5);
         return true;
     }
     for prefix in [
@@ -493,7 +543,9 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
                         "Auto Location Enabled".to_string(),
                         "Detecting weather for current location...".to_string(),
                     );
-                    app.island_state.assistant.last_response = "Lokasi cuaca dikembalikan ke deteksi otomatis.".to_string();
+                    app.island_state
+                        .assistant
+                        .set_action_done("Lokasi cuaca dikembalikan ke deteksi otomatis.".to_string(), 5);
                 } else {
                     if let Some(wm) = &app.weather_manager {
                         wm.set_manual_location(target);
@@ -503,10 +555,11 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
                         "Location Pinned".to_string(),
                         format!("Fetching weather for {}...", target),
                     );
-                    app.island_state.assistant.last_response =
-                        format!("Lokasi cuaca diatur ke {}. Memperbarui cuaca...", target);
+                    app.island_state.assistant.set_action_done(
+                        format!("Lokasi cuaca diatur ke {} dan sedang diperbarui.", target),
+                        5,
+                    );
                 }
-                app.island_state.assistant.is_thinking = false;
                 return true;
             }
         }
@@ -526,8 +579,10 @@ fn handle_assistant_local_command_inner(prompt: &str, app: &mut App) -> bool {
         let temp = app.island_state.weather.temperature.round() as i32;
         let cond = app.island_state.weather.condition_text();
         let city = &app.island_state.weather.city;
-        app.island_state.assistant.last_response = format!("Cuaca saat ini {}°C, {} di {}.", temp, cond, city);
-        app.island_state.assistant.is_thinking = false;
+        app.island_state.assistant.set_action_done(
+            format!("Cuaca saat ini {}°C, {} di {}.", temp, cond, city),
+            0,
+        );
         return true;
     }
 
@@ -666,7 +721,29 @@ fn process_assistant_actions(response: &str, app: &mut App) -> String {
         }
     }
 
-    // 10. [ACTION:LOCK] or [ACTION:SYSTEM:LOCK]
+    // 10. [ACTION:MUSIC_PLAYER:mode]
+    if let Some(start) = clean_text.find("[ACTION:MUSIC_PLAYER:") {
+        if let Some(end) = clean_text[start..].find(']') {
+            let raw_mode = clean_text[start + 21..start + end].trim();
+            if let Some(mode) = system::music::MusicBrowserMode::parse_config(raw_mode) {
+                let _ = system::music::save_music_browser_mode(&mode);
+            }
+            clean_text.replace_range(start..start + end + 1, "");
+        }
+    }
+
+    // 11. [ACTION:PLAY_MUSIC:query] or [ACTION:PLAY_MUSIC:query:platform]
+    if let Some(start) = clean_text.find("[ACTION:PLAY_MUSIC:") {
+        if let Some(end) = clean_text[start..].find(']') {
+            let payload = clean_text[start + 19..start + end].trim();
+            if let Some(req) = system::music::parse_action_play_music(payload) {
+                system::music::play_music_async(req, None);
+            }
+            clean_text.replace_range(start..start + end + 1, "");
+        }
+    }
+
+    // 12. [ACTION:LOCK] or [ACTION:SYSTEM:LOCK]
     if let Some(start) = clean_text.find("[ACTION:SYSTEM:LOCK]").or_else(|| clean_text.find("[ACTION:LOCK]")) {
         let tag_len = if clean_text[start..].starts_with("[ACTION:SYSTEM:LOCK]") { 20 } else { 13 };
         system::app_launcher::lock_workstation();
@@ -1111,6 +1188,7 @@ pub unsafe extern "system" fn window_proc(
             let cx = (lparam.0 & 0xFFFF) as i16 as f32;
             let cy = ((lparam.0 >> 16) & 0xFFFF) as i16 as f32;
             let mut app_to_activate: Option<String> = None;
+            let mut open_screenshot_markup: Option<Option<std::path::PathBuf>> = None;
 
             if let Ok(mut lock) = APP.lock() {
                 if let Some(app) = lock.as_mut() {
@@ -1488,6 +1566,15 @@ pub unsafe extern "system" fn window_proc(
                             wake_animation(hwnd, app);
                             app_to_activate = Some(app_name);
                         }
+                        Some(ClickAction::OpenLatestScreenshotMarkup) => {
+                            app.island_state.dismiss_sub_notification();
+                            if matches!(app.island_state.mode, IslandMode::Notification(_)) {
+                                app.island_state.restore_previous_mode();
+                            }
+                            let shelf_hint = app.island_state.shelf.latest_image_path();
+                            wake_animation(hwnd, app);
+                            open_screenshot_markup = Some(shelf_hint);
+                        }
                         None => {
                             // If user clicks anywhere on Resting or Closed notch, expand to active page!
                             match app.island_state.mode {
@@ -1511,6 +1598,15 @@ pub unsafe extern "system" fn window_proc(
                 std::thread::spawn(move || {
                     activate_application(&app_name);
                 });
+            }
+
+            if let Some(shelf_hint) = open_screenshot_markup {
+                unsafe {
+                    let _ = windows::Win32::UI::WindowsAndMessaging::AllowSetForegroundWindow(
+                        windows::Win32::UI::WindowsAndMessaging::ASFW_ANY,
+                    );
+                }
+                system::snip::open_latest_screenshot_markup_async(shelf_hint);
             }
 
             LRESULT(0)
@@ -2767,6 +2863,24 @@ pub unsafe extern "system" fn window_proc(
                     if let Some((resp, err)) = app.assistant_manager.take_reply() {
                         let clean_resp = process_assistant_actions(&resp, app);
                         app.island_state.assistant.on_reply(clean_resp, err);
+                        wake_animation(hwnd, app);
+                    }
+                }
+            }
+            LRESULT(0)
+        }
+
+        system::music::WM_APP_MUSIC_STATUS => {
+            let ptr = lparam.0 as *mut system::music::MusicStatusPayload;
+            if !ptr.is_null() {
+                let payload = unsafe { Box::from_raw(ptr) };
+                if let Ok(mut lock) = APP.lock() {
+                    if let Some(app) = lock.as_mut() {
+                        if payload.is_error {
+                            app.island_state.assistant.set_action_error(payload.message, 6);
+                        } else {
+                            app.island_state.assistant.set_action_done(payload.message, 5);
+                        }
                         wake_animation(hwnd, app);
                     }
                 }

@@ -10,6 +10,7 @@ pub mod eco_qos;
 pub mod keyboard;
 pub mod lyrics;
 pub mod media;
+pub mod music;
 pub mod network;
 pub mod notifications;
 pub mod power;

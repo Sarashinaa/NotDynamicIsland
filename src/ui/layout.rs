@@ -65,6 +65,7 @@ pub enum ClickAction {
     AssistantClear,
     AssistantCopyResponse,
     ActivateApp { app_name: String },
+    OpenLatestScreenshotMarkup,
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -79,6 +80,14 @@ impl Rect {
     pub fn contains(&self, px: f32, py: f32) -> bool {
         px >= self.x && px <= self.x + self.w && py >= self.y && py <= self.y + self.h
     }
+}
+
+fn is_screenshot_app(app_name: &str) -> bool {
+    let lower_app = app_name.to_lowercase();
+    lower_app.contains("snip")
+        || lower_app.contains("alat pemotong")
+        || lower_app.contains("screensketch")
+        || lower_app.contains("screenshot")
 }
 
 #[derive(Clone, Debug)]
@@ -3427,7 +3436,11 @@ fn wrap_lyric_line<'a>(
 
         // Model / Status Badge in Card Header Strip
         let badge_text = if state.assistant.is_thinking {
-            "Thinking..."
+            if state.assistant.thinking_label.is_some() {
+                "Working..."
+            } else {
+                "Thinking..."
+            }
         } else if state.assistant.is_groq {
             "Groq • Qwen 3.8 (Free LPU)"
         } else {
@@ -3507,8 +3520,30 @@ fn wrap_lyric_line<'a>(
                 3 => "...",
                 _ => "   ",
             };
-            let thinking_msg = format!("Sedang memproses{}", dots);
-            text_renderer.draw_text(buf, &thinking_msg, card_x + 14.0, card_y + 44.0, Self::ASSISTANT_BODY_FONT_SIZE, palette.primary_fg, false);
+            let base = state
+                .assistant
+                .thinking_label
+                .as_deref()
+                .unwrap_or("Sedang memproses");
+            let thinking_msg = format!("{}{}", base, dots);
+            let thinking_lines = Self::wrap_text_lines(
+                &thinking_msg,
+                max_text_w,
+                text_renderer,
+                Self::ASSISTANT_BODY_FONT_SIZE,
+                4,
+            );
+            for (i, line) in thinking_lines.iter().enumerate() {
+                text_renderer.draw_text(
+                    buf,
+                    line,
+                    card_x + 14.0,
+                    card_y + 41.0 + (i as f32) * 18.0,
+                    Self::ASSISTANT_BODY_FONT_SIZE,
+                    palette.primary_fg,
+                    false,
+                );
+            }
         } else if !all_lines.is_empty() {
             let body_fg = if state.assistant.error_message.is_some() {
                 if is_light { Color::rgba(220, 38, 38, 0.98 * opacity) } else { Color::rgba(252, 165, 165, 0.98 * opacity) }
@@ -3556,7 +3591,7 @@ fn wrap_lyric_line<'a>(
                 "Tanyakan apa saja ke Gemini AI..."
             };
             text_renderer.draw_text(buf, placeholder_intro, card_x + 14.0, card_y + 42.0, Self::ASSISTANT_BODY_FONT_SIZE, palette.primary_fg, true);
-            let example_hint = "Contoh: \"tambahin to-do beli susu\", \"pasang timer 25 menit\", \"matiin mic\", \"cuaca\"";
+            let example_hint = "Contoh: \"play lagu ...\", \"set musik edge app\", \"pasang timer 25m\", \"cuaca\"";
             let hint_lines = Self::wrap_text_lines(example_hint, max_text_w, text_renderer, 11.0, 3);
             for (i, line) in hint_lines.iter().enumerate() {
                 text_renderer.draw_text(buf, line, card_x + 14.0, card_y + 62.0 + (i as f32) * 16.5, 11.0, palette.secondary_fg, false);
@@ -3754,21 +3789,16 @@ fn wrap_lyric_line<'a>(
     ) {
         let cy = y + h * 0.5;
 
-        let lower_app = app_name.to_lowercase();
-        let is_screenshot = lower_app.contains("snip")
-            || lower_app.contains("alat pemotong")
-            || lower_app.contains("screensketch")
-            || lower_app.contains("screenshot");
-
-        // Register clickable banner target to activate and bring application to foreground (except screenshot)
-        if !is_screenshot {
-            self.click_targets.push((
-                Rect { x, y, w, h },
-                ClickAction::ActivateApp {
-                    app_name: app_name.to_string(),
-                },
-            ));
-        }
+        // Register clickable banner target: open screenshot markup editor for Snipping Tool,
+        // or activate and bring regular application windows to foreground.
+        let action = if is_screenshot_app(app_name) {
+            ClickAction::OpenLatestScreenshotMarkup
+        } else {
+            ClickAction::ActivateApp {
+                app_name: app_name.to_string(),
+            }
+        };
+        self.click_targets.push((Rect { x, y, w, h }, action));
 
         let badge_bg = if is_light {
             Color::rgba(0, 0, 0, 0.08 * opacity)
@@ -4214,12 +4244,12 @@ fn wrap_lyric_line<'a>(
 
     /// Notification: Smart Clipboard Pulse Toast
     fn render_clipboard_copied(
-        &self,
+        &mut self,
         buf: &mut PixelBuffer,
         text_renderer: &TextRenderer,
         x: f32,
         y: f32,
-        _w: f32,
+        w: f32,
         h: f32,
         preview: &str,
         item_count: usize,
@@ -4227,6 +4257,11 @@ fn wrap_lyric_line<'a>(
         opacity: f32,
         is_light: bool,
     ) {
+        if matches!(kind, ClipboardKind::Screenshot) {
+            self.click_targets
+                .push((Rect { x, y, w, h }, ClickAction::OpenLatestScreenshotMarkup));
+        }
+
         let cy = y + h * 0.5;
 
         // Left Icon badge in sleek frosted glass container
@@ -4453,14 +4488,15 @@ fn wrap_lyric_line<'a>(
                     false,
                 );
 
-                let lower_app = app_name.to_lowercase();
-                let is_screenshot = lower_app.contains("snip")
-                    || lower_app.contains("alat pemotong")
-                    || lower_app.contains("screensketch")
-                    || lower_app.contains("screenshot");
-
-                if p > 0.4 && !sub.is_dismissing && !is_screenshot {
-                    self.click_targets.push((pill_rect, ClickAction::ActivateApp { app_name: app_name.clone() }));
+                if p > 0.4 && !sub.is_dismissing {
+                    let action = if is_screenshot_app(app_name) {
+                        ClickAction::OpenLatestScreenshotMarkup
+                    } else {
+                        ClickAction::ActivateApp {
+                            app_name: app_name.clone(),
+                        }
+                    };
+                    self.click_targets.push((pill_rect, action));
                 }
             }
             NotificationKind::PrivacyAlert { is_camera, app_name } => {
@@ -4481,13 +4517,7 @@ fn wrap_lyric_line<'a>(
                 let desc = format!("{} sedang mengakses {}", app_name, if *is_camera { "Kamera" } else { "Mikrofon" });
                 text_renderer.draw_text_truncated(buf, &desc, content_x, cy + 12.0, 9.5, sub_w - 60.0, sub_message_color, false);
 
-                let lower_app = app_name.to_lowercase();
-                let is_screenshot = lower_app.contains("snip")
-                    || lower_app.contains("alat pemotong")
-                    || lower_app.contains("screensketch")
-                    || lower_app.contains("screenshot");
-
-                if p > 0.4 && !sub.is_dismissing && !is_screenshot {
+                if p > 0.4 && !sub.is_dismissing && !is_screenshot_app(app_name) {
                     self.click_targets.push((pill_rect, ClickAction::ActivateApp { app_name: app_name.clone() }));
                 }
             }
@@ -4527,6 +4557,11 @@ fn wrap_lyric_line<'a>(
                 };
                 text_renderer.draw_text_truncated(buf, &tag, content_x, cy - 3.0, 10.0, 130.0, tag_color, true);
                 text_renderer.draw_text_truncated(buf, preview, content_x, cy + 12.0, 9.5, sub_w - 60.0, sub_message_color, false);
+
+                if p > 0.4 && !sub.is_dismissing && matches!(kind, ClipboardKind::Screenshot) {
+                    self.click_targets
+                        .push((pill_rect, ClickAction::OpenLatestScreenshotMarkup));
+                }
             }
             _ => {
                 draw_circle(buf, sub_x + 24.0, cy, 13.0, badge_bg);
@@ -5694,7 +5729,7 @@ mod tests {
             assert_eq!(ty_pill, 8.0);
         }
 
-        // 19. Screenshot Notifications are non-clickable
+        // 19. Screenshot Notifications open Snipping Tool markup; regular notifications activate their app
         {
             let mut buf = PixelBuffer::new(820, 200);
             let mut state = IslandState::new();
@@ -5709,10 +5744,40 @@ mod tests {
             lm_snip.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
             assert!(
                 !lm_snip.click_targets.iter().any(|(_, a)| matches!(a, ClickAction::ActivateApp { .. })),
-                "Screenshot notifications must not be clickable"
+                "Screenshot notifications must not trigger generic ActivateApp"
+            );
+            assert!(
+                lm_snip.click_targets.iter().any(|(_, a)| *a == ClickAction::OpenLatestScreenshotMarkup),
+                "Screenshot banner must trigger OpenLatestScreenshotMarkup"
             );
 
-            // Regular app notification (e.g. WhatsApp) MUST be clickable
+            // Clipboard Screenshot pulse must also trigger OpenLatestScreenshotMarkup
+            state.mode = IslandMode::Notification(NotificationKind::ClipboardCopied {
+                preview: "Screenshot.png".to_string(),
+                item_count: 1,
+                kind: ClipboardKind::Screenshot,
+            });
+            let mut lm_clip_snip = LayoutManager::new();
+            lm_clip_snip.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
+            assert!(
+                lm_clip_snip.click_targets.iter().any(|(_, a)| *a == ClickAction::OpenLatestScreenshotMarkup),
+                "Screenshot ClipboardCopied pulse must trigger OpenLatestScreenshotMarkup"
+            );
+
+            // Plain text clipboard pulse must NOT trigger OpenLatestScreenshotMarkup
+            state.mode = IslandMode::Notification(NotificationKind::ClipboardCopied {
+                preview: "Hello".to_string(),
+                item_count: 1,
+                kind: ClipboardKind::Text,
+            });
+            let mut lm_clip_txt = LayoutManager::new();
+            lm_clip_txt.render(&mut buf, &tr, &springs, &state, &lyrics, None, None);
+            assert!(
+                !lm_clip_txt.click_targets.iter().any(|(_, a)| *a == ClickAction::OpenLatestScreenshotMarkup),
+                "Text ClipboardCopied pulse must not trigger OpenLatestScreenshotMarkup"
+            );
+
+            // Regular app notification (e.g. WhatsApp) MUST be clickable via ActivateApp
             state.mode = IslandMode::Notification(NotificationKind::Banner {
                 app_name: "WhatsApp".to_string(),
                 title: "John".to_string(),

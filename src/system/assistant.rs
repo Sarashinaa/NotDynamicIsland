@@ -26,6 +26,8 @@ pub struct AssistantState {
     pub input: crate::ui::TextInput,
     pub is_input_active: bool,
     pub is_thinking: bool,
+    pub thinking_label: Option<String>,
+    pub status_reset_at: Option<Instant>,
     pub last_prompt: String,
     pub last_response: String,
     pub error_message: Option<String>,
@@ -43,6 +45,8 @@ impl Default for AssistantState {
             input: crate::ui::TextInput::new(500),
             is_input_active: false,
             is_thinking: false,
+            thinking_label: None,
+            status_reset_at: None,
             last_prompt: String::new(),
             last_response: String::new(),
             error_message: None,
@@ -102,6 +106,8 @@ impl AssistantState {
         self.is_input_active = false;
         self.last_prompt = trimmed.clone();
         self.is_thinking = true;
+        self.thinking_label = None;
+        self.status_reset_at = None;
         self.error_message = None;
         self.scroll_offset = 0;
         self.max_scroll = 0;
@@ -124,12 +130,79 @@ impl AssistantState {
         self.last_response.clear();
         self.error_message = None;
         self.is_thinking = false;
+        self.thinking_label = None;
+        self.status_reset_at = None;
         self.scroll_offset = 0;
         self.max_scroll = 0;
     }
 
+    /// Starts an animated progress state for async local actions (e.g. searching/opening media).
+    pub fn set_thinking_status(&mut self, label: String) {
+        self.is_thinking = true;
+        self.thinking_label = Some(label);
+        self.error_message = None;
+        self.status_reset_at = None;
+        self.scroll_offset = 0;
+        self.max_scroll = 0;
+    }
+
+    /// Records completion of an action and optionally schedules an auto-reset back to the ready state.
+    pub fn set_action_done(&mut self, message: String, auto_reset_secs: u64) {
+        self.is_thinking = false;
+        self.thinking_label = None;
+        self.error_message = None;
+        self.last_response = message.clone();
+        self.scroll_offset = 0;
+        self.max_scroll = 0;
+        self.status_reset_at = if auto_reset_secs > 0 {
+            Some(Instant::now() + std::time::Duration::from_secs(auto_reset_secs))
+        } else {
+            None
+        };
+        self.messages.push(ChatMessage {
+            is_user: false,
+            text: message,
+            timestamp: Instant::now(),
+        });
+        if self.messages.len() > 60 {
+            let excess = self.messages.len() - 60;
+            self.messages.drain(0..excess);
+        }
+    }
+
+    /// Records a transient action failure and schedules an auto-reset back to the ready state.
+    pub fn set_action_error(&mut self, message: String, auto_reset_secs: u64) {
+        self.is_thinking = false;
+        self.thinking_label = None;
+        self.error_message = Some(message.clone());
+        self.last_response = message;
+        self.scroll_offset = 0;
+        self.max_scroll = 0;
+        self.status_reset_at = if auto_reset_secs > 0 {
+            Some(Instant::now() + std::time::Duration::from_secs(auto_reset_secs))
+        } else {
+            None
+        };
+    }
+
+    /// Clears transient action status once its auto-reset deadline has elapsed.
+    pub fn check_status_reset(&mut self, now: Instant) -> bool {
+        if !self.is_thinking && self.status_reset_at.map(|dl| now >= dl).unwrap_or(false) {
+            self.last_response.clear();
+            self.error_message = None;
+            self.status_reset_at = None;
+            self.scroll_offset = 0;
+            self.max_scroll = 0;
+            true
+        } else {
+            false
+        }
+    }
+
     pub fn on_reply(&mut self, response: String, error: Option<String>) {
         self.is_thinking = false;
+        self.thinking_label = None;
+        self.status_reset_at = None;
         self.scroll_offset = 0;
         self.is_groq = has_groq_key();
         if let Some(err) = error {
@@ -318,7 +391,7 @@ fn execute_groq_query(api_key: &str, history: &[ChatMessage], prompt: &str) -> R
     let host_w: Vec<u16> = host.encode_utf16().chain(std::iter::once(0)).collect();
     let path_w: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
 
-    let system_content = "Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 1-3 baris dalam Bahasa Indonesia. Pahami typo, singkatan, slang, dan berbagai variasi perintah bahasa Indonesia (contoh: minta buka, tolong bukain, coba buka, buka, jalankan; wa->whatsapp, dc->discord, wrod/word->winword, eksel->excel, spoti->spotify, tele->telegram, kalkulator->calc, krom->chrome, brv->brave, wt->terminal, cmd->cmd, pwsh->powershell, steam, anydesk, vlc, obs, figma, dll).\\n\\n[KLARIFIKASI PENTING]: Jika pengguna meminta untuk membuka sesuatu yang tidak spesifik, ambigu, atau memiliki banyak alternatif di Windows (contoh: 'note' / 'catatan' bisa Notepad, OneNote, atau Sticky Notes; 'browser' bisa Chrome, Brave, atau Edge; 'terminal' bisa Windows Terminal, PowerShell, atau CMD; 'office' bisa Word, Excel, atau PowerPoint):\\nJANGAN langsung membuka dan JANGAN keluarkan tag aksi! Tanyakan klarifikasi dengan ramah dan sebutkan 2-3 pilihan aplikasi tersebut secara singkat (contoh: 'Ada beberapa aplikasi catatan: Notepad, OneNote, atau Sticky Notes. Yang mana yang ingin dibuka?').\\n\\n[EKSEKUSI AKSI]: Jika permintaan sudah jelas/spesifik (membuka aplikasi apapun yang terpasang di Windows atau membuka folder), atau pengguna telah memilih dari pertanyaan klarifikasi, berikan konfirmasi singkat dan WAJIB sertakan SATU tag aksi di baris paling akhir:\\n[ACTION:OPEN:app_name] (contoh: [ACTION:OPEN:steam], [ACTION:OPEN:anydesk], [ACTION:OPEN:notepad], [ACTION:OPEN:whatsapp], [ACTION:OPEN:discord], [ACTION:OPEN:winword], [ACTION:OPEN:excel], [ACTION:OPEN:chrome])\\n[ACTION:EXPLORER:folder] (contoh: [ACTION:EXPLORER:downloads], [ACTION:EXPLORER:documents], [ACTION:EXPLORER:desktop], [ACTION:EXPLORER:pictures], [ACTION:EXPLORER:screenshots], [ACTION:EXPLORER:C:\\\\Users\\\\Public\\\\Projects]). Jika pengguna memberikan letak/path folder spesifik (misal 'ada di C:\\\\...'), langsung buka dengan [ACTION:EXPLORER:path].\\n[ACTION:BROWSER:browser:profile] (contoh: [ACTION:BROWSER:brave:Default])\\n[ACTION:FILE_NEW:folder:file] (contoh: [ACTION:FILE_NEW:desktop:catatan.txt])\\n[ACTION:LOCK]\\n[ACTION:TODO:teks]\\n[ACTION:TIMER:menit]\\n[ACTION:MUTE]\\n[ACTION:SNIP]\\n[ACTION:WEATHER]\\n[ACTION:WEATHER_CITY:kota] (gunakan 'auto' untuk kembali otomatis)";
+    let system_content = "Kamu adalah asisten AI Dynamic Island Windows. Berikan jawaban padat, akurat, to-the-point, dan ramah dalam 1-3 baris dalam Bahasa Indonesia. Pahami typo, singkatan, slang, dan berbagai variasi perintah bahasa Indonesia (contoh: minta buka, tolong bukain, coba buka, buka, jalankan; wa->whatsapp, dc->discord, wrod/word->winword, eksel->excel, spoti->spotify, tele->telegram, kalkulator->calc, krom->chrome, brv->brave, wt->terminal, cmd->cmd, pwsh->powershell, steam, anydesk, vlc, obs, figma, dll).\\n\\n[KLARIFIKASI PENTING]: Jika pengguna meminta untuk membuka sesuatu yang tidak spesifik, ambigu, atau memiliki banyak alternatif di Windows (contoh: 'note' / 'catatan' bisa Notepad, OneNote, atau Sticky Notes; 'browser' bisa Chrome, Brave, atau Edge; 'terminal' bisa Windows Terminal, PowerShell, atau CMD; 'office' bisa Word, Excel, atau PowerPoint):\\nJANGAN langsung membuka dan JANGAN keluarkan tag aksi! Tanyakan klarifikasi dengan ramah dan sebutkan 2-3 pilihan aplikasi tersebut secara singkat (contoh: 'Ada beberapa aplikasi catatan: Notepad, OneNote, atau Sticky Notes. Yang mana yang ingin dibuka?').\\n\\n[EKSEKUSI AKSI]: Jika permintaan sudah jelas/spesifik (membuka aplikasi apapun yang terpasang di Windows atau membuka folder), atau pengguna telah memilih dari pertanyaan klarifikasi, berikan konfirmasi singkat dan WAJIB sertakan SATU tag aksi di baris paling akhir:\\n[ACTION:OPEN:app_name] (contoh: [ACTION:OPEN:steam], [ACTION:OPEN:anydesk], [ACTION:OPEN:notepad], [ACTION:OPEN:whatsapp], [ACTION:OPEN:discord], [ACTION:OPEN:winword], [ACTION:OPEN:excel], [ACTION:OPEN:chrome])\\n[ACTION:EXPLORER:folder] (contoh: [ACTION:EXPLORER:downloads], [ACTION:EXPLORER:documents], [ACTION:EXPLORER:desktop], [ACTION:EXPLORER:pictures], [ACTION:EXPLORER:screenshots], [ACTION:EXPLORER:C:\\\\Users\\\\Public\\\\Projects]). Jika pengguna memberikan letak/path folder spesifik (misal 'ada di C:\\\\...'), langsung buka dengan [ACTION:EXPLORER:path].\\n[ACTION:PLAY_MUSIC:judul artis] (atau [ACTION:PLAY_MUSIC:judul artis:youtube|ytmusic|spotify], default YouTube Music)\\n[ACTION:MUSIC_PLAYER:edge-app|edge|brave-app|chrome-app|default]\\n[ACTION:BROWSER:browser:profile] (contoh: [ACTION:BROWSER:brave:Default])\\n[ACTION:FILE_NEW:folder:file] (contoh: [ACTION:FILE_NEW:desktop:catatan.txt])\\n[ACTION:LOCK]\\n[ACTION:TODO:teks]\\n[ACTION:TIMER:menit]\\n[ACTION:MUTE]\\n[ACTION:SNIP]\\n[ACTION:WEATHER]\\n[ACTION:WEATHER_CITY:kota] (gunakan 'auto' untuk kembali otomatis)";
 
     let mut messages_json = Vec::new();
     messages_json.push(format!(
@@ -618,12 +691,12 @@ fn execute_gemini_query(history: &[ChatMessage], prompt: &str) -> (String, Optio
 
     let concise_prompt = if history_context.is_empty() {
         format!(
-            "Jawab pertanyaan berikut secara langsung, ringkas, dan to-the-point dalam 1-3 kalimat dalam Bahasa Indonesia. Pahami variasi perintah (minta buka, tolong bukain, coba buka, buka, jalankan; steam, anydesk, wa, dc, wrod). Jika ambigu (contoh 'note', 'browser', 'terminal'), jangan buka dulu, tanyakan klarifikasi 2-3 pilihan. Jika jelas/memilih, sertakan tag di baris akhir: [ACTION:OPEN:app], [ACTION:EXPLORER:folder], [ACTION:BROWSER:browser:profile], [ACTION:FILE_NEW:folder:file], [ACTION:LOCK], [ACTION:TODO:teks], [ACTION:TIMER:menit]: {}",
+            "Jawab pertanyaan berikut secara langsung, ringkas, dan to-the-point dalam 1-3 kalimat dalam Bahasa Indonesia. Pahami variasi perintah (minta buka, tolong bukain, coba buka, buka, jalankan; steam, anydesk, wa, dc, wrod). Jika ambigu (contoh 'note', 'browser', 'terminal'), jangan buka dulu, tanyakan klarifikasi 2-3 pilihan. Jika jelas/memilih, sertakan tag di baris akhir: [ACTION:OPEN:app], [ACTION:EXPLORER:folder], [ACTION:PLAY_MUSIC:lagu artis], [ACTION:MUSIC_PLAYER:mode], [ACTION:BROWSER:browser:profile], [ACTION:FILE_NEW:folder:file], [ACTION:LOCK], [ACTION:TODO:teks], [ACTION:TIMER:menit]: {}",
             prompt
         )
     } else {
         format!(
-            "Riwayat percakapan:\n{}\nPengguna: {}\nJika ambigu, tanyakan klarifikasi. Jika jelas/memilih, sertakan tag aksi di baris akhir [ACTION:OPEN:app], [ACTION:EXPLORER:folder], dll. Jawab ringkas 1-3 kalimat Bahasa Indonesia:",
+            "Riwayat percakapan:\n{}\nPengguna: {}\nJika ambigu, tanyakan klarifikasi. Jika jelas/memilih, sertakan tag aksi di baris akhir [ACTION:OPEN:app], [ACTION:EXPLORER:folder], [ACTION:PLAY_MUSIC:lagu artis], [ACTION:MUSIC_PLAYER:mode], dll. Jawab ringkas 1-3 kalimat Bahasa Indonesia:",
             history_context, prompt
         )
     };
@@ -892,5 +965,43 @@ mod tests {
                 turn2_resp
             );
         }
+    }
+
+    #[test]
+    fn test_assistant_action_status_lifecycle_and_reset() {
+        let mut st = AssistantState::default();
+        st.set_thinking_status("Mencari \"Sample Song\" di YouTube Music".to_string());
+        assert!(st.is_thinking);
+        assert_eq!(
+            st.thinking_label.as_deref(),
+            Some("Mencari \"Sample Song\" di YouTube Music")
+        );
+
+        st.set_action_done("Berhasil memutar \"Sample Song\" di YouTube Music.".to_string(), 5);
+        assert!(!st.is_thinking);
+        assert!(st.thinking_label.is_none());
+        assert!(st.status_reset_at.is_some());
+        assert_eq!(
+            st.last_response,
+            "Berhasil memutar \"Sample Song\" di YouTube Music."
+        );
+
+        // Before deadline: remains visible
+        let now = Instant::now();
+        assert!(!st.check_status_reset(now));
+        assert!(!st.last_response.is_empty());
+
+        // Past deadline: auto-resets cleanly back to ready state
+        let future = now + std::time::Duration::from_secs(6);
+        assert!(st.check_status_reset(future));
+        assert!(st.last_response.is_empty());
+        assert!(st.status_reset_at.is_none());
+        assert!(st.error_message.is_none());
+
+        // Normal Q&A reply (`on_reply`) must not auto-reset
+        st.on_reply("Jawaban Q&A tetap tampil".to_string(), None);
+        assert!(st.status_reset_at.is_none());
+        assert!(!st.check_status_reset(future));
+        assert_eq!(st.last_response, "Jawaban Q&A tetap tampil");
     }
 }

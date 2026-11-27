@@ -1111,6 +1111,14 @@ impl FileShelf {
         }
     }
 
+    /// Returns the most recently added image file path currently on the shelf (pure in-memory).
+    pub fn latest_image_path(&self) -> Option<PathBuf> {
+        self.items.iter().rev().find_map(|item| match &item.kind {
+            ShelfItemKind::File(path) if is_image_file(path) => Some(path.clone()),
+            _ => None,
+        })
+    }
+
     #[allow(dead_code)]
     pub fn clear(&mut self) {
         self.items.clear();

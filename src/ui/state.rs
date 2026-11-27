@@ -598,13 +598,18 @@ impl IslandState {
     }
 
     pub fn check_timeouts(&mut self) -> bool {
-        // While user is actively typing, dragging slider, or island is pinned open by hotkey, pause unhover collapse
-        if self.todo.is_input_active || self.assistant.is_input_active || self.is_dragging_slider || self.is_pinned_open {
-            return false;
-        }
-
         let now = Instant::now();
         let mut woke = false;
+
+        // Always allow transient Assistant action confirmations to auto-reset even when pinned open or typing
+        if self.assistant.check_status_reset(now) {
+            woke = true;
+        }
+
+        // While user is actively typing, dragging slider, or island is pinned open by hotkey, pause unhover collapse
+        if self.todo.is_input_active || self.assistant.is_input_active || self.is_dragging_slider || self.is_pinned_open {
+            return woke;
+        }
 
         // 0. Check under-island sub-notification timeout
         if let Some(sub) = &mut self.sub_notification {
